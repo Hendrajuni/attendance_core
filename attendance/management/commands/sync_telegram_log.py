@@ -94,14 +94,19 @@ class Command(BaseCommand):
                         filtered_count += 1
                         continue
 
-                    # 2. Find Employee by Telegram ID
-                    employee = Employee.objects.filter(telegram_user_id=user_id, is_active=True).first()
+                    # 2. Find Employee by Phone Number (NOMOR WA)
+                    # The Log sheet uses NOMOR WA which is stored in phone_number field
+                    employee = Employee.objects.filter(phone_number=user_id, is_active=True).first()
+                    
+                    # Fallback: also check telegram_user_id for backwards compatibility
+                    if not employee:
+                        employee = Employee.objects.filter(telegram_user_id=user_id, is_active=True).first()
                     
                     if not employee:
                         unknown_user_count += 1
                         if verbose:
                             self.stdout.write(
-                                self.style.WARNING(f"  ? Unknown user: {nama} (ID: {user_id})")
+                                self.style.WARNING(f"  ? Unknown user: {nama} (NOMOR WA: {user_id})")
                             )
                         continue
 

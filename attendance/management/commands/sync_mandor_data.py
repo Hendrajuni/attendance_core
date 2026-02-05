@@ -1,6 +1,7 @@
 import pandas as pd
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils import timezone
 from attendance.models import Employee, WorkLocation
 
 
@@ -46,19 +47,22 @@ class Command(BaseCommand):
             # Check required columns - support both naming conventions
             name_col = None
             tele_col = None
+            phone_col = None  # NEW: NOMOR WA column
             
             for col in df.columns:
                 if 'NAMA' in col and 'PEGAWAI' in col:
                     name_col = col
                 elif 'TELE' in col and ('USER' in col or 'ID' in col):
                     tele_col = col
+                elif 'NOMOR' in col and 'WA' in col:
+                    phone_col = col
             
             if not name_col or not tele_col:
                 self.stdout.write(self.style.ERROR(f"CSV missing required columns. Found: {list(df.columns)}"))
                 self.stdout.write(self.style.ERROR(f"  Need: NAMA PEGAWAI and TELE USERID"))
                 return
 
-            self.stdout.write(f"Using columns: name='{name_col}', tele='{tele_col}'")
+            self.stdout.write(f"Using columns: name='{name_col}', tele='{tele_col}', phone='{phone_col}'")
             
             # Get location for new employees
             location_obj = WorkLocation.objects.filter(code=location_code).first()
@@ -75,6 +79,12 @@ class Command(BaseCommand):
                 for index, row in df.iterrows():
                     raw_name = str(row[name_col]).strip()
                     tele_id_raw = row[tele_col]
+                    
+                    # Get phone number if column exists
+                    phone_raw = row[phone_col] if phone_col and phone_col in df.columns else None
+                    phone_number = None
+                    if phone_raw and not pd.isna(phone_raw):
+                        phone_number = str(int(float(phone_raw))) if isinstance(phone_raw, (int, float)) else str(phone_raw).strip()
                     
                     # Handle NaN and convert to string
                     if pd.isna(tele_id_raw):
@@ -124,33 +134,40 @@ class Command(BaseCommand):
                             continue
 
                     if employee:
-                        # UPDATE existing employee
+                        # UPDATE existing employee - telegram_user_id and phone_number
+                        updated_fields = []
                         if employee.telegram_user_id != tele_id:
-                            if not dry_run:
-                                employee.telegram_user_id = tele_id
-                                employee.save()
+                            employee.telegram_user_id = tele_id
+                            updated_fields.append('tele')
+                        if phone_number and employee.phone_number != phone_number:
+                            employee.phone_number = phone_number
+                            updated_fields.append('phone')
+                        
+                        if updated_fields and not dry_run:
+                            employee.save()
                             self.stdout.write(self.style.SUCCESS(
-                                f"  ✓ Updated [{match_method}]: {employee.full_name} -> Tele ID: {tele_id}"
+                                f"  ✓ Updated [{match_method}]: {employee.full_name} -> {', '.join(updated_fields)}"
                             ))
                             updated_count += 1
-                        else:
-                            # Already has same ID
-                            pass
                     else:
-                        # CREATE new employee
+                        # CREATE new employee as UNVERIFIED (goes to Pendaftaran Baru)
                         new_nik = f"TELE-{tele_id}"[:20]
+                        now = timezone.now()
                         
                         if not dry_run:
                             Employee.objects.create(
                                 nik=new_nik,
                                 full_name=clean_name,
                                 telegram_user_id=tele_id,
+                                phone_number=phone_number,  # NEW: Store phone number
                                 employee_type='HARIAN',
                                 home_base=location_obj,
-                                is_active=True
+                                is_active=True,
+                                is_verified=False,
+                                imported_at=now,
                             )
                         self.stdout.write(self.style.SUCCESS(
-                            f"  + Created: {clean_name} (NIK: {new_nik}, Tele: {tele_id})"
+                            f"  + Created (Draft): {clean_name} (Phone: {phone_number})"
                         ))
                         created_count += 1
                 

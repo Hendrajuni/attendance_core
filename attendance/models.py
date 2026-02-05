@@ -171,6 +171,11 @@ class ShiftPattern(models.Model):
 
 
 class Employee(models.Model):
+    """
+    Master data karyawan.
+    is_verified=False = Data baru (draft/pending review)
+    is_verified=True = Data sudah divalidasi (master)
+    """
     TYPE_CHOICES = [
         ('HARIAN', 'Buruh Harian'),
         ('STAFF', 'Staff Kantor'),
@@ -189,6 +194,12 @@ class Employee(models.Model):
     # Device & Integration IDs
     device_user_id = models.IntegerField(null=True, blank=True, help_text="ID User di mesin Fingerprint", unique=True)
     telegram_user_id = models.CharField(max_length=50, null=True, blank=True, help_text="ID Telegram untuk Mandor")
+    phone_number = models.CharField(max_length=20, null=True, blank=True, help_text="Nomor WA/HP untuk matching log Telegram")
+    
+    # Verification & Dates
+    is_verified = models.BooleanField(default=False, help_text="False = Data baru (butuh review). True = Data master valid.")
+    joined_date = models.DateField(null=True, blank=True, help_text="Tanggal mulai bekerja")
+    imported_at = models.DateTimeField(null=True, blank=True, help_text="Tanggal data di-import")
     
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -196,11 +207,22 @@ class Employee(models.Model):
 
     class Meta:
         ordering = ['full_name']
-        verbose_name = "Employee"
-        verbose_name_plural = "Employees"
+        verbose_name = "Karyawan"
+        verbose_name_plural = "Karyawan Master"
 
     def __str__(self):
         return f"{self.full_name} - {self.nik}"
+
+
+class NewRegistration(Employee):
+    """
+    Proxy Model untuk menampilkan karyawan baru yang belum diverifikasi.
+    Tidak membuat tabel baru di database.
+    """
+    class Meta:
+        proxy = True
+        verbose_name = "Pendaftaran Baru"
+        verbose_name_plural = "Pendaftaran Baru"
 
 
 class EmployeeShiftAssignment(models.Model):

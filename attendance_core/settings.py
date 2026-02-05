@@ -93,8 +93,8 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # Internationalization
-LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'Asia/Jakarta'  # Adjusted for Indonesia/Petaling context if applicable, or keep UTC
+LANGUAGE_CODE = 'id'  # Indonesian - uses 24-hour format
+TIME_ZONE = 'Asia/Jakarta'  # WIB (UTC+7)
 USE_I18N = True
 USE_TZ = True
 

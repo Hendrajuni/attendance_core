@@ -4,10 +4,12 @@ from django.contrib import admin, messages
 from django.shortcuts import render, redirect
 from django.http import HttpResponseRedirect
 from django.template.response import TemplateResponse
+from django.utils import timezone
 from .models import (
     Department, Employee, AttendanceLog, WorkLocation, 
     FingerprintDevice, SpreadsheetSource,
-    DailySchedule, ShiftPattern, EmployeeShiftAssignment
+    DailySchedule, ShiftPattern, EmployeeShiftAssignment,
+    NewRegistration  # Proxy Model
 )
 
 
@@ -81,7 +83,6 @@ class DailyScheduleAdmin(admin.ModelAdmin):
     search_fields = ('name', 'code')
     
     fieldsets = (
-        # Section 1: Basic & Fingerprint Configuration
         ('Basic & Fingerprint Configuration', {
             'fields': (
                 ('name', 'code'),
@@ -93,7 +94,6 @@ class DailyScheduleAdmin(admin.ModelAdmin):
             ),
             'description': 'Konfigurasi jam kerja dasar dan toleransi scan mesin fingerprint.'
         }),
-        # Section 2: Telegram Configuration
         ('Telegram Configuration (Multi-Checkpoint)', {
             'fields': (
                 ('enable_checkin_1', 'checkin_1_start', 'checkin_1_end'),
@@ -101,7 +101,7 @@ class DailyScheduleAdmin(admin.ModelAdmin):
                 'allowed_radius',
             ),
             'classes': ('collapse',),
-            'description': 'Konfigurasi checkpoint tambahan untuk absensi Telegram. Aktifkan checkbox untuk menggunakan fitur ini.'
+            'description': 'Konfigurasi checkpoint tambahan untuk absensi Telegram.'
         }),
         ('Status', {
             'fields': ('is_active',),
@@ -124,7 +124,7 @@ class ShiftPatternAdmin(admin.ModelAdmin):
                 'monday', 'tuesday', 'wednesday', 'thursday', 
                 'friday', 'saturday', 'sunday'
             ),
-            'description': 'Pilih jadwal harian untuk setiap hari dalam seminggu. Kosongkan untuk hari libur.'
+            'description': 'Pilih jadwal harian untuk setiap hari. Kosongkan untuk hari libur.'
         }),
     )
 
@@ -150,24 +150,55 @@ class DepartmentAdmin(admin.ModelAdmin):
 
 
 # =============================================================================
-# EMPLOYEE ADMIN (with Bulk Assignment Action)
+# EMPLOYEE ADMIN - VERIFIED / MASTER DATA
 # =============================================================================
 
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
-    list_display = ('nik', 'full_name', 'employee_type', 'department', 'home_base', 'is_active', 'device_user_id', 'telegram_user_id')
-    list_filter = ('employee_type', 'is_active', 'department', 'home_base')
-    search_fields = ('nik', 'full_name', 'device_user_id', 'telegram_user_id')
+    """
+    Admin untuk mengelola Karyawan MASTER (is_verified=True).
+    Menampilkan hanya karyawan yang sudah divalidasi.
+    """
+    list_display = (
+        'nik', 'full_name', 'employee_type', 'home_base', 
+        'phone_number', 'device_user_id', 'telegram_user_id', 'joined_date', 'is_active'
+    )
+    list_filter = ('employee_type', 'is_active', 'department', 'home_base', 'joined_date')
+    search_fields = ('nik', 'full_name', 'phone_number', 'device_user_id', 'telegram_user_id')
     list_editable = ('is_active',)
-    actions = ['assign_shift_pattern']
+    date_hierarchy = 'joined_date'
+    actions = ['assign_shift_pattern', 'mark_as_unverified', 'soft_delete_selected']
+    
+    # Fieldsets for easy mutation (change location/device ID)
+    fieldsets = (
+        ('Identitas Karyawan', {
+            'fields': (
+                ('nik', 'full_name'),
+                ('employee_type', 'department'),
+                ('joined_date', 'is_active'),
+            )
+        }),
+        ('Penempatan & Mutasi', {
+            'fields': (
+                'home_base',
+                ('device_user_id', 'telegram_user_id'),
+            ),
+            'description': 'Edit lokasi dan ID device untuk kasus mutasi/pindah lokasi.'
+        }),
+        ('Status Verifikasi', {
+            'fields': ('is_verified',),
+            'classes': ('collapse',),
+        }),
+    )
+    
+    def get_queryset(self, request):
+        """Hanya tampilkan karyawan yang sudah VERIFIED."""
+        qs = super().get_queryset(request)
+        return qs.filter(is_verified=True)
     
     @admin.action(description="📅 Assign Shift Pattern (Bulk)")
     def assign_shift_pattern(self, request, queryset):
-        """
-        Bulk action to assign a shift pattern to multiple employees.
-        Shows an intermediate page with a form to select the shift pattern.
-        """
-        # If POST and form data exists, process the assignment
+        """Bulk action to assign a shift pattern to multiple employees."""
         if request.POST.get('apply'):
             form = BulkShiftAssignmentForm(request.POST)
             if form.is_valid():
@@ -179,7 +210,6 @@ class EmployeeAdmin(admin.ModelAdmin):
                 updated_count = 0
                 
                 for employee in queryset:
-                    # Deactivate existing active assignments for this employee
                     existing = EmployeeShiftAssignment.objects.filter(
                         employee=employee,
                         is_active=True
@@ -188,7 +218,6 @@ class EmployeeAdmin(admin.ModelAdmin):
                         existing.update(is_active=False, effective_to=effective_from)
                         updated_count += existing.count()
                     
-                    # Create new assignment
                     EmployeeShiftAssignment.objects.create(
                         employee=employee,
                         shift_pattern=shift_pattern,
@@ -200,15 +229,13 @@ class EmployeeAdmin(admin.ModelAdmin):
                 
                 self.message_user(
                     request,
-                    f"✅ Berhasil assign shift '{shift_pattern.name}' ke {created_count} karyawan. "
-                    f"({updated_count} assignment lama di-nonaktifkan)",
+                    f"✅ Berhasil assign shift '{shift_pattern.name}' ke {created_count} karyawan.",
                     messages.SUCCESS
                 )
                 return HttpResponseRedirect(request.get_full_path())
         else:
             form = BulkShiftAssignmentForm()
         
-        # Render intermediate page with inline template
         context = {
             'title': 'Bulk Assign Shift Pattern',
             'queryset': queryset,
@@ -218,49 +245,37 @@ class EmployeeAdmin(admin.ModelAdmin):
             'media': self.media,
         }
         
-        # Using inline HTML template - render directly with Template class
         from django.template import Template, RequestContext
         from django.http import HttpResponse
         
         html_template = """
         {% extends "admin/base_site.html" %}
         {% load i18n admin_urls %}
-
         {% block content %}
         <h1>📅 Bulk Assign Shift Pattern</h1>
         <p>Anda akan mengassign shift pattern ke <strong>{{ queryset.count }}</strong> karyawan berikut:</p>
-        
         <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0; max-height: 200px; overflow-y: auto;">
             <ol>
             {% for employee in queryset %}
-                <li><strong>{{ employee.nik }}</strong> - {{ employee.full_name }} 
-                    <small style="color: #666;">({{ employee.get_employee_type_display }})</small>
-                </li>
+                <li><strong>{{ employee.nik }}</strong> - {{ employee.full_name }}</li>
             {% endfor %}
             </ol>
         </div>
-        
         <form method="post">
             {% csrf_token %}
-            
             <fieldset style="padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
-                <legend style="font-weight: bold; padding: 0 10px;">Pilih Shift Pattern</legend>
-                
-                <table style="margin: 10px 0;">
-                    {{ form.as_table }}
-                </table>
+                <legend style="font-weight: bold;">Pilih Shift Pattern</legend>
+                <table style="margin: 10px 0;">{{ form.as_table }}</table>
             </fieldset>
-
             {% for obj in queryset %}
                 <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk }}" />
             {% endfor %}
-            
             <div style="margin-top: 20px;">
                 <input type="hidden" name="action" value="assign_shift_pattern" />
                 <input type="submit" name="apply" value="✅ Confirm Assignment" 
-                       style="background: #417690; color: white; padding: 10px 25px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;" />
+                       style="background: #417690; color: white; padding: 10px 25px; border: none; border-radius: 5px; cursor: pointer;" />
                 <a href="{% url 'admin:attendance_employee_changelist' %}" 
-                   style="background: #6c757d; color: white; padding: 11px 25px; border-radius: 5px; text-decoration: none; margin-left: 10px; font-size: 14px;">
+                   style="background: #6c757d; color: white; padding: 11px 25px; border-radius: 5px; text-decoration: none; margin-left: 10px;">
                     ❌ Cancel
                 </a>
             </div>
@@ -271,6 +286,144 @@ class EmployeeAdmin(admin.ModelAdmin):
         template = Template(html_template)
         rendered = template.render(RequestContext(request, context))
         return HttpResponse(rendered)
+    
+    @admin.action(description="⚠️ Kembalikan ke Pendaftaran Baru (Unverify)")
+    def mark_as_unverified(self, request, queryset):
+        """Move employees back to pending verification."""
+        count = queryset.update(is_verified=False)
+        self.message_user(
+            request,
+            f"⚠️ {count} karyawan dikembalikan ke Pendaftaran Baru.",
+            messages.WARNING
+        )
+    
+    @admin.action(description="🗑️ Hapus (Soft Delete → Pendaftaran Baru)")
+    def soft_delete_selected(self, request, queryset):
+        """
+        Soft delete: instead of deleting, move back to Pendaftaran Baru.
+        This allows admin to permanently delete from there if needed.
+        """
+        count = queryset.update(is_verified=False, is_active=False)
+        self.message_user(
+            request,
+            f"🗑️ {count} karyawan dipindahkan ke Pendaftaran Baru (non-aktif). "
+            f"Hapus permanen dari menu Pendaftaran Baru jika diperlukan.",
+            messages.WARNING
+        )
+
+
+# =============================================================================
+# NEW REGISTRATION ADMIN - DRAFT / PENDING REVIEW
+# =============================================================================
+
+@admin.register(NewRegistration)
+class NewRegistrationAdmin(admin.ModelAdmin):
+    """
+    Admin untuk mengelola Pendaftaran BARU (is_verified=False).
+    Data yang di-import dari mesin/telegram masuk ke sini untuk review.
+    """
+    list_display = (
+        'full_name', 'nik', 'home_base', 
+        'phone_number', 'device_user_id', 'telegram_user_id', 'imported_at', 'is_active'
+    )
+    list_filter = ('home_base', 'imported_at', 'is_active')
+    search_fields = ('nik', 'full_name', 'phone_number', 'device_user_id', 'telegram_user_id')
+    ordering = ['-imported_at', '-created_at']
+    actions = ['verify_employees', 'reject_employees']
+    
+    fieldsets = (
+        ('Identitas (Edit sebelum Approval)', {
+            'fields': (
+                ('nik', 'full_name'),
+                ('employee_type', 'department'),
+                'joined_date',
+            ),
+            'description': 'Perbaiki data sebelum meng-approve ke Master.'
+        }),
+        ('Penempatan & Device', {
+            'fields': (
+                'home_base',
+                ('device_user_id', 'telegram_user_id'),
+            )
+        }),
+        ('Status', {
+            'fields': (('is_verified', 'is_active'),),
+        }),
+    )
+    
+    def get_queryset(self, request):
+        """Hanya tampilkan karyawan yang BELUM VERIFIED."""
+        qs = super().get_queryset(request)
+        return qs.filter(is_verified=False)
+    
+    @admin.action(description="✅ Approve / Verify Selected (Pindahkan ke Master)")
+    def verify_employees(self, request, queryset):
+        """
+        Move selected employees to Master (verified status).
+        Auto-generates proper NIK if current NIK starts with TEMP- or TELE-.
+        Format: EMP-YYYYMM-XXXX (e.g., EMP-202602-0001)
+        """
+        now = timezone.now()
+        count = 0
+        nik_generated = 0
+        
+        for emp in queryset:
+            emp.is_verified = True
+            
+            # Set joined_date if not set
+            if not emp.joined_date:
+                emp.joined_date = now.date()
+            
+            # Auto-generate NIK if temporary
+            if emp.nik.startswith('TEMP-') or emp.nik.startswith('TELE-'):
+                emp.nik = self._generate_unique_nik(now)
+                nik_generated += 1
+            
+            emp.save()
+            count += 1
+        
+        msg = f"✅ {count} karyawan berhasil di-verify dan dipindahkan ke Karyawan Master."
+        if nik_generated > 0:
+            msg += f" ({nik_generated} NIK baru di-generate)"
+        
+        self.message_user(request, msg, messages.SUCCESS)
+    
+    def _generate_unique_nik(self, now):
+        """
+        Generate unique NIK in format: PMG-XXXX
+        Example: PMG-0001, PMG-0002, ...
+        """
+        from attendance.models import Employee
+        
+        prefix = "PMG-"
+        
+        # Find the highest existing sequence
+        existing = Employee.objects.filter(
+            nik__startswith=prefix
+        ).order_by('-nik').first()
+        
+        if existing:
+            try:
+                # Extract the sequence number
+                last_seq = int(existing.nik.replace(prefix, ''))
+                new_seq = last_seq + 1
+            except (ValueError, IndexError):
+                new_seq = 1
+        else:
+            new_seq = 1
+        
+        return f"{prefix}{new_seq:04d}"
+    
+    @admin.action(description="❌ Reject / Hapus Selected")
+    def reject_employees(self, request, queryset):
+        """Delete rejected registrations."""
+        count = queryset.count()
+        queryset.delete()
+        self.message_user(
+            request,
+            f"❌ {count} pendaftaran dihapus.",
+            messages.WARNING
+        )
 
 
 # =============================================================================
@@ -283,5 +436,3 @@ class AttendanceLogAdmin(admin.ModelAdmin):
     list_filter = ('status', 'log_category', 'source_type', 'timestamp', 'captured_at', 'employee__department')
     search_fields = ('employee__full_name', 'employee__nik')
     date_hierarchy = 'timestamp'
-
-

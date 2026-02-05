@@ -1,8 +1,10 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils import timezone
 from zk import ZK
 from attendance.models import FingerprintDevice, Employee
 import random
+
 
 class Command(BaseCommand):
     help = 'Import employee data (ID & Name) from fingerprint devices'
@@ -49,6 +51,7 @@ class Command(BaseCommand):
 
                 created_count = 0
                 updated_count = 0
+                now = timezone.now()
                 
                 with transaction.atomic():
                     for user in users:
@@ -59,7 +62,7 @@ class Command(BaseCommand):
                         employee = Employee.objects.filter(device_user_id=user_id).first()
 
                         if not employee:
-                            # Create new employee
+                            # Create new employee as UNVERIFIED (goes to Pendaftaran Baru)
                             temp_nik = f"TEMP-{user_id}"
                             
                             # Ensure unique NIK
@@ -70,10 +73,14 @@ class Command(BaseCommand):
                                 nik=temp_nik,
                                 full_name=name,
                                 device_user_id=user_id,
-                                home_base=device.location, # Smart assign location
-                                is_active=True
+                                home_base=device.location,
+                                is_active=True,
+                                is_verified=False,  # NEW: Draft status
+                                imported_at=now,    # NEW: Import timestamp
                             )
-                            self.stdout.write(f"    + Created: {name} (ID: {user_id}) -> Loc: {device.location.name}")
+                            self.stdout.write(
+                                self.style.SUCCESS(f"    + Created (Draft): {name} (ID: {user_id}) -> {device.location.name}")
+                            )
                             created_count += 1
                         else:
                             # Update Existing User
@@ -84,7 +91,7 @@ class Command(BaseCommand):
                                 employee.full_name = name
                                 updated_fields.append("Name")
                             
-                            # Update home_base ONLY if not set (don't overwrite admin manual changes)
+                            # Update home_base ONLY if not set
                             if not employee.home_base:
                                 employee.home_base = device.location
                                 updated_fields.append("HomeBase")
@@ -103,4 +110,5 @@ class Command(BaseCommand):
                     conn.disconnect()
 
         self.stdout.write(self.style.SUCCESS("---------------------------------------------------"))
-        self.stdout.write(self.style.SUCCESS("Import process completed."))
+        self.stdout.write(self.style.SUCCESS("Import complete. New employees are in 'Pendaftaran Baru' for review."))
+
