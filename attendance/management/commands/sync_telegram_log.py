@@ -27,11 +27,17 @@ class Command(BaseCommand):
             required=False,
             help='Filter by Year (e.g. 2026)',
         )
+        parser.add_argument(
+            '--verbose',
+            action='store_true',
+            help='Show detailed output for each log',
+        )
 
     def handle(self, *args, **kwargs):
         url = kwargs['url']
         filter_month = kwargs.get('month')
         filter_year = kwargs.get('year')
+        verbose = kwargs.get('verbose', False)
 
         self.stdout.write(f"Reading logs from {url}...")
         if filter_month and filter_year:
@@ -43,6 +49,7 @@ class Command(BaseCommand):
             created_count = 0
             skipped_count = 0
             filtered_count = 0
+            unknown_user_count = 0
             
             for index, row in df.iterrows():
                 try:
@@ -51,7 +58,7 @@ class Command(BaseCommand):
                     
                     tgl_str = str(row.get('TANGGAL', '')).strip()
                     jam_str = str(row.get('JAM ABSEN', '')).strip()
-                    user_id = str(row.get('NOMOR WA', '')).strip() # Using WA Number as ID? Or is it Telegram ID? Assuming ID for now based on previous context.
+                    user_id = str(row.get('NOMOR WA', '')).strip()
                     nama = row.get('NAMA PEGAWAI')
                     coord = str(row.get('KOORDINAT', ''))
                     
@@ -77,7 +84,6 @@ class Command(BaseCommand):
                         if timezone.is_naive(timestamp):
                             timestamp = timezone.make_aware(timestamp)
                     except Exception as e:
-                        # self.stdout.write(self.style.WARNING(f"  ! Invalid date: {full_ts_str}"))
                         continue
 
                     # OPTIMIZATION: Filter by Date
@@ -89,17 +95,19 @@ class Command(BaseCommand):
                         continue
 
                     # 2. Find Employee by Telegram ID
-                    # user_id column is "NOMOR WA", verify if this matches telegram_user_id in DB
                     employee = Employee.objects.filter(telegram_user_id=user_id, is_active=True).first()
                     
                     if not employee:
-                        # Fallback: Try searching by Name if ID fails? (Dangerous but optional)
-                        # For now, strict on ID
-                        skipped_count += 1
+                        unknown_user_count += 1
+                        if verbose:
+                            self.stdout.write(
+                                self.style.WARNING(f"  ? Unknown user: {nama} (ID: {user_id})")
+                            )
                         continue
 
-                    # 3. Determine Category Logic
-                    category = determine_category(timestamp)
+                    # 3. Determine Category using THE BRAIN
+                    # New signature: determine_category(employee, log_datetime) -> (category, schedule_name)
+                    category, schedule_name = determine_category(employee, timestamp)
 
                     # 4. Create Attendance Log
                     log, created = AttendanceLog.objects.get_or_create(
@@ -112,19 +120,39 @@ class Command(BaseCommand):
                             'captured_at': employee.home_base,
                             'latitude': lat if pd.notna(lat) else None,
                             'longitude': lng if pd.notna(lng) else None,
-                            'notes': nama, # Save raw name from log for reference
+                            'notes': nama,
                             'log_category': category
                         }
                     )
 
                     if created:
                         created_count += 1
+                        if verbose:
+                            time_str = timestamp.strftime('%H:%M')
+                            shift_info = f" (Shift: {schedule_name})" if schedule_name else " (No Shift)"
+                            self.stdout.write(
+                                self.style.SUCCESS(
+                                    f"  ✓ {employee.full_name}: {time_str} -> {category}{shift_info}"
+                                )
+                            )
+                    else:
+                        skipped_count += 1
                 
                 except Exception as row_err:
                     self.stdout.write(self.style.ERROR(f"  ! Error row {index}: {row_err}"))
                     continue
 
-            self.stdout.write(self.style.SUCCESS(f"Sync complete. New Logs: {created_count}, Skipped (Unknown User): {skipped_count}"))
+            # Summary
+            self.stdout.write("")
+            self.stdout.write(self.style.SUCCESS("=" * 50))
+            self.stdout.write(self.style.SUCCESS(f"Sync Complete!"))
+            self.stdout.write(f"  ✓ New Logs Created: {created_count}")
+            self.stdout.write(f"  ○ Skipped (Duplicate): {skipped_count}")
+            self.stdout.write(f"  ? Unknown Users: {unknown_user_count}")
+            if filtered_count > 0:
+                self.stdout.write(f"  ⊘ Filtered by Date: {filtered_count}")
+            self.stdout.write(self.style.SUCCESS("=" * 50))
 
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"Failed to sync logs: {str(e)}"))
+

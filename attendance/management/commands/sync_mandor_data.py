@@ -3,8 +3,9 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from attendance.models import Employee, WorkLocation
 
+
 class Command(BaseCommand):
-    help = 'Sync Mandor/Employee Telegram IDs from Google Sheet CSV'
+    help = 'Sync Mandor/Employee data and Telegram IDs from Google Sheet CSV'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -17,105 +18,156 @@ class Command(BaseCommand):
             '--location',
             type=str,
             required=False,
-            help='Code of WorkLocation to assign for new employees (e.g. KBN-A)',
+            default='PR',  # Default to Pulau Raman
+            help='Code of WorkLocation to assign for new employees (e.g. PR, HO)',
+        )
+        parser.add_argument(
+            '--dry-run',
+            action='store_true',
+            help='Preview changes without saving to database',
         )
 
     def handle(self, *args, **kwargs):
         url = kwargs['url']
-        location_code = kwargs.get('location')
+        location_code = kwargs.get('location', 'PR')
+        dry_run = kwargs.get('dry_run', False)
         
         self.stdout.write(f"Reading data from {url}...")
+        if dry_run:
+            self.stdout.write(self.style.WARNING("DRY RUN MODE - No changes will be saved"))
 
         try:
             df = pd.read_csv(url)
-            # Normalize column names just in case
+            # Normalize column names
             df.columns = [c.strip().upper() for c in df.columns]
             
-            # Check required columns
-            required_cols = ['NAMA PEGAWAI', 'TELE USERID']
-            if not all(col in df.columns for col in required_cols):
-                self.stdout.write(self.style.ERROR(f"CSV missing required columns: {required_cols}. Found: {list(df.columns)}"))
+            self.stdout.write(f"Columns found: {list(df.columns)}")
+            
+            # Check required columns - support both naming conventions
+            name_col = None
+            tele_col = None
+            
+            for col in df.columns:
+                if 'NAMA' in col and 'PEGAWAI' in col:
+                    name_col = col
+                elif 'TELE' in col and ('USER' in col or 'ID' in col):
+                    tele_col = col
+            
+            if not name_col or not tele_col:
+                self.stdout.write(self.style.ERROR(f"CSV missing required columns. Found: {list(df.columns)}"))
+                self.stdout.write(self.style.ERROR(f"  Need: NAMA PEGAWAI and TELE USERID"))
                 return
+
+            self.stdout.write(f"Using columns: name='{name_col}', tele='{tele_col}'")
+            
+            # Get location for new employees
+            location_obj = WorkLocation.objects.filter(code=location_code).first()
+            if location_obj:
+                self.stdout.write(f"Location for new employees: {location_obj.name} ({location_code})")
+            else:
+                self.stdout.write(self.style.WARNING(f"Location '{location_code}' not found. New employees will have no home_base."))
 
             updated_count = 0
             created_count = 0
-            not_found_count = 0
+            skipped_count = 0
 
             with transaction.atomic():
                 for index, row in df.iterrows():
-                    raw_name = str(row['NAMA PEGAWAI'])
-                    tele_id = str(row['TELE USERID']).strip()
+                    raw_name = str(row[name_col]).strip()
+                    tele_id_raw = row[tele_col]
+                    
+                    # Handle NaN and convert to string
+                    if pd.isna(tele_id_raw):
+                        self.stdout.write(self.style.WARNING(f"  ! Row {index+1}: '{raw_name}' - No Telegram ID, skipping"))
+                        skipped_count += 1
+                        continue
+                    
+                    tele_id = str(int(float(tele_id_raw))) if isinstance(tele_id_raw, (int, float)) else str(tele_id_raw).strip()
 
-                    # Simple validation
-                    if not raw_name or not tele_id or tele_id.lower() == 'nan':
+                    # Basic validation
+                    if not raw_name or raw_name.lower() == 'nan':
+                        continue
+                    if not tele_id or tele_id.lower() == 'nan':
+                        skipped_count += 1
                         continue
 
-                    # 1. CLEAN NAME
-                    # Remove " | PROGRAMMER" etc
+                    # Clean name - remove "|" annotations like "| PROGRAMMER"
                     clean_name = raw_name.split('|')[0].strip()
+                    clean_name = " ".join(clean_name.split())  # Normalize spaces
+
+                    # SEARCH: Try to find existing employee
+                    employee = None
+                    match_method = None
                     
-                    # Remove extra spaces
-                    clean_name = " ".join(clean_name.split())
+                    # Strategy 1: Exact match by Telegram ID (already assigned)
+                    employee = Employee.objects.filter(telegram_user_id=tele_id).first()
+                    if employee:
+                        match_method = "Telegram ID"
+                    
+                    # Strategy 2: Exact name match
+                    if not employee:
+                        employee = Employee.objects.filter(full_name__iexact=clean_name, is_active=True).first()
+                        if employee:
+                            match_method = "Exact Name"
+                    
+                    # Strategy 3: Contains match
+                    if not employee:
+                        matches = Employee.objects.filter(full_name__icontains=clean_name, is_active=True)
+                        if matches.count() == 1:
+                            employee = matches.first()
+                            match_method = "Contains"
+                        elif matches.count() > 1:
+                            self.stdout.write(self.style.WARNING(
+                                f"  ? Row {index+1}: '{clean_name}' matches {matches.count()} employees, skipping"
+                            ))
+                            skipped_count += 1
+                            continue
 
-                    # 2. SEARCH STRATEGY
-                    employees = Employee.objects.none()
-                    match_method = "Exact/Contain"
-
-                    # Attempt A: Search by Clean Name
-                    employees = Employee.objects.filter(full_name__icontains=clean_name, is_active=True)
-
-                    # Attempt B: Search by First 2 Words (if A failed)
-                    if not employees.exists():
-                        parts = clean_name.split()
-                        if len(parts) >= 2:
-                            term = f"{parts[0]} {parts[1]}"
-                            employees = Employee.objects.filter(full_name__icontains=term, is_active=True)
-                            match_method = f"Fuzzy (2 words: {term})"
-                        elif len(parts) == 1:
-                            term = parts[0]
-                            # Only search if term length > 2 to avoid matching "M" to everyone
-                            if len(term) > 2:
-                                employees = Employee.objects.filter(full_name__icontains=term, is_active=True)
-                                match_method = f"Fuzzy (1 word: {term})"
-
-                    # 3. UPDATE
-                    if employees.exists():
-                        # If multiple found, warning inside log
-                        if employees.count() > 1:
-                            self.stdout.write(self.style.WARNING(f"  ? Ambiguous: '{clean_name}' matches {employees.count()} people. Using first."))
-                        
-                        employee = employees.first()
-                        
+                    if employee:
+                        # UPDATE existing employee
                         if employee.telegram_user_id != tele_id:
-                            employee.telegram_user_id = tele_id
-                            employee.save()
-                            self.stdout.write(f"  > Updated [{match_method}]: {clean_name} -> {employee.full_name} (ID: {tele_id})")
+                            if not dry_run:
+                                employee.telegram_user_id = tele_id
+                                employee.save()
+                            self.stdout.write(self.style.SUCCESS(
+                                f"  ✓ Updated [{match_method}]: {employee.full_name} -> Tele ID: {tele_id}"
+                            ))
                             updated_count += 1
                         else:
-                            # self.stdout.write(f"  . Skipped: {employee.full_name} (No change)")
+                            # Already has same ID
                             pass
                     else:
-                        # AUTO-CREATE NEW EMPLOYEE
-                        # Generate unique NIK based on Telegram ID
-                        new_nik = f"TELE-{tele_id}"[:20] 
+                        # CREATE new employee
+                        new_nik = f"TELE-{tele_id}"[:20]
                         
-                        location_obj = None
-                        if location_code:
-                            location_obj = WorkLocation.objects.filter(code=location_code).first()
-
-                        Employee.objects.create(
-                            nik=new_nik,
-                            full_name=clean_name,
-                            telegram_user_id=tele_id,
-                            employee_type='HARIAN', # Default
-                            home_base=location_obj,
-                            is_active=True
-                        )
-                        self.stdout.write(f"  + Created: {clean_name} (ID: {tele_id})")
+                        if not dry_run:
+                            Employee.objects.create(
+                                nik=new_nik,
+                                full_name=clean_name,
+                                telegram_user_id=tele_id,
+                                employee_type='HARIAN',
+                                home_base=location_obj,
+                                is_active=True
+                            )
+                        self.stdout.write(self.style.SUCCESS(
+                            f"  + Created: {clean_name} (NIK: {new_nik}, Tele: {tele_id})"
+                        ))
                         created_count += 1
+                
+                if dry_run:
+                    # Rollback in dry run
+                    transaction.set_rollback(True)
                         
-            self.stdout.write(self.style.SUCCESS(f"Sync complete. Updated: {updated_count}, Created: {created_count}, Not Found: {not_found_count} (Should be 0 now)"))
-
+            self.stdout.write("")
+            self.stdout.write(self.style.SUCCESS("=" * 50))
+            self.stdout.write(self.style.SUCCESS(f"Sync Complete!"))
+            self.stdout.write(f"  ✓ Created: {created_count}")
+            self.stdout.write(f"  ○ Updated: {updated_count}")
+            self.stdout.write(f"  ? Skipped: {skipped_count}")
+            self.stdout.write(self.style.SUCCESS("=" * 50))
 
         except Exception as e:
+            import traceback
             self.stdout.write(self.style.ERROR(f"Failed to sync data: {str(e)}"))
+            self.stdout.write(traceback.format_exc())
+

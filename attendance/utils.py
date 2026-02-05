@@ -2,10 +2,12 @@
 Attendance Utilities
 
 Shared helper functions for attendance processing across all data sources.
+The Brain: Central logic for time-slot categorization based on employee shift assignments.
 """
 
-from datetime import time
+from datetime import time, date, datetime
 from django.utils import timezone
+from django.db.models import Q
 
 
 def time_to_minutes(t):
@@ -30,128 +32,6 @@ def is_within_range(current_time, start_time, end_time):
     return start <= current <= end
 
 
-def determine_category(dt, schedule=None):
-    """
-    Determine log category based on datetime and optional schedule.
-    
-    This function standardizes time-slot categorization for attendance logs
-    regardless of source (Telegram, Fingerprint, etc.).
-    
-    Args:
-        dt: A datetime object (timezone-aware or naive).
-            If naive, it will be treated as local time.
-        schedule: Optional DailySchedule object for dynamic checkpoint detection.
-                  If None, uses hardcoded fallback ranges.
-    
-    Returns:
-        str: One of 'MASUK', 'CHECKPOINT_1', 'ISTIRAHAT', 'CHECKPOINT_2', 'PULANG', or 'UNKNOWN'
-    
-    Fallback Time Ranges (when no schedule):
-        - 05:00 - 08:30 -> MASUK (Check-in)
-        - 09:00 - 11:00 -> CHECKPOINT_1 (Mid-morning check)
-        - 11:30 - 13:30 -> ISTIRAHAT (Lunch break)
-        - 14:00 - 15:45 -> CHECKPOINT_2 (Afternoon check)
-        - 16:00 - 23:59 -> PULANG (Check-out)
-        - Otherwise -> UNKNOWN
-    """
-    # Handle None input
-    if dt is None:
-        return 'UNKNOWN'
-    
-    # Make aware if naive (assume local timezone)
-    if timezone.is_naive(dt):
-        dt = timezone.make_aware(dt)
-    
-    # Convert to local time for consistent categorization
-    local_dt = timezone.localtime(dt)
-    current_time = local_dt.time()
-    
-    # If schedule is provided, use schedule-based detection
-    if schedule is not None:
-        return _determine_category_with_schedule(current_time, schedule)
-    
-    # Fallback: Use hardcoded ranges (legacy behavior)
-    return _determine_category_fallback(current_time)
-
-
-def _determine_category_with_schedule(current_time, schedule):
-    """
-    Determine category using DailySchedule configuration.
-    
-    Priority order:
-    1. CHECKPOINT_1 (if enabled and within range)
-    2. CHECKPOINT_2 (if enabled and within range)
-    3. ISTIRAHAT (break time)
-    4. MASUK (scan-in window or before clock_in + tolerance)
-    5. PULANG (scan-out window or after clock_out)
-    6. UNKNOWN
-    """
-    # Check Checkpoint 1 (Telegram-specific)
-    if schedule.enable_checkin_1:
-        if is_within_range(current_time, schedule.checkin_1_start, schedule.checkin_1_end):
-            return 'CHECKPOINT_1'
-    
-    # Check Checkpoint 2 (Telegram-specific)
-    if schedule.enable_checkin_2:
-        if is_within_range(current_time, schedule.checkin_2_start, schedule.checkin_2_end):
-            return 'CHECKPOINT_2'
-    
-    # Check Break/Istirahat
-    if is_within_range(current_time, schedule.break_start, schedule.break_end):
-        return 'ISTIRAHAT'
-    
-    # Check MASUK (Clock-in window)
-    # Use scan_in window if available, otherwise use clock_in time with tolerance
-    if schedule.scan_in_start and schedule.scan_in_end:
-        if is_within_range(current_time, schedule.scan_in_start, schedule.scan_in_end):
-            return 'MASUK'
-    else:
-        # Fallback: 30 minutes before clock_in to clock_in + late_tolerance
-        clock_in_mins = time_to_minutes(schedule.clock_in)
-        if clock_in_mins:
-            start_mins = max(0, clock_in_mins - 30)
-            end_mins = clock_in_mins + schedule.late_tolerance + 30  # Allow 30 mins after tolerance
-            current_mins = time_to_minutes(current_time)
-            if start_mins <= current_mins <= end_mins:
-                return 'MASUK'
-    
-    # Check PULANG (Clock-out window)
-    if schedule.scan_out_start and schedule.scan_out_end:
-        if is_within_range(current_time, schedule.scan_out_start, schedule.scan_out_end):
-            return 'PULANG'
-    else:
-        # Fallback: After clock_out time
-        clock_out_mins = time_to_minutes(schedule.clock_out)
-        if clock_out_mins:
-            current_mins = time_to_minutes(current_time)
-            if current_mins >= clock_out_mins:
-                return 'PULANG'
-    
-    return 'UNKNOWN'
-
-
-def _determine_category_fallback(current_time):
-    """
-    Legacy fallback using hardcoded time ranges.
-    Used when no DailySchedule is provided.
-    """
-    # Use integer comparison for HHMM format (e.g., 0830 = 8:30 AM)
-    t = current_time.hour * 100 + current_time.minute
-
-    if 500 <= t <= 830:
-        return 'MASUK'
-    elif 900 <= t <= 1100:
-        return 'CHECKPOINT_1'
-    elif 1130 <= t <= 1330:
-        return 'ISTIRAHAT'
-    elif 1400 <= t <= 1545:
-        return 'CHECKPOINT_2'
-    elif 1600 <= t <= 2359:
-        return 'PULANG'
-    
-    return 'UNKNOWN'
-
-
 def make_aware_timestamp(dt):
     """
     Ensure a datetime object is timezone-aware.
@@ -171,7 +51,7 @@ def make_aware_timestamp(dt):
     return dt
 
 
-def get_employee_schedule_for_date(employee, target_date):
+def get_employee_schedule(employee, target_date):
     """
     Get the applicable DailySchedule for an employee on a specific date.
     
@@ -180,9 +60,8 @@ def get_employee_schedule_for_date(employee, target_date):
         target_date: datetime.date object
     
     Returns:
-        DailySchedule object or None if no assignment found
+        tuple: (DailySchedule object or None, ShiftPattern object or None)
     """
-    from django.db.models import Q
     from attendance.models import EmployeeShiftAssignment
     
     # Find active assignment for the target date
@@ -197,8 +76,173 @@ def get_employee_schedule_for_date(employee, target_date):
     
     if assignment and assignment.shift_pattern:
         weekday = target_date.weekday()  # 0=Monday, 6=Sunday
-        return assignment.shift_pattern.get_schedule_for_day(weekday)
+        daily_schedule = assignment.shift_pattern.get_schedule_for_day(weekday)
+        return (daily_schedule, assignment.shift_pattern)
     
-    return None
+    return (None, None)
+
+
+def determine_category(employee, log_datetime):
+    """
+    Determine log category based on employee's shift assignment and log datetime.
+    
+    This is THE BRAIN function that standardizes time-slot categorization for 
+    attendance logs regardless of source (Telegram, Fingerprint, etc.).
+    
+    Args:
+        employee: Employee model instance
+        log_datetime: A datetime object (timezone-aware or naive).
+                      If naive, it will be treated as local time.
+    
+    Returns:
+        tuple: (category: str, schedule_name: str or None)
+            - category: One of 'MASUK', 'CHECKPOINT_1', 'ISTIRAHAT', 'CHECKPOINT_2', 'PULANG', 'LIBUR', 'UNKNOWN'
+            - schedule_name: Name of the matched schedule for logging purposes
+    
+    Logic Flow:
+        1. Identify weekday from log_datetime
+        2. Query EmployeeShiftAssignment for active assignment on that date
+        3. Get DailySchedule from ShiftPattern for that weekday
+        4. Match log time against schedule windows
+        5. Return category and schedule name
+    """
+    # Handle None input
+    if log_datetime is None:
+        return ('UNKNOWN', None)
+    
+    # Make aware if naive (assume local timezone)
+    if timezone.is_naive(log_datetime):
+        log_datetime = timezone.make_aware(log_datetime)
+    
+    # Convert to local time for consistent categorization
+    local_dt = timezone.localtime(log_datetime)
+    current_time = local_dt.time()
+    target_date = local_dt.date()
+    
+    # Get employee's schedule for this date
+    schedule, shift_pattern = get_employee_schedule(employee, target_date)
+    
+    # No shift assigned or day is off (null in pattern)
+    if schedule is None:
+        if shift_pattern is not None:
+            # Has pattern but this day is null = day off
+            return ('LIBUR', shift_pattern.name)
+        else:
+            # No assignment at all - use fallback
+            category = _determine_category_fallback(current_time)
+            return (category, None)
+    
+    # Determine category based on schedule configuration
+    category = _determine_category_with_schedule(current_time, schedule)
+    return (category, schedule.name)
+
+
+def _determine_category_with_schedule(current_time, schedule):
+    """
+    Determine category using DailySchedule configuration.
+    
+    Priority order:
+    1. MASUK (scan-in window)
+    2. CHECKPOINT_1 (if enabled and within range)
+    3. ISTIRAHAT (break time)
+    4. CHECKPOINT_2 (if enabled and within range)
+    5. PULANG (scan-out window)
+    6. UNKNOWN
+    """
+    # 1. Check MASUK (Clock-in window) - HIGHEST PRIORITY
+    if schedule.scan_in_start and schedule.scan_in_end:
+        if is_within_range(current_time, schedule.scan_in_start, schedule.scan_in_end):
+            return 'MASUK'
+    else:
+        # Fallback: 60 minutes before clock_in to clock_in + late_tolerance + 30
+        clock_in_mins = time_to_minutes(schedule.clock_in)
+        if clock_in_mins:
+            start_mins = max(0, clock_in_mins - 60)
+            end_mins = clock_in_mins + (schedule.late_tolerance or 0) + 30
+            current_mins = time_to_minutes(current_time)
+            if start_mins <= current_mins <= end_mins:
+                return 'MASUK'
+    
+    # 2. Check Checkpoint 1 (Telegram-specific)
+    if schedule.enable_checkin_1:
+        if is_within_range(current_time, schedule.checkin_1_start, schedule.checkin_1_end):
+            return 'CHECKPOINT_1'
+    
+    # 3. Check Break/Istirahat
+    if is_within_range(current_time, schedule.break_start, schedule.break_end):
+        return 'ISTIRAHAT'
+    
+    # 4. Check Checkpoint 2 (Telegram-specific)
+    if schedule.enable_checkin_2:
+        if is_within_range(current_time, schedule.checkin_2_start, schedule.checkin_2_end):
+            return 'CHECKPOINT_2'
+    
+    # 5. Check PULANG (Clock-out window)
+    if schedule.scan_out_start and schedule.scan_out_end:
+        if is_within_range(current_time, schedule.scan_out_start, schedule.scan_out_end):
+            return 'PULANG'
+    else:
+        # Fallback: clock_out - 30 mins to midnight
+        clock_out_mins = time_to_minutes(schedule.clock_out)
+        if clock_out_mins:
+            current_mins = time_to_minutes(current_time)
+            if current_mins >= (clock_out_mins - 30):
+                return 'PULANG'
+    
+    return 'UNKNOWN'
+
+
+def _determine_category_fallback(current_time):
+    """
+    Legacy fallback using hardcoded time ranges.
+    Used when employee has no shift assignment.
+    """
+    # Use integer comparison for HHMM format (e.g., 0830 = 8:30 AM)
+    t = current_time.hour * 100 + current_time.minute
+
+    if 500 <= t <= 830:
+        return 'MASUK'
+    elif 900 <= t <= 1100:
+        return 'CHECKPOINT_1'
+    elif 1130 <= t <= 1330:
+        return 'ISTIRAHAT'
+    elif 1400 <= t <= 1545:
+        return 'CHECKPOINT_2'
+    elif 1600 <= t <= 2359:
+        return 'PULANG'
+    
+    return 'UNKNOWN'
+
+
+# =============================================================================
+# LEGACY COMPATIBILITY FUNCTION
+# =============================================================================
+
+def determine_category_simple(dt, schedule=None):
+    """
+    LEGACY: Simple determine_category for backward compatibility.
+    Prefer using determine_category(employee, log_datetime) instead.
+    
+    Args:
+        dt: datetime object
+        schedule: Optional DailySchedule object
+    
+    Returns:
+        str: Category name
+    """
+    if dt is None:
+        return 'UNKNOWN'
+    
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt)
+    
+    local_dt = timezone.localtime(dt)
+    current_time = local_dt.time()
+    
+    if schedule is not None:
+        return _determine_category_with_schedule(current_time, schedule)
+    
+    return _determine_category_fallback(current_time)
+
 
 
