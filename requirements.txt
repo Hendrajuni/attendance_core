@@ -1,0 +1,10 @@
+django
+psycopg2-binary
+python-dotenv
+pyzk
+gspread
+google-auth
+pandas
+requests
+# Production only
+gunicorn

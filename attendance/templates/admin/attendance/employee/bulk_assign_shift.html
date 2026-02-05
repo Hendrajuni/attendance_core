@@ -1,0 +1,71 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block content %}
+<h1>📅 Bulk Assign Shift Pattern</h1>
+<p>Anda akan mengassign shift pattern ke <strong>{{ queryset.count }}</strong> karyawan berikut:</p>
+
+<div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0; max-height: 200px; overflow-y: auto;">
+    <ol>
+    {% for employee in queryset %}
+        <li><strong>{{ employee.nik }}</strong> - {{ employee.full_name }} 
+            <small style="color: #666;">({{ employee.get_employee_type_display }})</small>
+        </li>
+    {% endfor %}
+    </ol>
+</div>
+
+<form method="post">
+    {% csrf_token %}
+    
+    <fieldset style="padding: 20px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 20px;">
+        <legend style="font-weight: bold; padding: 0 10px;">📋 Pilih Shift Pattern</legend>
+        
+        <table style="margin: 10px 0; width: 100%;">
+            <tr>
+                <th style="text-align: left; padding: 8px 0;">{{ form.shift_pattern.label }}:</th>
+                <td>{{ form.shift_pattern }}</td>
+            </tr>
+            <tr>
+                <td></td>
+                <td><small style="color: #666;">{{ form.shift_pattern.help_text }}</small></td>
+            </tr>
+            <tr>
+                <th style="text-align: left; padding: 8px 0;">{{ form.effective_from.label }}:</th>
+                <td>{{ form.effective_from }}</td>
+            </tr>
+            <tr>
+                <td></td>
+                <td><small style="color: #666;">{{ form.effective_from.help_text }}</small></td>
+            </tr>
+            <tr>
+                <th style="text-align: left; padding: 8px 0;">{{ form.effective_to.label }}:</th>
+                <td>{{ form.effective_to }}</td>
+            </tr>
+            <tr>
+                <td></td>
+                <td><small style="color: #666;">{{ form.effective_to.help_text }}</small></td>
+            </tr>
+        </table>
+    </fieldset>
+
+    {% for obj in queryset %}
+        <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk }}" />
+    {% endfor %}
+    
+    <div style="margin-top: 20px;">
+        <input type="hidden" name="action" value="assign_shift_pattern" />
+        <input type="submit" name="apply" value="✅ Confirm Assignment" 
+               style="background: #417690; color: white; padding: 10px 25px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;" />
+        <a href="{% url 'admin:attendance_employee_changelist' %}" 
+           style="background: #6c757d; color: white; padding: 11px 25px; border-radius: 5px; text-decoration: none; margin-left: 10px; font-size: 14px;">
+            ❌ Cancel
+        </a>
+    </div>
+</form>
+
+<style>
+    table td, table th { padding: 5px 10px; vertical-align: top; }
+    select, input[type="date"] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; min-width: 250px; }
+</style>
+{% endblock %}
