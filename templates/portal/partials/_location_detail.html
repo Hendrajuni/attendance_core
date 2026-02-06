@@ -1,0 +1,203 @@
+<div class="p-3">
+    <!-- Header: Breadcrumb & Title -->
+    <div class="d-flex justify-content-between align-items-center mb-4 border-bottom pb-2">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 small text-muted">
+                    {% for ancestor in location.get_ancestors %}
+                    <li class="breadcrumb-item">{{ ancestor.name }}</li>
+                    {% endfor %}
+                    <li class="breadcrumb-item active" aria-current="page">{{ location.name }}</li>
+                </ol>
+            </nav>
+            <h4 class="mb-0 fw-bold text-primary">{{ location.name }} <span class="text-muted fw-light">({{ location.code }})</span></h4>
+        </div>
+        <div class="text-end">
+           {% if location.latitude and location.longitude %}
+           <a href="https://www.google.com/maps?q={{ location.latitude }},{{ location.longitude }}" target="_blank" class="btn btn-outline-secondary btn-sm rounded-pill">
+                <i class="fas fa-map-marker-alt me-1"></i> Peta
+            </a>
+           {% endif %}
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm bg-primary text-white h-100">
+                <div class="card-body py-3">
+                    <div class="d-flex align-items-center">
+                        <div class="bg-white bg-opacity-25 p-2 rounded-circle me-3">
+                            <i class="fas fa-users fs-4"></i>
+                        </div>
+                        <div>
+                            <small class="opacity-75 d-block">Total Pegawai</small>
+                            <h3 class="mb-0 fw-bold">{{ total_employees }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+             <div class="card border-0 shadow-sm bg-success text-white h-100">
+                <div class="card-body py-3">
+                    <div class="d-flex align-items-center">
+                        <div class="bg-white bg-opacity-25 p-2 rounded-circle me-3">
+                            <i class="fas fa-user-check fs-4"></i>
+                        </div>
+                        <div>
+                            <small class="opacity-75 d-block">Hadir Hari Ini</small>
+                            <h3 class="mb-0 fw-bold">{{ present_today }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+             <div class="card border-0 shadow-sm bg-info text-dark h-100">
+                <div class="card-body py-3">
+                    <div class="d-flex align-items-center">
+                         <div class="bg-white bg-opacity-25 p-2 rounded-circle me-3">
+                             <i class="fas fa-user-tie fs-4"></i>
+                        </div>
+                        <div>
+                             <small class="opacity-75 d-block">Pegawai Aktif</small>
+                             <h3 class="mb-0 fw-bold">{{ active_employees }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabs Content -->
+    <ul class="nav nav-tabs mb-3" id="locationTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active fw-medium" id="employees-tab" data-bs-toggle="tab" data-bs-target="#employees" type="button" role="tab" aria-controls="employees" aria-selected="true">
+                <i class="fas fa-id-badge me-2"></i>Personalia
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link fw-medium" id="attendance-tab" data-bs-toggle="tab" data-bs-target="#attendance" type="button" role="tab" aria-controls="attendance" aria-selected="false">
+                 <i class="fas fa-history me-2"></i>Log Absensi
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="locationTabsContent">
+        <!-- Tab Personalia -->
+        <div class="tab-pane fade show active" id="employees" role="tabpanel" aria-labelledby="employees-tab">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="bg-light">
+                                <tr>
+                                    <th class="ps-4">Nama Karyawan</th>
+                                    <th>Jabatan (Departemen)</th>
+                                    <th>Status</th>
+                                    <th class="text-end pe-4">Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for emp in employees %}
+                                <tr>
+                                    <td class="ps-4">
+                                        <div class="d-flex align-items-center">
+                                            <div class="bg-light rounded-circle d-flex align-items-center justify-content-center me-3 text-secondary border" style="width: 40px; height: 40px;">
+                                                <span class="fw-bold">{{ emp.full_name|slice:":1" }}</span>
+                                            </div>
+                                            <div>
+                                                <div class="fw-bold text-dark">{{ emp.full_name }}</div>
+                                                <small class="text-muted">{{ emp.nik }}</small>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="text-dark">{{ emp.department.name|default:"-" }}</div>
+                                        <small class="text-muted">{{ emp.home_base.code }}</small>
+                                    </td>
+                                    <td>
+                                        {% if emp.is_active %}
+                                            <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill">Aktif</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle rounded-pill">Non-Aktif</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end pe-4">
+                                        <button class="btn btn-sm btn-outline-primary rounded-pill px-3">
+                                            <i class="fas fa-edit me-1"></i> Detail
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="4" class="text-center py-5 text-muted">
+                                        <i class="fas fa-users-slash fs-1 mb-2 opacity-25"></i>
+                                        <p class="mb-0">Tidak ada data karyawan di lokasi ini.</p>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Tab Absensi Harian -->
+        <div class="tab-pane fade" id="attendance" role="tabpanel" aria-labelledby="attendance-tab">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="bg-light">
+                                <tr>
+                                    <th class="ps-4">Waktu</th>
+                                    <th>Nama Karyawan</th>
+                                    <th>Metode</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for log in recent_logs %}
+                                <tr>
+                                    <td class="ps-4 text-nowrap">
+                                        <div class="fw-bold text-dark">{{ log.timestamp|date:"H:i" }}</div>
+                                        <small class="text-muted">{{ log.timestamp|date:"d M Y" }}</small>
+                                    </td>
+                                    <td>
+                                        <div class="fw-medium text-dark">{{ log.employee.full_name }}</div>
+                                        <small class="text-muted">{{ log.employee.nik }}</small>
+                                    </td>
+                                    <td>
+                                        {% if log.verification_method == 'FINGER' %}
+                                            <span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle rounded-pill">
+                                                <i class="fas fa-fingerprint me-1"></i> Fingerprint
+                                            </span>
+                                        {% else %}
+                                            <span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary-subtle rounded-pill">
+                                                {{ log.verification_method }}
+                                            </span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill">Hadir</span>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="4" class="text-center py-5 text-muted">
+                                        <i class="fas fa-history fs-1 mb-2 opacity-25"></i>
+                                        <p class="mb-0">Belum ada data absensi terbaru.</p>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

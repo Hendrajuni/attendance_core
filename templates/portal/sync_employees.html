@@ -30,6 +30,7 @@
                             <tr>
                                 <th class="border-0 ps-3">Nama Mesin</th>
                                 <th class="border-0">Lokasi</th>
+                                <th class="border-0">Terakhir Cek</th>
                                 <th class="border-0">Status</th>
                                 <th class="border-0 pe-3 text-end">Aksi</th>
                             </tr>
@@ -39,23 +40,36 @@
                             <tr>
                                 <td class="ps-3 fw-medium">{{ device.name }}</td>
                                 <td><span class="badge bg-info bg-opacity-10 text-info">{{ device.location.code }}</span></td>
+                                <td>
+                                    <small class="text-muted">
+                                        {% if device.last_activity %}
+                                        {{ device.last_activity|timesince }} yang lalu
+                                        {% else %}
+                                        -
+                                        {% endif %}
+                                    </small>
+                                </td>
                                 <td id="status-device-{{ device.id }}">
-                                    {% if device.is_active %}
-                                        <span class="badge bg-secondary">Ready</span>
-                                    {% else %}
-                                        <span class="badge bg-danger">Non-Aktif</span>
-                                    {% endif %}
+                                    <span class="badge bg-secondary">-</span>
                                 </td>
                                 <td class="pe-3 text-end">
-                                    <button class="btn btn-outline-primary btn-sm" 
+                                    <button class="btn btn-outline-secondary btn-sm me-1" 
+                                            hx-get="{% url 'portal:ping_machine_htmx' device.id %}"
+                                            hx-target="#status-device-{{ device.id }}"
+                                            hx-swap="innerHTML"
+                                            hx-indicator="this"
+                                            {% if not device.is_active %}disabled{% endif %}>
+                                        <i class="fas fa-network-wired"></i>
+                                    </button>
+                                    <button class="btn btn-outline-primary btn-sm"  
                                             hx-post="{% url 'portal:sync_employee_machine_htmx' device.id %}"
                                             hx-target="#status-device-{{ device.id }}"
                                             hx-swap="innerHTML"
-                                            hx-indicator="#spinner-device-{{ device.id }}"
+                                            hx-indicator="this"
                                             {% if not device.is_active %}disabled{% endif %}>
                                         <i class="fas fa-user-plus" id="icon-device-{{ device.id }}"></i>
                                         <span class="spinner-border spinner-border-sm d-none" id="spinner-device-{{ device.id }}" role="status"></span>
-                                        Tarik User
+                                        Sync
                                     </button>
                                 </td>
                             </tr>
@@ -85,6 +99,7 @@
                             <tr>
                                 <th class="border-0 ps-3">Nama Group</th>
                                 <th class="border-0">Lokasi</th>
+                                <th class="border-0">Terakhir Cek</th>
                                 <th class="border-0">Status</th>
                                 <th class="border-0 pe-3 text-end">Aksi</th>
                             </tr>
@@ -94,6 +109,15 @@
                             <tr>
                                 <td class="ps-3 fw-medium">{{ source.name|truncatechars:20 }}</td>
                                 <td><span class="badge bg-info bg-opacity-10 text-info">{{ source.location.code }}</span></td>
+                                <td>
+                                    <small class="text-muted">
+                                        {% if source.last_activity %}
+                                        {{ source.last_activity|timesince }} yang lalu
+                                        {% else %}
+                                        -
+                                        {% endif %}
+                                    </small>
+                                </td>
                                 <td id="status-source-{{ source.id }}">
                                     <span class="badge bg-secondary">Ready</span>
                                 </td>
@@ -102,10 +126,10 @@
                                             hx-post="{% url 'portal:sync_employee_wa_htmx' source.id %}"
                                             hx-target="#status-source-{{ source.id }}"
                                             hx-swap="innerHTML"
-                                            hx-indicator="#spinner-source-{{ source.id }}">
+                                            hx-indicator="this">
                                         <i class="fas fa-user-plus" id="icon-source-{{ source.id }}"></i>
                                         <span class="spinner-border spinner-border-sm d-none" id="spinner-source-{{ source.id }}" role="status"></span>
-                                        Tarik User
+                                        Sync
                                     </button>
                                 </td>
                             </tr>
@@ -128,9 +152,9 @@
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-dark text-white py-2 d-flex align-items-center">
                 <i class="fas fa-terminal me-2"></i>
-                <small class="fw-bold text-uppercase">Log Proses Penarikan Data (Live)</small>
+                <small class="fw-bold text-uppercase">Log Penarikan Karyawan Baru (Live)</small>
             </div>
-            <div class="card-body p-0" style="max-height: 300px; overflow-y: auto;">
+            <div class="card-body p-0" style="min-height: 380px;">
                 <div class="table-responsive">
                     <table class="table table-sm table-dark table-striped mb-0 font-monospace small">
                         <thead>
@@ -142,25 +166,100 @@
                             </tr>
                         </thead>
                         <tbody id="sync-log-body">
-                            <!-- HTMX OOB updates will appear here -->
+                            <!-- Rows will be rendered by JS -->
                         </tbody>
                     </table>
+                </div>
+            </div>
+            <!-- Pagination Controls -->
+            <div class="card-footer bg-dark border-top border-secondary py-2">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-secondary small" id="log-info">Menampilkan 0-0 dari 0 data</span>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-secondary" onclick="SyncLogManager.prevPage()" id="btn-prev" disabled>
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <button class="btn btn-outline-secondary" onclick="SyncLogManager.nextPage()" id="btn-next" disabled>
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
+<script>
+    const SyncLogManager = {
+        rows: [], // Stores HTML strings of rows
+        currentPage: 1,
+        pageSize: 10,
+
+        // Add new rows (LIFO - Newest First)
+        addRows: function(htmlString) {
+            // Create a temp container to parse the HTML string into nodes to split them
+            const tempDiv = document.createElement('tbody');
+            tempDiv.innerHTML = htmlString;
+            const newRows = Array.from(tempDiv.children).map(tr => tr.outerHTML);
+            
+            // Add to beginning of array (Newest first)
+            this.rows = [...newRows, ...this.rows];
+            
+            // Reset to page 1 to see new data immediately
+            this.currentPage = 1;
+            this.render();
+        },
+
+        render: function() {
+            const tbody = document.getElementById('sync-log-body');
+            const start = (this.currentPage - 1) * this.pageSize;
+            const end = start + this.pageSize;
+            const pageRows = this.rows.slice(start, end);
+
+            tbody.innerHTML = pageRows.join('');
+
+            // Update Info
+            const total = this.rows.length;
+            const displayEnd = Math.min(end, total);
+            const displayStart = total === 0 ? 0 : start + 1;
+            document.getElementById('log-info').innerText = `Menampilkan ${displayStart}-${displayEnd} dari ${total} data`;
+
+            // Update Buttons
+            document.getElementById('btn-prev').disabled = this.currentPage === 1;
+            document.getElementById('btn-next').disabled = end >= total;
+        },
+
+        nextPage: function() {
+            if ((this.currentPage * this.pageSize) < this.rows.length) {
+                this.currentPage++;
+                this.render();
+            }
+        },
+
+        prevPage: function() {
+            if (this.currentPage > 1) {
+                this.currentPage--;
+                this.render();
+            }
+        }
+    };
+</script>
+
 <style>
-    /* Add blinking effect for HTMX indicator */
-    .htmx-request .btn {
-        opacity: 0.8;
+    /* CSS for HTMX Loading State
+       When .htmx-request is added to the button (via hx-indicator="this")
+    */
+    button.htmx-request {
+        opacity: 0.7;
         pointer-events: none;
+        cursor: wait;
     }
-    .htmx-request .fa-user-plus {
+
+    button.htmx-request .fa-user-plus {
          display: none;
     }
-    .htmx-request .spinner-border {
+
+    button.htmx-request .spinner-border {
         display: inline-block !important;
     }
 </style>

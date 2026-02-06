@@ -1,19 +1,94 @@
 {% extends "base.html" %}
-
-{% block page_title %}{{ page_title }}{% endblock %}
+{% load mptt_tags %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <div class="card border-0 shadow-sm">
-            <div class="card-body p-5 text-center">
-                <div class="mb-4">
-                    <i class="fas fa-tools fa-3x text-muted opacity-50"></i>
+<div class="row g-3">
+    <!-- Sidebar Tree -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white py-3">
+                <h6 class="mb-0 fw-bold"><i class="fas fa-sitemap me-2 text-primary"></i>Struktur Wilayah</h6>
+            </div>
+            <div class="card-body overflow-auto" style="max-height: 80vh;">
+                {% if locations %}
+                <ul class="list-unstyled m-0">
+                    {% recursetree locations %}
+                        <li>
+                            <div class="d-flex align-items-center py-1 node-item"
+                                 hx-get="{% url 'portal:location_detail' node.id %}"
+                                 hx-target="#location-content-area"
+                                 hx-swap="innerHTML"
+                                 hx-trigger="click"
+                                 onclick="setActiveNode(this)">
+                                <i class="fas fa-folder text-warning me-2"></i>
+                                <span class="fw-medium text-dark">{{ node.name }}</span>
+                                <small class="text-muted ms-2">({{ node.code }})</small>
+                                <div class="spinner-border spinner-border-sm text-primary ms-auto d-none htmx-indicator" role="status"></div>
+                            </div>
+                            {% if not node.is_leaf_node %}
+                                <ul class="list-unstyled ms-4 border-start ps-2 border-light">
+                                    {{ children }}
+                                </ul>
+                            {% endif %}
+                        </li>
+                    {% endrecursetree %}
+                </ul>
+                {% else %}
+                <div class="text-center text-muted py-4">
+                    <i class="fas fa-folder-open fs-1 mb-2 opacity-50"></i>
+                    <p class="small mb-0">Belum ada data wilayah</p>
                 </div>
-                <h4 class="text-muted">Halaman {{ page_title }} sedang dalam pengembangan</h4>
-                <p class="text-muted small">Silakan kembali lagi nanti.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Content Area -->
+    <div class="col-md-9">
+        <div class="card border-0 shadow-sm h-100">
+            <div id="location-content-area" class="card-body p-0 h-100 position-relative">
+                <!-- Placeholder State -->
+                <div class="d-flex flex-column align-items-center justify-content-center text-muted h-100 min-vh-50">
+                    <div class="text-center">
+                        <div class="bg-light rounded-circle d-inline-flex align-items-center justify-content-center mb-3" style="width: 80px; height: 80px;">
+                            <i class="fas fa-map-marked-alt fs-1 text-secondary opacity-50"></i>
+                        </div>
+                        <h5>Pilih Wilayah</h5>
+                        <p class="small text-muted mb-0">Klik salah satu wilayah di samping untuk melihat detail.</p>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
+
+<style>
+    .node-item {
+        cursor: pointer;
+        padding: 6px 10px;
+        border-radius: 6px;
+        transition: all 0.2s;
+    }
+    .node-item:hover {
+        background-color: #e9ecef;
+    }
+    .node-item.active {
+        background-color: #cfe2ff; /* Primary Soft */
+        color: #084298;
+    }
+    
+    /* Show loader when htmx request is in flight */
+    .node-item.htmx-request .htmx-indicator {
+        display: inline-block !important;
+    }
+</style>
+
+<script>
+    function setActiveNode(element) {
+        // Remove active class from all nodes
+        document.querySelectorAll('.node-item').forEach(el => el.classList.remove('active'));
+        // Add active class to clicked node
+        element.classList.add('active');
+    }
+</script>
 {% endblock %}

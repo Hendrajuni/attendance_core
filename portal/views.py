@@ -14,12 +14,73 @@ def dashboard(request):
 @login_required
 def tree_explorer(request):
     """
-    Pusat Data Wilayah View
+    Pusat Data Wilayah View (Hierarchy)
     """
+    from attendance.models import WorkLocation
+    
+    locations = WorkLocation.objects.all()
+    
+    # RBAC: Kerani only sees their location and descendants
+    if hasattr(request.user, 'employee_profile'):
+        profile = request.user.employee_profile
+        if profile.role == 'KERANI' and profile.assigned_location:
+            # get_descendants(include_self=True) handles the tree traversal efficiently
+            locations = profile.assigned_location.get_descendants(include_self=True)
+            
     context = {
         'page_title': 'Pusat Data Wilayah',
+        'locations': locations,
     }
     return render(request, 'portal/tree_explorer.html', context)
+
+
+@login_required
+def location_detail_view(request, location_id):
+    """
+    HTMX: Load detail konten untuk panel kanan Tree Explorer
+    """
+    from attendance.models import WorkLocation, Employee, AttendanceLog
+    from django.utils import timezone
+    
+    location = get_object_or_404(WorkLocation, id=location_id)
+    
+    # Ambil lokasi ini DAN seluruh turunannya (jika ada)
+    # Ini penting untuk melihat total karyawan di wilayah tersebut (termasuk sub-wilayah)
+    # Gunakan get_descendants(include_self=True) dari MPTT
+    sub_locations = location.get_descendants(include_self=True)
+    
+    # Filter Karyawan: Home Base is within these locations
+    employees = Employee.objects.filter(
+        home_base__in=sub_locations,
+        is_verified=True
+    ).select_related('department', 'home_base')
+    
+    total_employees = employees.count()
+    active_employees = employees.filter(is_active=True).count()
+    
+    # Statistik Kehadiran Hari Ini (Sederhana)
+    today = timezone.now().date()
+    # Log hari ini untuk karyawan di wilayah ini
+    logs_today = AttendanceLog.objects.filter(
+        employee__in=employees,
+        timestamp__date=today
+    ).values('employee').distinct().count()
+    
+    # Recent Logs for Tab (Last 50)
+    recent_logs = AttendanceLog.objects.filter(
+        employee__in=employees
+    ).select_related('employee', 'captured_at').order_by('-timestamp')[:50]
+    
+    context = {
+        'location': location,
+        'employees': employees,
+        'total_employees': total_employees,
+        'active_employees': active_employees,
+        'present_today': logs_today,
+        'recent_logs': recent_logs,
+    }
+    
+    return render(request, 'portal/partials/_location_detail.html', context)
 
 from django.shortcuts import render, get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -28,7 +89,7 @@ from django.http import HttpResponse
 from django.views.decorators.http import require_POST
 from django.db import transaction
 from django.db.models import Q
-from attendance.models import FingerprintDevice, SpreadsheetSource, AttendanceLog, Employee, WorkLocation
+from attendance.models import FingerprintDevice, SpreadsheetSource, AttendanceLog, Employee, WorkLocation, EmployeeProfile
 
 @login_required
 def sync_logs_view(request):
@@ -90,7 +151,7 @@ def sync_employee_machine_htmx(request, device_id):
 
     from attendance.utils import fetch_users_from_machine
     
-    count, error = fetch_users_from_machine(device)
+    count, samples, error = fetch_users_from_machine(device)
     
     if error:
         return HttpResponse(f'''
@@ -103,16 +164,37 @@ def sync_employee_machine_htmx(request, device_id):
             </tr>
         ''')
     
-    status_badge = f'<span class="badge bg-success">OK ({count})</span>'
+    current_time = timezone.now().strftime("%H:%M:%S")
+    
+    if count > 0:
+        badge_html = f'<span class="badge bg-success">User: {count}</span> <span class="badge bg-light text-dark border">Cek: {current_time}</span>'
+        msg_text = f"Berhasil menarik {count} user baru"
+    else:
+        badge_html = f'<span class="badge bg-secondary">User: 0</span> <span class="badge bg-light text-dark border">Cek: {current_time}</span>'
+        msg_text = "Tidak ada user baru (Up-to-date)"
+        
+    # Build Detail Rows for Samples
+    extra_rows = ""
+    if samples:
+        for sample in samples:
+            extra_rows += f'''
+            <tr hx-swap-oob="afterbegin:#sync-log-body">
+                <td>{current_time}</td>
+                <td>{device.name}</td>
+                <td><span class="badge bg-info">Detail</span></td>
+                <td class="text-info">{sample}</td>
+            </tr>
+            '''
+    
     log_row = f'''
         <tr hx-swap-oob="afterbegin:#sync-log-body">
-            <td>{timezone.now().strftime("%H:%M:%S")}</td>
+            <td>{current_time}</td>
             <td>{device.name}</td>
-            <td><span class="badge bg-success">Sukses</span></td>
-            <td>Berhasil menarik {count} user baru</td>
+            <td><span class="badge bg-{'success' if count > 0 else 'secondary'}">Sukses</span></td>
+            <td>{msg_text}</td>
         </tr>
     '''
-    return HttpResponse(status_badge + log_row)
+    return HttpResponse(badge_html + extra_rows + log_row)
 
 
 @login_required
@@ -128,11 +210,11 @@ def sync_employee_wa_htmx(request, source_id):
 
     from attendance.utils import fetch_users_from_wa_source
     
-    count, error = fetch_users_from_wa_source(source)
+    count, samples, error = fetch_users_from_wa_source(source)
     
     if error:
          return HttpResponse(f'''
-            <span class="badge bg-danger">Error</span>
+            <span id="status-source-{source.id}" class="badge bg-danger" hx-swap-oob="true">Error</span>
              <tr hx-swap-oob="afterbegin:#sync-log-body">
                 <td>{timezone.now().strftime("%H:%M:%S")}</td>
                 <td>{source.name}</td>
@@ -141,7 +223,24 @@ def sync_employee_wa_htmx(request, source_id):
             </tr>
         ''')
 
-    status_badge = f'<span class="badge bg-success">OK ({count})</span>'
+    # Main Status Update (OOB) to avoid messy main-swap context
+    status_html = f'<span id="status-source-{source.id}" class="badge bg-success" hx-swap-oob="true">OK ({count})</span>'
+    
+    # Build Detail Rows for Samples
+    extra_rows = ""
+    current_time = timezone.now().strftime("%H:%M:%S")
+    if samples:
+        for sample in samples:
+            extra_rows += f'''
+            <tr hx-swap-oob="afterbegin:#sync-log-body">
+                <td>{current_time}</td>
+                <td>{source.name}</td>
+                <td><span class="badge bg-info">Detail</span></td>
+                <td class="text-info">{sample}</td>
+            </tr>
+            '''
+            
+    # Main Log Row
     log_row = f'''
         <tr hx-swap-oob="afterbegin:#sync-log-body">
             <td>{timezone.now().strftime("%H:%M:%S")}</td>
@@ -150,13 +249,39 @@ def sync_employee_wa_htmx(request, source_id):
             <td>Berhasil menarik {count} karyawan baru</td>
         </tr>
     '''
-    return HttpResponse(status_badge + log_row)
+    
+    # Return everything combined.
+    # ALTERNATIVE APPROACH: JS Injection
+    # Since HTMX/Browser parsing of OOB <tr> tags is flaky, we use a simple script to inject the rows.
+    # This bypasses the parsing "tr must be inside table" rule because it's treated as a JS string until insertion.
+    
+    # Escape single quotes and newlines for JS string safety
+    rows_js = (extra_rows + log_row).replace('"', '\\"').replace('\n', '')
+    
+    response_html = f'''
+    {status_html.replace('hx-swap-oob="true"', '')} <!-- Return normal HTML for the target -->
+    <script>
+        var newRows = "{rows_js}";
+        // Remove hx-swap-oob attributes since we are injecting manually
+        newRows = newRows.replace(/hx-swap-oob="[^"]+"/g, "");
+        
+        // Use our new Client-Side Manager
+        if (typeof SyncLogManager !== 'undefined') {{
+            SyncLogManager.addRows(newRows);
+        }} else {{
+            // Fallback if script not loaded yet (should rarely happen)
+            document.querySelector('#sync-log-body').insertAdjacentHTML('afterbegin', newRows);
+        }}
+    </script>
+    '''
+    return HttpResponse(response_html)
 
 
 @login_required
 @require_POST
 def sync_machine_htmx(request, device_id):
     device = get_object_or_404(FingerprintDevice, id=device_id)
+    print(f"DEBUG: HIT sync_machine_htmx for {device.name} (IP: {device.ip_address})")
     
     # Simple Access Check
     if hasattr(request.user, 'employee_profile'):
@@ -167,8 +292,10 @@ def sync_machine_htmx(request, device_id):
     try:
         from zk import ZK
         from attendance.utils import determine_category
+        from portal.models import Notification
         
-        zk = ZK(device.ip_address, port=device.port, timeout=10)
+        print("DEBUG: Connecting to ZK...")
+        zk = ZK(device.ip_address, port=device.port, timeout=5)
         conn = zk.connect()
         
         if not conn:
@@ -178,25 +305,46 @@ def sync_machine_htmx(request, device_id):
                     <td>{timezone.now().strftime("%H:%M:%S")}</td>
                     <td>{device.name}</td>
                     <td><span class="badge bg-danger">Error</span></td>
-                    <td class="text-danger">Gagal terhubung ke mesin</td>
+                    <td class="text-danger">Gagal terhubung ke mesin (Timeout)</td>
                 </tr>
             ''')
             
         try:
+            print("DEBUG: Fetching attendance...")
             attendances = conn.get_attendance()
+            total_records = len(attendances)
+            print(f"DEBUG: Fetched {total_records} records. Optimizing processing...")
+            
             created_count = 0
+            
+            # OPTIMIZATION: Prefetch all active employees to avoid N+1 queries
+            # Map device_user_id -> Employee Object
+            active_employees = {
+                str(emp.device_user_id): emp 
+                for emp in Employee.objects.filter(is_active=True)
+            }
+            print(f"DEBUG: Loaded {len(active_employees)} active employees into memory.")
+
+            # Track detailed logs for UI (Limit 5)
+            detailed_logs = []
             
             with transaction.atomic():
                 for att in attendances:
-                    user_id = att.user_id
+                    user_id = str(att.user_id)
+                    
+                    # Fast Lookup from Memory
+                    employee = active_employees.get(user_id)
+                    if not employee:
+                        continue
+                        
                     timestamp = att.timestamp
                     if timezone.is_naive(timestamp):
                         timestamp = timezone.make_aware(timestamp)
-                        
-                    employee = Employee.objects.filter(device_user_id=user_id, is_active=True).first()
-                    if not employee: continue
                     
+                    # Determine category (CPU bound, fast)
                     category, _ = determine_category(employee, timestamp)
+                    
+                    # We still use get_or_create for safety, but now 'employee' is already fetched
                     _, created = AttendanceLog.objects.get_or_create(
                         employee=employee, timestamp=timestamp,
                         defaults={
@@ -205,32 +353,156 @@ def sync_machine_htmx(request, device_id):
                             'log_category': category
                         }
                     )
-                    if created: created_count += 1
+                    if created: 
+                        created_count += 1
+                        if len(detailed_logs) < 5:
+                            time_str = timestamp.strftime("%H:%M")
+                            detailed_logs.append(f"{employee.full_name} ({time_str})")
             
-            status_badge = f'<span class="badge bg-success">OK ({created_count})</span>'
+            print(f"DEBUG: Created {created_count} new logs from {total_records} raw records.")
+            current_time = timezone.now().strftime("%H:%M:%S")
+            
+            # --- Update Last Activity ---
+            device.last_activity = timezone.now()
+            device.save(update_fields=['last_activity'])
+            
+            # --- Create Notification (ALWAYS) ---
+            from portal.models import Notification
+            from attendance.models import EmployeeProfile 
+            from django.contrib.auth.models import User
+            
+            actor_name = request.user.first_name or request.user.username
+            time_str = timezone.localtime(timezone.now()).strftime("%d/%m %H:%M")
+            
+            title = f"Sync: {device.name} ({device.location.code})"
+            if created_count > 0:
+                message = f"Ditarik oleh {actor_name} pada {time_str}. Total {created_count} data baru dari {device.location.name}."
+            else:
+                message = f"Dicek oleh {actor_name} pada {time_str}. Tidak ada data baru dari {device.location.name}."
+            
+            # Logic: Send to Admin/HRD (Global) + Manager/Kerani (Location Specific)
+            # 1. Global (Admin/HRD) + All Superusers
+            global_recipients = set(EmployeeProfile.objects.filter(role__in=['ADMIN', 'HRD']).values_list('user', flat=True))
+            superusers = set(User.objects.filter(is_superuser=True).values_list('id', flat=True))
+            
+            # 2. Local (Manager/Kerani at this location)
+            local_recipients = set(EmployeeProfile.objects.filter(
+                role__in=['HRD', 'KERANI'], 
+                assigned_location=device.location
+            ).values_list('user', flat=True))
+            
+            recipient_ids = global_recipients.union(superusers).union(local_recipients)
+            
+            notifications_to_create = []
+            for uid in recipient_ids:
+                notifications_to_create.append(Notification(
+                    recipient_id=uid,
+                    title=title,
+                    message=message,
+                    related_location=device.location
+                ))
+            
+            Notification.objects.bulk_create(notifications_to_create)
+
+            # Badge logic
+            if created_count > 0:
+                badge_html = f'<span class="badge bg-success">Data: {created_count}</span> <span class="badge bg-light text-dark border">Cek: {current_time}</span>'
+                msg_text = f"Berhasil menarik {created_count} data baru (Total Mesin: {total_records})"
+            else:
+                badge_html = f'<span class="badge bg-secondary">Data: 0</span> <span class="badge bg-light text-dark border">Cek: {current_time}</span>'
+                msg_text = f"Tidak ada data baru. (Total di Mesin: {total_records})"
+
+           # Build HTML for new logs (Script Injection Method)
+            extra_rows = ""
+            if detailed_logs:
+                for log_detail in detailed_logs:
+                    extra_rows += f'''
+                    <tr>
+                        <td>{current_time}</td>
+                        <td>{device.name}</td>
+                        <td><span class="badge bg-info">Detail</span></td>
+                        <td class="text-info">{log_detail}</td>
+                    </tr>
+                    '''
+            
             log_row = f'''
-                <tr hx-swap-oob="afterbegin:#sync-log-body">
-                    <td>{timezone.now().strftime("%H:%M:%S")}</td>
+                <tr>
+                    <td>{current_time}</td>
                     <td>{device.name}</td>
                     <td><span class="badge bg-success">Sukses</span></td>
-                    <td>Berhasil menarik has {created_count} data baru</td>
+                    <td>Berhasil menarik {created_count} data baru (Total Mesin: {total_records})</td>
                 </tr>
             '''
-            return HttpResponse(status_badge + log_row)
+            
+            # Escape strings for JS
+            rows_js = (extra_rows + log_row).replace('"', '\\"').replace('\n', '')
+            
+            status_html = f'<span id="status-device-{device.id}" class="badge bg-success">OK ({total_records})</span>'
+            
+            return HttpResponse(f'''
+                {status_html}
+                <script>
+                    var newRows = "{rows_js}";
+                    if (typeof SyncLogManager !== 'undefined') {{
+                         SyncLogManager.addRows(newRows);
+                    }} else {{
+                         document.querySelector('#sync-log-body').insertAdjacentHTML('afterbegin', newRows);
+                    }}
+                </script>
+            ''')
+            
+        except Exception as e:
+            print(f"DEBUG: Error during sync: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            error_msg = str(e)
+            error_row_js = f'''
+                <tr>
+                    <td>{timezone.now().strftime("%H:%M:%S")}</td>
+                    <td>{device.name}</td>
+                    <td><span class="badge bg-danger">Error</span></td>
+                    <td class="text-danger">{error_msg}</td>
+                </tr>
+            '''.replace('"', '\\"').replace('\n', '')
+
+            return HttpResponse(f'''
+                <span class="badge bg-danger">Error</span>
+                 <script>
+                    var errorRows = "{error_row_js}";
+                    if (typeof SyncLogManager !== 'undefined') {{
+                         SyncLogManager.addRows(errorRows);
+                    }} else {{
+                         document.querySelector('#sync-log-body').insertAdjacentHTML('afterbegin', errorRows);
+                    }}
+                </script>
+            ''')
             
         finally:
             conn.disconnect()
 
     except Exception as e:
-        return HttpResponse(f'''
-            <span class="badge bg-danger">Error</span>
-            <tr hx-swap-oob="afterbegin:#sync-log-body">
-                <td>{timezone.now().strftime("%H:%M:%S")}</td>
-                <td>{device.name}</td>
-                <td><span class="badge bg-danger">Exception</span></td>
-                <td class="text-danger">{str(e)[:50]}</td>
-            </tr>
-        ''')
+        print(f"DEBUG: Top level error: {e}")
+        return HttpResponse(f'<span class="badge bg-danger">Error Connect</span>')
+
+
+@login_required
+def ping_machine_htmx(request, device_id):
+    device = get_object_or_404(FingerprintDevice, id=device_id)
+    
+    try:
+        from zk import ZK
+        zk = ZK(device.ip_address, port=device.port, timeout=3)
+        conn = zk.connect()
+        if conn:
+            conn.disconnect()
+            device.last_activity = timezone.now()
+            device.save(update_fields=['last_activity'])
+            return HttpResponse('<span class="badge bg-success">Online</span>')
+        else:
+            return HttpResponse('<span class="badge bg-danger">Offline</span>')
+    except Exception:
+        return HttpResponse('<span class="badge bg-danger">Offline</span>')
 
 @login_required
 @require_POST
@@ -251,7 +523,10 @@ def sync_wa_source_htmx(request, source_id):
         df = pd.read_csv(csv_url)
         df.columns = [c.strip().upper() for c in df.columns]
         
+        # Track detailed logs for UI
+        detailed_logs = []
         created_count = 0
+        
         with transaction.atomic():
             for _, row in df.iterrows():
                 tgl_str = str(row.get('TANGGAL', '')).strip()
@@ -276,18 +551,76 @@ def sync_wa_source_htmx(request, source_id):
                     _, created = AttendanceLog.objects.get_or_create(
                          employee=employee, timestamp=timestamp,
                          defaults={
-                            'status': 'HADIR', 'source_type': 'SPREADSHEET',
+                            'status': 'HADIR', 'source_type': 'TELEGRAM',
                             'verification_method': 'WA', 'captured_at': source.location,
                             'log_category': category
                         }
                     )
-                    if created: created_count += 1
+                    if created: 
+                        created_count += 1
+                        if len(detailed_logs) < 5:
+                           time_str = timestamp.strftime("%H:%M")
+                           detailed_logs.append(f"{employee.full_name} ({time_str})")
                 except: continue
+        
+        # --- Update Last Activity ---
+        source.last_activity = timezone.now()
+        source.save(update_fields=['last_activity'])
+        
+        # --- Create Notification (ALWAYS) ---
+        from portal.models import Notification
+        from attendance.models import EmployeeProfile
+        from django.contrib.auth.models import User
+        
+        actor_name = request.user.first_name or request.user.username
+        time_str = timezone.localtime(timezone.now()).strftime("%d/%m %H:%M")
+        
+        title = f"Sync WA: {source.name} ({source.location.code})"
+        if created_count > 0:
+            message = f"Ditarik oleh {actor_name} pada {time_str}. Total {created_count} data baru dari {source.location.name}."
+        else:
+            message = f"Dicek oleh {actor_name} pada {time_str}. Tidak ada data baru dari {source.location.name}."
+        
+        # Logic: Send to Admin/HRD (Global) + Manager/Kerani (Location Specific)
+        global_recipients = set(EmployeeProfile.objects.filter(role__in=['ADMIN', 'HRD']).values_list('user', flat=True))
+        superusers = set(User.objects.filter(is_superuser=True).values_list('id', flat=True))
+
+        local_recipients = set(EmployeeProfile.objects.filter(
+            role__in=['HRD', 'KERANI'],
+            assigned_location=source.location
+        ).values_list('user', flat=True))
+        
+        recipient_ids = global_recipients.union(superusers).union(local_recipients)
+        
+        notifications_to_create = []
+        for uid in recipient_ids:
+            notifications_to_create.append(Notification(
+                recipient_id=uid,
+                title=title,
+                message=message,
+                related_location=source.location
+            ))
+        
+        Notification.objects.bulk_create(notifications_to_create)
 
         status_badge = f'<span class="badge bg-success">OK ({created_count})</span>'
+        
+        # Build Detail Rows
+        extra_rows = ""
+        current_time = timezone.now().strftime("%H:%M:%S")
+        for detail in detailed_logs:
+            extra_rows += f'''
+            <tr hx-swap-oob="afterbegin:#sync-log-body">
+                <td>{current_time}</td>
+                <td>{source.name}</td>
+                <td><span class="badge bg-info">Detail</span></td>
+                <td class="text-info">{detail}</td>
+            </tr>
+            '''
+        
         log_row = f'''
             <tr hx-swap-oob="afterbegin:#sync-log-body">
-                <td>{timezone.now().strftime("%H:%M:%S")}</td>
+                <td>{current_time}</td>
                 <td>{source.name}</td>
                 <td><span class="badge bg-success">Sukses</span></td>
                 <td>Berhasil menarik {created_count} data baru</td>
@@ -369,6 +702,7 @@ def global_search(request):
         </li>
         '''
         
+    
     # Add "View All" link if needed, or just return list
     html += '<li><hr class="dropdown-divider"></li>'
     # Link to Admin list filtered by query is a nice touch
@@ -376,3 +710,55 @@ def global_search(request):
     html += f'<li><a class="dropdown-item text-center small text-primary fw-bold" href="{admin_search_url}">Lihat Semua Hasil</a></li>'
     
     return HttpResponse(html)
+
+@login_required
+@require_POST
+def mark_notification_read_htmx(request, notification_id):
+    """
+    Mark notification as read and return updated UI
+    """
+    from .models import Notification
+    
+    notif = get_object_or_404(Notification, id=notification_id, recipient=request.user)
+    if not notif.is_read:
+        notif.is_read = True
+        notif.save()
+        
+    unread_count = Notification.objects.filter(recipient=request.user, is_read=False).count()
+    
+    # Badge OOB Update
+    badge_html = ""
+    if unread_count > 0:
+         badge_html = f'''
+         <span id="notif-badge-count" class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle" hx-swap-oob="true">
+            <span class="visually-hidden">New alerts</span>
+         </span>
+         <span id="notif-header-count" class="badge bg-danger rounded-pill" hx-swap-oob="true">{unread_count} Baru</span>
+         '''
+    else:
+        # Remove badge if 0
+         badge_html = f'''
+         <span id="notif-badge-count" class="d-none" hx-swap-oob="true"></span>
+         <span id="notif-header-count" class="d-none" hx-swap-oob="true"></span>
+         '''
+
+    # Return the updated item (without bg-light and check button changed)
+    # We reconstruct the LI here
+    item_html = f'''
+    <li id="notif-item-{notif.id}">
+        <div class="dropdown-item small py-2 d-flex justify-content-between align-items-start">
+            <a href="#" class="text-decoration-none text-dark flex-grow-1">
+                <div class="d-flex align-items-start">
+                    <i class="fas fa-info-circle text-secondary mt-1 me-2"></i>
+                    <div>
+                        <div class="fw-medium">{notif.title}</div>
+                        <div class="text-muted text-truncate" style="max-width: 250px;">{notif.message}</div>
+                        <div class="text-muted" style="font-size: 0.7rem;">{notif.created_at.strftime("%H:%M")} (Dibaca)</div>
+                    </div>
+                </div>
+            </a>
+        </div>
+    </li>
+    '''
+    
+    return HttpResponse(item_html + badge_html)

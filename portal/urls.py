@@ -6,6 +6,8 @@ app_name = 'portal'
 urlpatterns = [
     path('dashboard/', views.dashboard, name='dashboard'),
     path('tree-explorer/', views.tree_explorer, name='tree_explorer'),
+    path('location-detail/<uuid:location_id>/', views.location_detail_view, name='location_detail'),
+    
     
     # Sync Log Absensi
     path('sync-logs/', views.sync_logs_view, name='sync_logs'),
@@ -17,11 +19,15 @@ urlpatterns = [
     path('sync-employees/machine/<uuid:device_id>/', views.sync_employee_machine_htmx, name='sync_employee_machine_htmx'),
     path('sync-employees/wa/<uuid:source_id>/', views.sync_employee_wa_htmx, name='sync_employee_wa_htmx'),
 
-    path('sync-employees/wa/<uuid:source_id>/', views.sync_employee_wa_htmx, name='sync_employee_wa_htmx'),
+    # Ping Machine
+    path('ping-machine/<uuid:device_id>/', views.ping_machine_htmx, name='ping_machine_htmx'),
 
     path('reports/', views.reports, name='reports'),
     path('settings/', views.settings, name='settings'),
     
     # Global Search
     path('search/', views.global_search, name='global_search'),
+    
+    # Notification Action
+    path('notification/<uuid:notification_id>/read/', views.mark_notification_read_htmx, name='mark_notification_read_htmx'),
 ]

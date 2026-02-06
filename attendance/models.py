@@ -1,18 +1,25 @@
 import uuid
 from django.db import models
+from mptt.models import MPTTModel, TreeForeignKey
 
 
-class WorkLocation(models.Model):
+class WorkLocation(MPTTModel):
     """
     Master lokasi kerja dengan koordinat GPS untuk validasi radius.
+    Supports Hierarchy (MPTT).
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=150, help_text="Contoh: Kebun Alpha, Pabrik Kelapa Sawit")
     code = models.CharField(max_length=20, unique=True, help_text="Contoh: KBN-A, PKS, HO")
     
+    parent = TreeForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='children')
+    
     # GPS Coordinates for radius validation
     latitude = models.FloatField(null=True, blank=True, help_text="Latitude koordinat lokasi")
     longitude = models.FloatField(null=True, blank=True, help_text="Longitude koordinat lokasi")
+
+    class MPTTMeta:
+        order_insertion_by = ['name']
 
     class Meta:
         ordering = ['code']
@@ -49,6 +56,7 @@ class FingerprintDevice(models.Model):
     port = models.IntegerField(default=4370)
     location = models.ForeignKey(WorkLocation, on_delete=models.CASCADE, related_name="devices")
     is_active = models.BooleanField(default=True)
+    last_activity = models.DateTimeField(null=True, blank=True, help_text="Waktu terakhir aktif/ping/sync")
 
     class Meta:
         ordering = ['name']
@@ -63,8 +71,10 @@ class SpreadsheetSource(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=150, help_text="Contoh: Rekap Absensi Kebun A")
     spreadsheet_id = models.CharField(max_length=150, help_text="ID unik Google Sheet")
-    sheet_name = models.CharField(max_length=100, default="Sheet1")
+    sheet_name = models.CharField(max_length=100, default="Sheet1", help_text="Nama Sheet untuk Log Absensi")
+    employee_sheet_name = models.CharField(max_length=100, default="Data-Pegawai", help_text="Nama Sheet untuk Data Pegawai")
     location = models.ForeignKey(WorkLocation, on_delete=models.CASCADE, related_name="spreadsheets")
+    last_activity = models.DateTimeField(null=True, blank=True, help_text="Waktu terakhir aktif/pull")
 
     class Meta:
         ordering = ['name']
@@ -289,6 +299,7 @@ class AttendanceLog(models.Model):
         ('FACE', 'Face ID'),
         ('GPS', 'GPS Location'),
         ('MANUAL', 'Manual Input'),
+        ('WA', 'WhatsApp / Telegram'),
     ]
 
     CATEGORY_CHOICES = [

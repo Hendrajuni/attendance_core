@@ -189,16 +189,55 @@
                 <div class="dropdown">
                     <button class="btn btn-link text-body p-0 position-relative" data-bs-toggle="dropdown">
                         <i class="fas fa-bell fs-5"></i>
-                        <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle">
+                        <span id="notif-badge-count" class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle {% if unread_notifications_count == 0 %}d-none{% endif %}">
                             <span class="visually-hidden">New alerts</span>
                         </span>
                     </button>
-                    <ul class="dropdown-menu dropdown-menu-end shadow border-0" style="min-width: 280px;">
-                        <li><h6 class="dropdown-header">Notifikasi</h6></li>
-                        <li><a class="dropdown-item small" href="#"><i class="fas fa-check-circle text-success me-2"></i>System Ready</a></li>
-                        <li><a class="dropdown-item small" href="#"><i class="fas fa-sync text-primary me-2"></i>Sync Log berhasil (09:00)</a></li>
+                    <ul class="dropdown-menu dropdown-menu-end shadow border-0" style="min-width: 320px;">
+                        <li>
+                            <div class="dropdown-header d-flex justify-content-between align-items-center">
+                                <span>Notifikasi</span>
+                                <span id="notif-header-count" class="badge bg-danger rounded-pill {% if unread_notifications_count == 0 %}d-none{% endif %}">
+                                    {% if unread_notifications_count > 0 %}{{ unread_notifications_count }} Baru{% endif %}
+                                </span>
+                            </div>
+                        </li>
+                        {% if latest_notifications %}
+                            {% for notif in latest_notifications %}
+                            <li id="notif-item-{{ notif.id }}">
+                                <div class="dropdown-item small py-2 d-flex justify-content-between align-items-start {% if not notif.is_read %}bg-light{% endif %}">
+                                    <a href="#" class="text-decoration-none text-dark flex-grow-1"
+                                       {% if not notif.is_read %}
+                                       hx-post="{% url 'portal:mark_notification_read_htmx' notif.id %}"
+                                       hx-target="#notif-item-{{ notif.id }}"
+                                       hx-swap="outerHTML"
+                                       {% endif %}>
+                                        <div class="d-flex align-items-start">
+                                            <i class="fas fa-info-circle text-primary mt-1 me-2"></i>
+                                            <div>
+                                                <div class="fw-medium">{{ notif.title }}</div>
+                                                <div class="text-muted text-truncate" style="max-width: 250px;">{{ notif.message }}</div>
+                                                <div class="text-muted" style="font-size: 0.7rem;">{{ notif.created_at|timesince }} yang lalu</div>
+                                            </div>
+                                        </div>
+                                    </a>
+                                    {% if not notif.is_read %}
+                                    <button class="btn btn-link btn-sm p-0 ms-2 text-muted" 
+                                            title="Tandai sudah dibaca"
+                                            hx-post="{% url 'portal:mark_notification_read_htmx' notif.id %}"
+                                            hx-target="#notif-item-{{ notif.id }}"
+                                            hx-swap="outerHTML">
+                                        <i class="fas fa-check"></i>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </li>
+                            {% endfor %}
+                        {% else %}
+                            <li><div class="dropdown-item small text-muted text-center py-3">Tidak ada notifikasi baru</div></li>
+                        {% endif %}
                         <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-center small text-primary" href="#">Lihat Semua</a></li>
+                        <li><a class="dropdown-item text-center small text-primary fw-bold" href="#">Lihat Semua</a></li>
                     </ul>
                 </div>
 

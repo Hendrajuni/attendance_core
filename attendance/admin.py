@@ -5,6 +5,7 @@ from django.shortcuts import render, redirect
 from django.http import HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.utils import timezone
+from mptt.admin import DraggableMPTTAdmin
 from .models import (
     Department, Employee, AttendanceLog, WorkLocation, 
     FingerprintDevice, SpreadsheetSource,
@@ -43,12 +44,13 @@ class BulkShiftAssignmentForm(forms.Form):
 # =============================================================================
 
 @admin.register(WorkLocation)
-class WorkLocationAdmin(admin.ModelAdmin):
-    list_display = ('name', 'code', 'latitude', 'longitude')
+class WorkLocationAdmin(DraggableMPTTAdmin):
+    list_display = ('tree_actions', 'indented_title', 'code', 'latitude', 'longitude')
+    list_display_links = ('indented_title',)
     search_fields = ('name', 'code')
     fieldsets = (
         (None, {
-            'fields': ('name', 'code')
+            'fields': ('parent', 'name', 'code')
         }),
         ('GPS Coordinates', {
             'fields': ('latitude', 'longitude'),

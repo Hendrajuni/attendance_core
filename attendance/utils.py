@@ -265,10 +265,11 @@ def fetch_users_from_machine(device):
         zk = ZK(device.ip_address, port=device.port, timeout=10)
         conn = zk.connect()
         if not conn:
-            return 0, "Gagal terhubung ke mesin"
+            return 0, [], "Gagal terhubung ke mesin"
             
         users = conn.get_users()
         created_count = 0
+        samples = []
         
         for user in users:
             uid = user.uid
@@ -290,11 +291,13 @@ def fetch_users_from_machine(device):
                     home_base=device.location  # Assume home base is where they are found
                 )
                 created_count += 1
+                if len(samples) < 5:
+                    samples.append(name if name else f"User {user_id}")
                 
-        return created_count, None
+        return created_count, samples, None
         
     except Exception as e:
-        return 0, str(e)
+        return 0, [], str(e)
     finally:
         if conn:
             conn.disconnect()
@@ -309,23 +312,23 @@ def fetch_users_from_wa_source(source):
     from attendance.models import Employee
     
     try:
-        # Construct URL for specific sheet 'Data-Pegawai'
-        # NOTE: User specified sheet name 'Data-Pegawai', replacing source.sheet_name logic for this specific sync
-        sheet_name = "Data-Pegawai" 
+        # Construct URL for specific sheet (Configurable)
+        sheet_name = source.employee_sheet_name if hasattr(source, 'employee_sheet_name') else "Data-Pegawai"
         csv_url = f"https://docs.google.com/spreadsheets/d/{source.spreadsheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
         
         try:
             df = pd.read_csv(csv_url)
         except Exception:
-             return 0, "Gagal membaca sheet 'Data-Pegawai'. Pastikan sheet ada."
+             return 0, [], "Gagal membaca sheet 'Data-Pegawai'. Pastikan sheet ada."
 
         df.columns = [c.strip().upper() for c in df.columns]
         
         # Check columns
         if 'NAMA PEGAWAI' not in df.columns or 'NOMOR WA' not in df.columns:
-             return 0, "Kolom 'NAMA PEGAWAI' atau 'NOMOR WA' tidak ditemukan."
+             return 0, [], "Kolom 'NAMA PEGAWAI' atau 'NOMOR WA' tidak ditemukan."
              
         created_count = 0
+        samples = []
         
         for _, row in df.iterrows():
             nama = str(row.get('NAMA PEGAWAI', '')).strip()
@@ -347,8 +350,10 @@ def fetch_users_from_wa_source(source):
                     home_base=source.location
                 )
                  created_count += 1
+                 if len(samples) < 5:
+                    samples.append(nama if nama else f"WA User {clean_wa}")
                  
-        return created_count, None
+        return created_count, samples, None
 
     except Exception as e:
-        return 0, str(e)
+        return 0, [], str(e)
