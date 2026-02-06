@@ -245,4 +245,110 @@ def determine_category_simple(dt, schedule=None):
     return _determine_category_fallback(current_time)
 
 
+    return _determine_category_fallback(current_time)
 
+
+# =============================================================================
+# USER SYNC UTILITIES
+# =============================================================================
+
+def fetch_users_from_machine(device):
+    """
+    Fetch users from ZK Device and create unverified Employee entries if new.
+    Returns: (created_count, error_msg)
+    """
+    from zk import ZK
+    from attendance.models import Employee
+    
+    conn = None
+    try:
+        zk = ZK(device.ip_address, port=device.port, timeout=10)
+        conn = zk.connect()
+        if not conn:
+            return 0, "Gagal terhubung ke mesin"
+            
+        users = conn.get_users()
+        created_count = 0
+        
+        for user in users:
+            uid = user.uid
+            name = user.name
+            user_id = user.user_id # This is the numeric ID usually used
+            
+            # Check if exists by device_user_id
+            if not Employee.objects.filter(device_user_id=user_id).exists():
+                # Create draft employee
+                Employee.objects.create(
+                    full_name=name if name else f"User {user_id}",
+                    # nik fallback or skip unique check if allows null. 
+                    # Assuming nik is unique, we might need a dummy NIK or check model constraint.
+                    # Best practice: leave NIK empty if nullable, or generate temp NIK.
+                    # For now, let's assume we create without NIK if model allows, or generate unique temp.
+                    nik=f"TEMP.{device.id}.{user_id}", 
+                    device_user_id=user_id,
+                    is_verified=False,
+                    home_base=device.location  # Assume home base is where they are found
+                )
+                created_count += 1
+                
+        return created_count, None
+        
+    except Exception as e:
+        return 0, str(e)
+    finally:
+        if conn:
+            conn.disconnect()
+
+
+def fetch_users_from_wa_source(source):
+    """
+    Fetch users from Spreadsheet (Sheet 'Data-Pegawai') and create unverified entries.
+    Returns: (created_count, error_msg)
+    """
+    import pandas as pd
+    from attendance.models import Employee
+    
+    try:
+        # Construct URL for specific sheet 'Data-Pegawai'
+        # NOTE: User specified sheet name 'Data-Pegawai', replacing source.sheet_name logic for this specific sync
+        sheet_name = "Data-Pegawai" 
+        csv_url = f"https://docs.google.com/spreadsheets/d/{source.spreadsheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+        
+        try:
+            df = pd.read_csv(csv_url)
+        except Exception:
+             return 0, "Gagal membaca sheet 'Data-Pegawai'. Pastikan sheet ada."
+
+        df.columns = [c.strip().upper() for c in df.columns]
+        
+        # Check columns
+        if 'NAMA PEGAWAI' not in df.columns or 'NOMOR WA' not in df.columns:
+             return 0, "Kolom 'NAMA PEGAWAI' atau 'NOMOR WA' tidak ditemukan."
+             
+        created_count = 0
+        
+        for _, row in df.iterrows():
+            nama = str(row.get('NAMA PEGAWAI', '')).strip()
+            no_wa = str(row.get('NOMOR WA', '')).strip()
+            
+            if not no_wa:
+                continue
+                
+            # Clean Phone Number (simple)
+            clean_wa = no_wa.replace('-', '').replace(' ', '')
+            
+            # Check if exists
+            if not Employee.objects.filter(phone_number=clean_wa).exists():
+                 Employee.objects.create(
+                    full_name=nama if nama else f"WA User {clean_wa}",
+                    nik=f"WA.{clean_wa[-6:]}", # Temp NIK
+                    phone_number=clean_wa,
+                    is_verified=False,
+                    home_base=source.location
+                )
+                 created_count += 1
+                 
+        return created_count, None
+
+    except Exception as e:
+        return 0, str(e)

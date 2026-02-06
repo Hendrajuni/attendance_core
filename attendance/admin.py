@@ -427,6 +427,43 @@ class NewRegistrationAdmin(admin.ModelAdmin):
 
 
 # =============================================================================
+# USER ADMIN CUSTOMIZATION (RBAC)
+# =============================================================================
+
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.models import User
+from .models import EmployeeProfile
+
+class EmployeeProfileInline(admin.StackedInline):
+    model = EmployeeProfile
+    can_delete = False
+    verbose_name_plural = 'Employee Profile (RBAC & Location)'
+    fk_name = 'user'
+
+# Unregister default User admin
+admin.site.unregister(User)
+
+@admin.register(User)
+class UserAdmin(BaseUserAdmin):
+    inlines = (EmployeeProfileInline,)
+    list_display = ('username', 'email', 'first_name', 'last_name', 'get_role', 'get_location', 'is_staff')
+    
+    def get_role(self, obj):
+        try:
+            return obj.employee_profile.get_role_display()
+        except EmployeeProfile.DoesNotExist:
+            return "-"
+    get_role.short_description = 'Role'
+    
+    def get_location(self, obj):
+        try:
+            return obj.employee_profile.assigned_location.code
+        except (EmployeeProfile.DoesNotExist, AttributeError):
+            return "-"
+    get_location.short_description = 'Assigned Location'
+
+
+# =============================================================================
 # ATTENDANCE LOG ADMIN
 # =============================================================================
 

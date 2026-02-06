@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block page_title %}{{ page_title }}{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12 mb-4">
+        <div class="alert alert-info d-flex align-items-center">
+            <i class="fas fa-info-circle fa-lg me-3"></i>
+            <div>
+                Data karyawan yang ditarik akan masuk ke menu <strong>Registrasi Baru</strong>. 
+                Anda perlu memverifikasi data tersebut agar bisa digunakan untuk absensi.
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Fingerprint Devices Section -->
+    <div class="col-12 col-lg-6 mb-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white py-3 border-bottom d-flex align-items-center justify-content-between">
+                <h6 class="m-0 fw-bold text-primary"><i class="fas fa-fingerprint me-2"></i>Mesin Fingerprint</h6>
+                <span class="badge bg-light text-dark border">{{ devices.count }} Mesin</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover table-striped align-middle mb-0">
+                        <thead class="bg-light">
+                            <tr>
+                                <th class="border-0 ps-3">Nama Mesin</th>
+                                <th class="border-0">Lokasi</th>
+                                <th class="border-0">Status</th>
+                                <th class="border-0 pe-3 text-end">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for device in devices %}
+                            <tr>
+                                <td class="ps-3 fw-medium">{{ device.name }}</td>
+                                <td><span class="badge bg-info bg-opacity-10 text-info">{{ device.location.code }}</span></td>
+                                <td id="status-device-{{ device.id }}">
+                                    {% if device.is_active %}
+                                        <span class="badge bg-secondary">Ready</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">Non-Aktif</span>
+                                    {% endif %}
+                                </td>
+                                <td class="pe-3 text-end">
+                                    <button class="btn btn-outline-primary btn-sm" 
+                                            hx-post="{% url 'portal:sync_employee_machine_htmx' device.id %}"
+                                            hx-target="#status-device-{{ device.id }}"
+                                            hx-swap="innerHTML"
+                                            hx-indicator="#spinner-device-{{ device.id }}"
+                                            {% if not device.is_active %}disabled{% endif %}>
+                                        <i class="fas fa-user-plus" id="icon-device-{{ device.id }}"></i>
+                                        <span class="spinner-border spinner-border-sm d-none" id="spinner-device-{{ device.id }}" role="status"></span>
+                                        Tarik User
+                                    </button>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center py-4 text-muted">Tidak ada mesin fingerprint tersedia.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- WA/Telegram Sources Section -->
+    <div class="col-12 col-lg-6 mb-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white py-3 border-bottom d-flex align-items-center justify-content-between">
+                <h6 class="m-0 fw-bold text-success"><i class="fab fa-whatsapp me-2"></i>Sumber WA / Telegram</h6>
+                <span class="badge bg-light text-dark border">{{ sources.count }} Sumber</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover table-striped align-middle mb-0">
+                        <thead class="bg-light">
+                            <tr>
+                                <th class="border-0 ps-3">Nama Group</th>
+                                <th class="border-0">Lokasi</th>
+                                <th class="border-0">Status</th>
+                                <th class="border-0 pe-3 text-end">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for source in sources %}
+                            <tr>
+                                <td class="ps-3 fw-medium">{{ source.name|truncatechars:20 }}</td>
+                                <td><span class="badge bg-info bg-opacity-10 text-info">{{ source.location.code }}</span></td>
+                                <td id="status-source-{{ source.id }}">
+                                    <span class="badge bg-secondary">Ready</span>
+                                </td>
+                                <td class="pe-3 text-end">
+                                    <button class="btn btn-outline-success btn-sm" 
+                                            hx-post="{% url 'portal:sync_employee_wa_htmx' source.id %}"
+                                            hx-target="#status-source-{{ source.id }}"
+                                            hx-swap="innerHTML"
+                                            hx-indicator="#spinner-source-{{ source.id }}">
+                                        <i class="fas fa-user-plus" id="icon-source-{{ source.id }}"></i>
+                                        <span class="spinner-border spinner-border-sm d-none" id="spinner-source-{{ source.id }}" role="status"></span>
+                                        Tarik User
+                                    </button>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center py-4 text-muted">Tidak ada sumber data WA.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Live Activity Log Section -->
+<div class="row">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-dark text-white py-2 d-flex align-items-center">
+                <i class="fas fa-terminal me-2"></i>
+                <small class="fw-bold text-uppercase">Log Proses Penarikan Data (Live)</small>
+            </div>
+            <div class="card-body p-0" style="max-height: 300px; overflow-y: auto;">
+                <div class="table-responsive">
+                    <table class="table table-sm table-dark table-striped mb-0 font-monospace small">
+                        <thead>
+                            <tr>
+                                <th style="width: 100px;">Jam</th>
+                                <th style="width: 200px;">Sumber</th>
+                                <th style="width: 100px;">Status</th>
+                                <th>Detail</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sync-log-body">
+                            <!-- HTMX OOB updates will appear here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* Add blinking effect for HTMX indicator */
+    .htmx-request .btn {
+        opacity: 0.8;
+        pointer-events: none;
+    }
+    .htmx-request .fa-user-plus {
+         display: none;
+    }
+    .htmx-request .spinner-border {
+        display: inline-block !important;
+    }
+</style>
+{% endblock %}

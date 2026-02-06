@@ -249,6 +249,27 @@ class EmployeeShiftAssignment(models.Model):
         return f"{self.employee.full_name} - {self.shift_pattern.name}"
 
 
+from django.contrib.auth.models import User
+
+class EmployeeProfile(models.Model):
+    """
+    Profil tambahan untuk User (RBAC & Lokasi).
+    """
+    ROLE_CHOICES = [
+        ('ADMIN', 'Administrator'),
+        ('HRD', 'HRD / Manager'),
+        ('ACCOUNTING', 'Accounting'),
+        ('KERANI', 'Kerani (Admin Lapangan)'),
+    ]
+    
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='employee_profile')
+    assigned_location = models.ForeignKey(WorkLocation, on_delete=models.SET_NULL, null=True, blank=True, help_text="Lokasi kerja utama (untuk filtering data)")
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='KERANI')
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.get_role_display()}"
+
+
 class AttendanceLog(models.Model):
     STATUS_CHOICES = [
         ('HADIR', 'Hadir'),

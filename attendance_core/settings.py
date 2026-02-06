@@ -29,7 +29,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'attendance',  # Renamed from attendance_core
+    'attendance',
+    'portal',  # New frontend app
 ]
 
 MIDDLEWARE = [
@@ -48,7 +49,7 @@ ROOT_URLCONF = 'attendance_core.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],  # Global templates directory
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -100,5 +101,13 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = 'static/'
+STATICFILES_DIRS = [
+    BASE_DIR / 'static',  # Global static directory
+]
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Login Settings
+LOGIN_REDIRECT_URL = 'portal:dashboard'
+LOGOUT_REDIRECT_URL = 'login'
+LOGIN_URL = 'login'
