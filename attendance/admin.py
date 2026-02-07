@@ -39,6 +39,16 @@ class BulkShiftAssignmentForm(forms.Form):
     )
 
 
+class BulkLocationAssignmentForm(forms.Form):
+    """Form for bulk location assignment action."""
+    location = forms.ModelChoiceField(
+        queryset=WorkLocation.objects.all(),
+        label="Pilih Lokasi",
+        empty_label="-- Pilih Lokasi --",
+        help_text="Pilih lokasi kerja (Home Base) untuk karyawan terpilih"
+    )
+
+
 # =============================================================================
 # LOCATION & DEVICE ADMINS
 # =============================================================================
@@ -331,7 +341,7 @@ class NewRegistrationAdmin(admin.ModelAdmin):
     list_filter = ('home_base', 'imported_at', 'is_active')
     search_fields = ('nik', 'full_name', 'phone_number', 'device_user_id', 'telegram_user_id')
     ordering = ['-imported_at', '-created_at']
-    actions = ['verify_employees', 'reject_employees']
+    actions = ['verify_employees', 'reject_employees', 'assign_location']
     
     fieldsets = (
         ('Identitas (Edit sebelum Approval)', {
@@ -426,6 +436,101 @@ class NewRegistrationAdmin(admin.ModelAdmin):
             f"❌ {count} pendaftaran dihapus.",
             messages.WARNING
         )
+
+    @admin.action(description="📍 Generate ke Lokasi (Set Location & Verify)")
+    def assign_location(self, request, queryset):
+        """
+        Bulk action to assign location AND verify employees (move to Master).
+        This combines setting home_base and running the verification logic.
+        """
+        if 'apply' in request.POST:
+            form = BulkLocationAssignmentForm(request.POST)
+            if form.is_valid():
+                location = form.cleaned_data['location']
+                now = timezone.now()
+                count = 0
+                nik_generated = 0
+
+                for emp in queryset:
+                    # 1. Set Location
+                    emp.home_base = location
+                    
+                    # 2. Set Verified & Active
+                    emp.is_verified = True
+                    # Ensure is_active is True if it was False (e.g. from soft delete)
+                    emp.is_active = True 
+                    
+                    # 3. Set Joined Date if empty
+                    if not emp.joined_date:
+                        emp.joined_date = now.date()
+                    
+                    # 4. Generate NIK if temporary
+                    if emp.nik.startswith('TEMP-') or emp.nik.startswith('TELE-'):
+                        emp.nik = self._generate_unique_nik(now)
+                        nik_generated += 1
+                    
+                    emp.save()
+                    count += 1
+                
+                msg = f"✅ Berhasil set lokasi '{location.name}' dan memindahkan {count} karyawan ke Master."
+                if nik_generated > 0:
+                    msg += f" ({nik_generated} NIK baru di-generate)"
+
+                self.message_user(request, msg, messages.SUCCESS)
+                return HttpResponseRedirect(request.get_full_path())
+        else:
+            form = BulkLocationAssignmentForm()
+            
+        context = {
+            'title': 'Generate ke Lokasi (Bulk Assign)',
+            'queryset': queryset,
+            'form': form,
+            'action_checkbox_name': admin.helpers.ACTION_CHECKBOX_NAME,
+            'opts': self.model._meta,
+            'media': self.media,
+        }
+        
+        from django.template import Template, RequestContext
+        from django.http import HttpResponse
+        
+        html_template = """
+        {% extends "admin/base_site.html" %}
+        {% load i18n admin_urls %}
+        {% block content %}
+        <h1>📍 Generate ke Lokasi (Bulk Assign)</h1>
+        <p>Anda akan mengubah lokasi (Home Base) untuk <strong>{{ queryset.count }}</strong> karyawan berikut:</p>
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0; max-height: 200px; overflow-y: auto;">
+            <ol>
+            {% for employee in queryset %}
+                <li><strong>{{ employee.nik }}</strong> - {{ employee.full_name }}</li>
+            {% endfor %}
+            </ol>
+        </div>
+        <form method="post">
+            {% csrf_token %}
+            <fieldset style="padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
+                <legend style="font-weight: bold;">Pilih Lokasi Baru</legend>
+                <table style="margin: 10px 0;">{{ form.as_table }}</table>
+            </fieldset>
+            {% for obj in queryset %}
+                <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk }}" />
+            {% endfor %}
+            <div style="margin-top: 20px;">
+                <input type="hidden" name="action" value="assign_location" />
+                <input type="submit" name="apply" value="✅ Simpan Lokasi" 
+                       style="background: #417690; color: white; padding: 10px 25px; border: none; border-radius: 5px; cursor: pointer;" />
+                <a href="#" onclick="window.history.back(); return false;" 
+                   style="background: #6c757d; color: white; padding: 11px 25px; border-radius: 5px; text-decoration: none; margin-left: 10px;">
+                    ❌ Batal
+                </a>
+            </div>
+        </form>
+        {% endblock %}
+        """
+        
+        template = Template(html_template)
+        rendered = template.render(RequestContext(request, context))
+        return HttpResponse(rendered)
 
 
 # =============================================================================

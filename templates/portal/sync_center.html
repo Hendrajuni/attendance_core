@@ -189,22 +189,22 @@
 </div>
 
 <script>
-    const SyncLogManager = {
-        rows: [], // Stores HTML strings of rows
+    // Ensure Global Scope
+    window.SyncLogManager = {
+        rows: [], 
         currentPage: 1,
         pageSize: 10,
 
-        // Add new rows (LIFO - Newest First)
         addRows: function(htmlString) {
-            // Create a temp container to parse the HTML string into nodes to split them
+            console.log("Adding rows...", htmlString.length);
             const tempDiv = document.createElement('tbody');
             tempDiv.innerHTML = htmlString;
             const newRows = Array.from(tempDiv.children).map(tr => tr.outerHTML);
             
-            // Add to beginning of array (Newest first)
+            // Add to beginning
             this.rows = [...newRows, ...this.rows];
             
-            // Reset to page 1 to see new data immediately
+            // Go to page 1 to see new data
             this.currentPage = 1;
             this.render();
         },
@@ -215,17 +215,26 @@
             const end = start + this.pageSize;
             const pageRows = this.rows.slice(start, end);
 
+            // Render Rows
             tbody.innerHTML = pageRows.join('');
 
-            // Update Info
+            // Pad with empty rows if less than pageSize (Optional, for "10 list" look)
+            // But usually simply displaying what we have is cleaner. 
+            // If user explicitly asked "tampilkan 10 list", maybe they want to see the capacity? 
+            // For now, let's stick to displaying data, but ensure buttons work.
+
             const total = this.rows.length;
             const displayEnd = Math.min(end, total);
             const displayStart = total === 0 ? 0 : start + 1;
-            document.getElementById('log-info').innerText = `Menampilkan ${displayStart}-${displayEnd} dari ${total} data`;
+            
+            const infoEl = document.getElementById('log-info');
+            if(infoEl) infoEl.innerText = `Menampilkan ${displayStart}-${displayEnd} dari ${total} data`;
 
-            // Update Buttons
-            document.getElementById('btn-prev').disabled = this.currentPage === 1;
-            document.getElementById('btn-next').disabled = end >= total;
+            const btnPrev = document.getElementById('btn-prev');
+            const btnNext = document.getElementById('btn-next');
+            
+            if(btnPrev) btnPrev.disabled = this.currentPage === 1;
+            if(btnNext) btnNext.disabled = end >= total;
         },
 
         nextPage: function() {

@@ -355,9 +355,9 @@ def sync_machine_htmx(request, device_id):
                     )
                     if created: 
                         created_count += 1
-                        if len(detailed_logs) < 5:
-                            time_str = timestamp.strftime("%H:%M")
-                            detailed_logs.append(f"{employee.full_name} ({time_str})")
+                        # Remove limit to allow client-side pagination to handle all logs
+                        time_str = timestamp.strftime("%H:%M")
+                        detailed_logs.append(f"{employee.full_name} ({time_str})")
             
             print(f"DEBUG: Created {created_count} new logs from {total_records} raw records.")
             current_time = timezone.now().strftime("%H:%M:%S")
@@ -434,18 +434,20 @@ def sync_machine_htmx(request, device_id):
                 </tr>
             '''
             
-            # Escape strings for JS
-            rows_js = (extra_rows + log_row).replace('"', '\\"').replace('\n', '')
+            # Escape strings for JS safely
+            import json
+            rows_js = json.dumps(extra_rows + log_row)
             
             status_html = f'<span id="status-device-{device.id}" class="badge bg-success">OK ({total_records})</span>'
             
             return HttpResponse(f'''
                 {status_html}
                 <script>
-                    var newRows = "{rows_js}";
-                    if (typeof SyncLogManager !== 'undefined') {{
-                         SyncLogManager.addRows(newRows);
+                    var newRows = {rows_js};
+                    if (window.SyncLogManager) {{
+                         window.SyncLogManager.addRows(newRows);
                     }} else {{
+                         // Fallback
                          document.querySelector('#sync-log-body').insertAdjacentHTML('afterbegin', newRows);
                     }}
                 </script>
@@ -456,22 +458,24 @@ def sync_machine_htmx(request, device_id):
             import traceback
             traceback.print_exc()
             
+            import json
             error_msg = str(e)
-            error_row_js = f'''
+            error_row_html = f'''
                 <tr>
                     <td>{timezone.now().strftime("%H:%M:%S")}</td>
                     <td>{device.name}</td>
                     <td><span class="badge bg-danger">Error</span></td>
                     <td class="text-danger">{error_msg}</td>
                 </tr>
-            '''.replace('"', '\\"').replace('\n', '')
+            '''
+            rows_js = json.dumps(error_row_html)
 
             return HttpResponse(f'''
                 <span class="badge bg-danger">Error</span>
                  <script>
-                    var errorRows = "{error_row_js}";
-                    if (typeof SyncLogManager !== 'undefined') {{
-                         SyncLogManager.addRows(errorRows);
+                    var errorRows = {rows_js};
+                    if (window.SyncLogManager) {{
+                         window.SyncLogManager.addRows(errorRows);
                     }} else {{
                          document.querySelector('#sync-log-body').insertAdjacentHTML('afterbegin', errorRows);
                     }}
@@ -558,9 +562,8 @@ def sync_wa_source_htmx(request, source_id):
                     )
                     if created: 
                         created_count += 1
-                        if len(detailed_logs) < 5:
-                           time_str = timestamp.strftime("%H:%M")
-                           detailed_logs.append(f"{employee.full_name} ({time_str})")
+                        time_str = timestamp.strftime("%H:%M")
+                        detailed_logs.append(f"{employee.full_name} ({time_str})")
                 except: continue
         
         # --- Update Last Activity ---
@@ -605,12 +608,14 @@ def sync_wa_source_htmx(request, source_id):
 
         status_badge = f'<span class="badge bg-success">OK ({created_count})</span>'
         
-        # Build Detail Rows
+        # Build HTML for new logs (Script Injection Method)
+        import json
         extra_rows = ""
         current_time = timezone.now().strftime("%H:%M:%S")
+        
         for detail in detailed_logs:
             extra_rows += f'''
-            <tr hx-swap-oob="afterbegin:#sync-log-body">
+            <tr>
                 <td>{current_time}</td>
                 <td>{source.name}</td>
                 <td><span class="badge bg-info">Detail</span></td>
@@ -619,24 +624,52 @@ def sync_wa_source_htmx(request, source_id):
             '''
         
         log_row = f'''
-            <tr hx-swap-oob="afterbegin:#sync-log-body">
+            <tr>
                 <td>{current_time}</td>
                 <td>{source.name}</td>
                 <td><span class="badge bg-success">Sukses</span></td>
                 <td>Berhasil menarik {created_count} data baru</td>
             </tr>
         '''
-        return HttpResponse(status_badge + log_row)
+        
+        rows_js = json.dumps(extra_rows + log_row)
+
+        return HttpResponse(f'''
+            {status_badge}
+            <script>
+                var newRows = {rows_js};
+                if (window.SyncLogManager) {{
+                     window.SyncLogManager.addRows(newRows);
+                }} else {{
+                     // Fallback
+                     document.querySelector('#sync-log-body').insertAdjacentHTML('afterbegin', newRows);
+                }}
+            </script>
+        ''')
 
     except Exception as e:
-         return HttpResponse(f'''
-            <span class="badge bg-danger">Error</span>
-             <tr hx-swap-oob="afterbegin:#sync-log-body">
+        import json
+        error_msg = str(e)[:100]
+        error_row_html = f'''
+            <tr>
                 <td>{timezone.now().strftime("%H:%M:%S")}</td>
                 <td>{source.name}</td>
                 <td><span class="badge bg-danger">Exception</span></td>
-                <td class="text-danger">{str(e)[:50]}</td>
+                <td class="text-danger">{error_msg}</td>
             </tr>
+        '''
+        rows_js = json.dumps(error_row_html)
+        
+        return HttpResponse(f'''
+            <span class="badge bg-danger">Error</span>
+             <script>
+                var errorRows = {rows_js};
+                if (window.SyncLogManager) {{
+                     window.SyncLogManager.addRows(errorRows);
+                }} else {{
+                     document.querySelector('#sync-log-body').insertAdjacentHTML('afterbegin', errorRows);
+                }}
+            </script>
         ''')
 
 @login_required
