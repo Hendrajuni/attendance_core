@@ -1,0 +1,360 @@
+<!-- Employee Detail Partial - Loaded via HTMX -->
+<div class="p-3">
+    <!-- Header with Back Button -->
+    <div class="d-flex align-items-center mb-4">
+        <button class="btn btn-outline-secondary btn-sm me-3" 
+                hx-get="{% url 'portal:location_detail' emp.home_base.id %}"
+                hx-target="#location-content-area"
+                hx-swap="innerHTML">
+            <i class="fas fa-arrow-left me-1"></i> Kembali
+        </button>
+        <h4 class="mb-0 fw-bold text-primary">Detail Karyawan</h4>
+    </div>
+
+    <div class="row g-4">
+        <!-- LEFT: Profile Card -->
+        <div class="col-md-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body text-center">
+                    <!-- Avatar -->
+                    <div class="bg-primary bg-gradient rounded-circle d-inline-flex align-items-center justify-content-center mb-3" 
+                         style="width: 100px; height: 100px;">
+                        <span class="text-white fs-1 fw-bold">{{ emp.full_name|slice:":1" }}</span>
+                    </div>
+                    
+                    <!-- Name & NIK -->
+                    <h5 class="fw-bold mb-1">{{ emp.full_name }}</h5>
+                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-2 mb-3">
+                        {{ emp.nik }}
+                    </span>
+                    
+                    <hr class="my-3">
+                    
+                    <!-- Quick Info -->
+                    <div class="text-start">
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="fas fa-map-marker-alt text-muted me-3" style="width: 16px;"></i>
+                            <div>
+                                <small class="text-muted d-block">Lokasi</small>
+                                <span class="fw-medium">{{ emp.home_base.name|default:"-" }}</span>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="fas fa-building text-muted me-3" style="width: 16px;"></i>
+                            <div>
+                                <small class="text-muted d-block">Departemen</small>
+                                <span class="fw-medium">{{ emp.department.name|default:"-" }}</span>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="fas fa-user-tag text-muted me-3" style="width: 16px;"></i>
+                            <div>
+                                <small class="text-muted d-block">Tipe</small>
+                                <span class="fw-medium">{{ emp.get_employee_type_display }}</span>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="fas fa-calendar-alt text-muted me-3" style="width: 16px;"></i>
+                            <div>
+                                <small class="text-muted d-block">Bergabung</small>
+                                <span class="fw-medium">{{ emp.joined_date|date:"d M Y"|default:"-" }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <hr class="my-3">
+                    
+                    <!-- Status Badge -->
+                    <div class="mb-3">
+                        {% if emp.is_active %}
+                        <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-3 py-2">
+                            <i class="fas fa-check-circle me-1"></i> Aktif
+                        </span>
+                        {% else %}
+                        <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle rounded-pill px-3 py-2">
+                            <i class="fas fa-times-circle me-1"></i> Non-Aktif
+                        </span>
+                        {% endif %}
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="d-grid gap-2">
+                        {% if user.is_superuser or user.employee_profile.role == 'HRD' or user.employee_profile.role == 'ADMIN' %}
+                        <button class="btn btn-outline-primary btn-sm"
+                                hx-get="{% url 'portal:employee_edit' emp.id %}"
+                                hx-target="#editEmployeeModalBody"
+                                hx-swap="innerHTML"
+                                data-bs-toggle="modal"
+                                data-bs-target="#editEmployeeModal">
+                            <i class="fas fa-edit me-1"></i> Edit Data
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm"
+                                onclick="openMutationModal('{{ emp.id }}', '{{ emp.full_name }}', '{{ emp.home_base.id }}', '{{ emp.home_base.name }}')">
+                            <i class="fas fa-exchange-alt me-1"></i> Mutasi
+                        </button>
+                        {% else %}
+                        <button class="btn btn-outline-secondary btn-sm" disabled>
+                            <i class="fas fa-lock me-1"></i> Edit (Hanya HRD)
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- RIGHT: Tabs Content -->
+        <div class="col-md-8">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-0 pt-3 pb-0">
+                    <ul class="nav nav-tabs" id="empDetailTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active fw-medium" id="profil-tab" data-bs-toggle="tab" data-bs-target="#profil" type="button">
+                                <i class="fas fa-user me-1"></i> Profil
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link fw-medium" id="absensi-tab" data-bs-toggle="tab" data-bs-target="#absensi" type="button">
+                                <i class="fas fa-clock me-1"></i> Absensi
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link fw-medium" id="mutasi-tab" data-bs-toggle="tab" data-bs-target="#mutasi" type="button">
+                                <i class="fas fa-history me-1"></i> Riwayat Mutasi
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <div class="tab-content" id="empDetailTabsContent">
+                        <!-- TAB 1: Profil -->
+                        <div class="tab-pane fade show active" id="profil" role="tabpanel">
+                            <div class="row g-3">
+                                <!-- Data Pribadi -->
+                                <div class="col-12">
+                                    <h6 class="fw-bold text-primary mb-3">
+                                        <i class="fas fa-id-card me-2"></i>Informasi Dasar
+                                    </h6>
+                                    <div class="row g-2">
+                                        <div class="col-md-6">
+                                            <div class="bg-light rounded p-3">
+                                                <small class="text-muted">NIK</small>
+                                                <div class="fw-medium">{{ emp.nik }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="bg-light rounded p-3">
+                                                <small class="text-muted">Nama Lengkap</small>
+                                                <div class="fw-medium">{{ emp.full_name }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="bg-light rounded p-3">
+                                                <small class="text-muted">No. Telepon</small>
+                                                <div class="fw-medium">{{ emp.phone_number|default:"-" }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="bg-light rounded p-3">
+                                                <small class="text-muted">Telegram ID</small>
+                                                <div class="fw-medium">{{ emp.telegram_user_id|default:"-" }}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Device Info -->
+                                <div class="col-12 mt-4">
+                                    <h6 class="fw-bold text-primary mb-3">
+                                        <i class="fas fa-fingerprint me-2"></i>Integrasi Device
+                                    </h6>
+                                    <div class="row g-2">
+                                        <div class="col-md-6">
+                                            <div class="bg-light rounded p-3">
+                                                <small class="text-muted">Device User ID (Fingerprint)</small>
+                                                <div class="fw-medium">{{ emp.device_user_id|default:"-" }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="bg-light rounded p-3">
+                                                <small class="text-muted">Shift Aktif</small>
+                                                <div class="fw-medium">
+                                                    {% if shift_assignment %}
+                                                    {{ shift_assignment.shift_pattern.name }}
+                                                    {% else %}
+                                                    <span class="text-muted">Belum di-assign</span>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- TAB 2: Absensi -->
+                        <div class="tab-pane fade" id="absensi" role="tabpanel">
+                            <!-- Stats Cards -->
+                            <h6 class="fw-bold text-primary mb-3">
+                                <i class="fas fa-chart-bar me-2"></i>Statistik {{ current_month }}
+                            </h6>
+                            <div class="row g-3 mb-4">
+                                <div class="col-3">
+                                    <div class="text-center p-3 bg-success-subtle rounded">
+                                        <div class="fs-3 fw-bold text-success">{{ stats.hadir }}</div>
+                                        <small class="text-success">Hadir</small>
+                                    </div>
+                                </div>
+                                <div class="col-3">
+                                    <div class="text-center p-3 bg-info-subtle rounded">
+                                        <div class="fs-3 fw-bold text-info">{{ stats.izin }}</div>
+                                        <small class="text-info">Izin</small>
+                                    </div>
+                                </div>
+                                <div class="col-3">
+                                    <div class="text-center p-3 bg-warning-subtle rounded">
+                                        <div class="fs-3 fw-bold text-warning">{{ stats.sakit }}</div>
+                                        <small class="text-warning">Sakit</small>
+                                    </div>
+                                </div>
+                                <div class="col-3">
+                                    <div class="text-center p-3 bg-danger-subtle rounded">
+                                        <div class="fs-3 fw-bold text-danger">{{ stats.alpha }}</div>
+                                        <small class="text-danger">Alpha</small>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Progress Bar -->
+                            <div class="mb-4">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <small class="text-muted">Tingkat Kehadiran</small>
+                                    <small class="fw-bold">{{ stats.hadir_pct }}%</small>
+                                </div>
+                                <div class="progress" style="height: 10px;">
+                                    <div class="progress-bar bg-success" style="width: {{ stats.hadir_pct }}%"></div>
+                                </div>
+                            </div>
+                            
+                            <!-- Recent Logs Table -->
+                            <h6 class="fw-bold text-primary mb-3">
+                                <i class="fas fa-list me-2"></i>10 Log Terakhir
+                            </h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover">
+                                    <thead class="bg-light">
+                                        <tr>
+                                            <th>Waktu</th>
+                                            <th>Kategori</th>
+                                            <th>Status</th>
+                                            <th>Metode</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for log in recent_logs %}
+                                        <tr>
+                                            <td>
+                                                <div class="fw-medium">{{ log.timestamp|date:"d M Y" }}</div>
+                                                <small class="text-muted">{{ log.timestamp|date:"H:i" }}</small>
+                                            </td>
+                                            <td>
+                                                {% if log.log_category == 'MASUK' %}
+                                                <span class="badge bg-success-subtle text-success">Masuk</span>
+                                                {% elif log.log_category == 'PULANG' %}
+                                                <span class="badge bg-primary-subtle text-primary">Pulang</span>
+                                                {% else %}
+                                                <span class="badge bg-secondary-subtle text-secondary">{{ log.log_category }}</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-success">{{ log.status }}</span>
+                                            </td>
+                                            <td>
+                                                <small class="text-muted">{{ log.verification_method }}</small>
+                                            </td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr>
+                                            <td colspan="4" class="text-center text-muted py-4">
+                                                Belum ada data absensi
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <!-- TAB 3: Riwayat Mutasi -->
+                        <div class="tab-pane fade" id="mutasi" role="tabpanel">
+                            <h6 class="fw-bold text-primary mb-3">
+                                <i class="fas fa-exchange-alt me-2"></i>Riwayat Mutasi
+                            </h6>
+                            
+                            {% if mutations %}
+                            <div class="timeline">
+                                {% for m in mutations %}
+                                <div class="d-flex mb-4">
+                                    <div class="me-3">
+                                        <div class="bg-primary rounded-circle d-flex align-items-center justify-content-center" 
+                                             style="width: 40px; height: 40px;">
+                                            <i class="fas fa-arrow-right text-white"></i>
+                                        </div>
+                                    </div>
+                                    <div class="flex-grow-1">
+                                        <div class="card border-0 bg-light">
+                                            <div class="card-body py-2 px-3">
+                                                <div class="d-flex justify-content-between">
+                                                    <div>
+                                                        <span class="text-muted">{{ m.old_location.name|default:"(Tidak ada)" }}</span>
+                                                        <i class="fas fa-long-arrow-alt-right mx-2 text-primary"></i>
+                                                        <span class="fw-bold text-primary">{{ m.new_location.name }}</span>
+                                                    </div>
+                                                    <small class="text-muted">{{ m.effective_date|date:"d M Y" }}</small>
+                                                </div>
+                                                {% if m.reason %}
+                                                <small class="text-muted d-block mt-1">
+                                                    <i class="fas fa-comment me-1"></i>{{ m.reason }}
+                                                </small>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <div class="text-center text-muted py-5">
+                                <i class="fas fa-exchange-alt fs-1 opacity-25 mb-3"></i>
+                                <p class="mb-0">Belum ada riwayat mutasi</p>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Employee Modal -->
+<div class="modal fade" id="editEmployeeModal" tabindex="-1" aria-labelledby="editEmployeeModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="editEmployeeModalLabel">
+                    <i class="fas fa-edit me-2"></i>Edit Data Karyawan
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="editEmployeeModalBody">
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Memuat form...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+

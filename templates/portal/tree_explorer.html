@@ -90,5 +90,96 @@
         // Add active class to clicked node
         element.classList.add('active');
     }
+    
+    // Mutation Modal Handler
+    function openMutationModal(employeeId, employeeName, currentLocationId, currentLocationName) {
+        document.getElementById('mutationEmployeeId').value = employeeId;
+        document.getElementById('mutationEmployeeName').textContent = employeeName;
+        document.getElementById('mutationCurrentLocation').textContent = currentLocationName || '-';
+        document.getElementById('mutation_effective_date').valueAsDate = new Date();
+        document.getElementById('mutation_reason').value = '';
+        document.getElementById('mutationResponse').innerHTML = '';
+        
+        // Set current location as disabled in dropdown
+        const dropdown = document.getElementById('mutation_new_location');
+        for (let option of dropdown.options) {
+            option.disabled = (option.value === currentLocationId);
+        }
+        
+        new bootstrap.Modal(document.getElementById('mutationModal')).show();
+    }
+</script>
+
+<!-- Mutation Modal -->
+<div class="modal fade" id="mutationModal" tabindex="-1" aria-labelledby="mutationModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="mutationModalLabel">
+                    <i class="fas fa-exchange-alt me-2"></i>Mutasi Karyawan
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="mutationResponse"></div>
+                
+                <form id="mutationForm" 
+                      hx-post="" 
+                      hx-target="#mutationResponse"
+                      hx-swap="innerHTML">
+                    {% csrf_token %}
+                    <input type="hidden" id="mutationEmployeeId" name="employee_id" value="">
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Nama Karyawan</label>
+                        <div id="mutationEmployeeName" class="form-control-plaintext fs-5 text-primary"></div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Lokasi Asal</label>
+                        <div id="mutationCurrentLocation" class="form-control-plaintext text-muted"></div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="mutation_new_location" class="form-label fw-bold">Lokasi Tujuan <span class="text-danger">*</span></label>
+                        <select class="form-select" id="mutation_new_location" name="new_location" required>
+                            <option value="">-- Pilih Lokasi --</option>
+                            {% for loc in all_locations %}
+                            <option value="{{ loc.id }}">{{ loc.name }} ({{ loc.code }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="mutation_effective_date" class="form-label fw-bold">Tanggal Efektif <span class="text-danger">*</span></label>
+                        <input type="date" class="form-control" id="mutation_effective_date" name="effective_date" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="mutation_reason" class="form-label fw-bold">Alasan Mutasi <small class="text-muted">(opsional)</small></label>
+                        <textarea class="form-control" id="mutation_reason" name="reason" rows="2" placeholder="Contoh: Rotasi jabatan, promosi, kebutuhan operasional..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
+                <button type="button" class="btn btn-primary" onclick="submitMutation()">
+                    <i class="fas fa-check me-1"></i> Proses Mutasi
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function submitMutation() {
+        const form = document.getElementById('mutationForm');
+        const employeeId = document.getElementById('mutationEmployeeId').value;
+        
+        // Update form action dynamically
+        form.setAttribute('hx-post', '/portal/mutate-employee/' + employeeId + '/');
+        htmx.process(form);
+        htmx.trigger(form, 'submit');
+    }
 </script>
 {% endblock %}

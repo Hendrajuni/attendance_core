@@ -341,3 +341,47 @@ class AttendanceLog(models.Model):
         loc = self.captured_at.code if self.captured_at else "Unknown"
         return f"{self.employee.full_name} @ {loc} - {self.timestamp.strftime('%Y-%m-%d %H:%M')}"
 
+
+# =============================================================================
+# MUTATION TRACKING MODEL
+# =============================================================================
+
+class EmployeeMutation(models.Model):
+    """
+    Log sejarah mutasi/perpindahan karyawan antar lokasi.
+    Preserves historical data integrity.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name="mutations")
+    old_location = models.ForeignKey(
+        WorkLocation, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        related_name="mutations_out",
+        help_text="Lokasi asal sebelum mutasi"
+    )
+    new_location = models.ForeignKey(
+        WorkLocation, 
+        on_delete=models.CASCADE, 
+        related_name="mutations_in",
+        help_text="Lokasi tujuan setelah mutasi"
+    )
+    effective_date = models.DateField(help_text="Tanggal efektif mutasi")
+    reason = models.TextField(blank=True, null=True, help_text="Alasan mutasi (opsional)")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        'auth.User', 
+        on_delete=models.SET_NULL, 
+        null=True,
+        related_name="processed_mutations",
+        help_text="Admin yang memproses mutasi"
+    )
+
+    class Meta:
+        ordering = ['-effective_date', '-created_at']
+        verbose_name = "Employee Mutation"
+        verbose_name_plural = "Employee Mutations"
+
+    def __str__(self):
+        return f"{self.employee.full_name}: {self.old_location} → {self.new_location} ({self.effective_date})"

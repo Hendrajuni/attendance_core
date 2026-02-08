@@ -10,7 +10,7 @@ from .models import (
     Department, Employee, AttendanceLog, WorkLocation, 
     FingerprintDevice, SpreadsheetSource,
     DailySchedule, ShiftPattern, EmployeeShiftAssignment,
-    NewRegistration  # Proxy Model
+    NewRegistration, EmployeeMutation  # Proxy Model + Mutation
 )
 
 
@@ -580,3 +580,32 @@ class AttendanceLogAdmin(admin.ModelAdmin):
     list_filter = ('status', 'log_category', 'source_type', 'timestamp', 'captured_at', 'employee__department')
     search_fields = ('employee__full_name', 'employee__nik')
     date_hierarchy = 'timestamp'
+
+
+# =============================================================================
+# EMPLOYEE MUTATION ADMIN (AUDIT LOG)
+# =============================================================================
+
+@admin.register(EmployeeMutation)
+class EmployeeMutationAdmin(admin.ModelAdmin):
+    """
+    Admin untuk melihat riwayat mutasi karyawan.
+    Readonly untuk menjaga integritas data historis.
+    """
+    list_display = ('employee', 'old_location', 'new_location', 'effective_date', 'created_by', 'created_at')
+    list_filter = ('effective_date', 'new_location', 'old_location', 'created_at')
+    search_fields = ('employee__full_name', 'employee__nik', 'reason')
+    date_hierarchy = 'effective_date'
+    
+    # Make all fields readonly to preserve audit trail
+    readonly_fields = ('employee', 'old_location', 'new_location', 'effective_date', 'reason', 'created_at', 'created_by')
+    
+    # Disable add/change/delete permissions (log only via frontend)
+    def has_add_permission(self, request):
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        return False
+    
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser  # Only superuser can delete (emergency)

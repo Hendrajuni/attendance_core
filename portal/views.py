@@ -18,7 +18,8 @@ def tree_explorer(request):
     """
     from attendance.models import WorkLocation
     
-    locations = WorkLocation.objects.all()
+    all_locations = WorkLocation.objects.all()
+    locations = all_locations
     
     # RBAC: Kerani only sees their location and descendants
     if hasattr(request.user, 'employee_profile'):
@@ -30,6 +31,7 @@ def tree_explorer(request):
     context = {
         'page_title': 'Pusat Data Wilayah',
         'locations': locations,
+        'all_locations': all_locations,  # For mutation modal dropdown
     }
     return render(request, 'portal/tree_explorer.html', context)
 
@@ -38,11 +40,26 @@ def tree_explorer(request):
 def location_detail_view(request, location_id):
     """
     HTMX: Load detail konten untuk panel kanan Tree Explorer
+    Supports pagination with page_size for employees and logs
     """
     from attendance.models import WorkLocation, Employee, AttendanceLog
     from django.utils import timezone
+    from django.core.paginator import Paginator
     
     location = get_object_or_404(WorkLocation, id=location_id)
+    
+    # Pagination parameters
+    emp_page_size = int(request.GET.get('emp_page_size', 10))  # Default 10
+    emp_page = int(request.GET.get('emp_page', 1))
+    log_page_size = int(request.GET.get('log_page_size', 10))  # Default 10
+    log_page = int(request.GET.get('log_page', 1))
+    
+    # Valid page sizes
+    PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+    if emp_page_size not in PAGE_SIZE_OPTIONS:
+        emp_page_size = 10
+    if log_page_size not in PAGE_SIZE_OPTIONS:
+        log_page_size = 10
     
     # Ambil lokasi ini DAN seluruh turunannya (jika ada)
     # Ini penting untuk melihat total karyawan di wilayah tersebut (termasuk sub-wilayah)
@@ -50,34 +67,47 @@ def location_detail_view(request, location_id):
     sub_locations = location.get_descendants(include_self=True)
     
     # Filter Karyawan: Home Base is within these locations
-    employees = Employee.objects.filter(
+    employees_qs = Employee.objects.filter(
         home_base__in=sub_locations,
         is_verified=True
-    ).select_related('department', 'home_base')
+    ).select_related('department', 'home_base').order_by('full_name')
     
-    total_employees = employees.count()
-    active_employees = employees.filter(is_active=True).count()
+    total_employees = employees_qs.count()
+    active_employees = employees_qs.filter(is_active=True).count()
+    
+    # Paginate employees
+    emp_paginator = Paginator(employees_qs, emp_page_size)
+    employees_page = emp_paginator.get_page(emp_page)
     
     # Statistik Kehadiran Hari Ini (Sederhana)
     today = timezone.now().date()
     # Log hari ini untuk karyawan di wilayah ini
     logs_today = AttendanceLog.objects.filter(
-        employee__in=employees,
+        employee__in=employees_qs,
         timestamp__date=today
     ).values('employee').distinct().count()
     
-    # Recent Logs for Tab (Last 50)
-    recent_logs = AttendanceLog.objects.filter(
-        employee__in=employees
-    ).select_related('employee', 'captured_at').order_by('-timestamp')[:50]
+    # Recent Logs for Tab with pagination
+    recent_logs_qs = AttendanceLog.objects.filter(
+        employee__in=employees_qs
+    ).select_related('employee', 'captured_at').order_by('-timestamp')
+    
+    log_paginator = Paginator(recent_logs_qs, log_page_size)
+    logs_page = log_paginator.get_page(log_page)
     
     context = {
         'location': location,
-        'employees': employees,
+        'employees': employees_page,
+        'employees_page': employees_page,
         'total_employees': total_employees,
         'active_employees': active_employees,
         'present_today': logs_today,
-        'recent_logs': recent_logs,
+        'recent_logs': logs_page,
+        'logs_page': logs_page,
+        # Pagination state
+        'emp_page_size': emp_page_size,
+        'log_page_size': log_page_size,
+        'page_size_options': PAGE_SIZE_OPTIONS,
     }
     
     return render(request, 'portal/partials/_location_detail.html', context)
@@ -846,3 +876,290 @@ def mark_notification_read_htmx(request, notification_id):
     '''
     
     return HttpResponse(item_html + badge_html)
+
+
+# =============================================================================
+# EMPLOYEE MUTATION VIEW
+# =============================================================================
+
+@login_required
+@require_POST
+def mutate_employee_view(request, employee_id):
+    """
+    HTMX View untuk memproses mutasi karyawan.
+    Only accessible by HRD or Superuser.
+    """
+    from attendance.models import EmployeeMutation
+    
+    # Permission Check: HRD or Superuser only
+    if not request.user.is_superuser:
+        if hasattr(request.user, 'employee_profile'):
+            if request.user.employee_profile.role not in ['ADMIN', 'HRD']:
+                return HttpResponse('<div class="alert alert-danger">Akses ditolak. Hanya HRD/Admin yang bisa memutasi karyawan.</div>', status=403)
+        else:
+            return HttpResponse('<div class="alert alert-danger">Akses ditolak.</div>', status=403)
+    
+    employee = get_object_or_404(Employee, id=employee_id)
+    old_location = employee.home_base
+    
+    # Get form data
+    new_location_id = request.POST.get('new_location')
+    effective_date_str = request.POST.get('effective_date')
+    reason = request.POST.get('reason', '').strip()
+    
+    if not new_location_id or not effective_date_str:
+        return HttpResponse('<div class="alert alert-warning">Lokasi tujuan dan tanggal efektif wajib diisi.</div>')
+    
+    try:
+        from datetime import datetime
+        new_location = get_object_or_404(WorkLocation, id=new_location_id)
+        effective_date = datetime.strptime(effective_date_str, '%Y-%m-%d').date()
+        
+        # Validate: Can't mutate to same location
+        if old_location and old_location.id == new_location.id:
+            return HttpResponse('<div class="alert alert-warning">Lokasi tujuan sama dengan lokasi asal.</div>')
+        
+        with transaction.atomic():
+            # 1. Create mutation log
+            EmployeeMutation.objects.create(
+                employee=employee,
+                old_location=old_location,
+                new_location=new_location,
+                effective_date=effective_date,
+                reason=reason if reason else None,
+                created_by=request.user
+            )
+            
+            # 2. Update employee's home_base
+            employee.home_base = new_location
+            employee.save(update_fields=['home_base'])
+        
+        # Success response
+        return HttpResponse(f'''
+            <div class="alert alert-success">
+                <i class="fas fa-check-circle me-2"></i>
+                <strong>Mutasi Berhasil!</strong><br>
+                {employee.full_name} dipindahkan dari <strong>{old_location.name if old_location else '-'}</strong> 
+                ke <strong>{new_location.name}</strong> efektif tanggal {effective_date.strftime('%d %b %Y')}.
+            </div>
+            <script>
+                // Close modal and refresh location detail
+                setTimeout(() => {{
+                    bootstrap.Modal.getInstance(document.getElementById('mutationModal')).hide();
+                    // Trigger refresh on active location node
+                    const activeNode = document.querySelector('.node-item.active');
+                    if (activeNode) activeNode.click();
+                }}, 1500);
+            </script>
+        ''')
+        
+    except Exception as e:
+        return HttpResponse(f'<div class="alert alert-danger">Error: {str(e)}</div>')
+
+
+# =============================================================================
+# EMPLOYEE DETAIL VIEW
+# =============================================================================
+
+@login_required
+def employee_detail_view(request, employee_id):
+    """
+    HTMX View untuk menampilkan detail lengkap karyawan.
+    Includes: Profile, Attendance Stats, Mutation History
+    """
+    from attendance.models import Employee, AttendanceLog, EmployeeMutation, EmployeeShiftAssignment
+    from django.db.models import Count, Q
+    from django.utils import timezone
+    from datetime import timedelta
+    
+    employee = get_object_or_404(Employee, id=employee_id)
+    now = timezone.now()
+    
+    # === ATTENDANCE STATS (Current Month) ===
+    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
+    attendance_logs = AttendanceLog.objects.filter(
+        employee=employee,
+        timestamp__gte=start_of_month
+    )
+    
+    # Count by status
+    stats = attendance_logs.values('status').annotate(count=Count('id'))
+    stats_dict = {s['status']: s['count'] for s in stats}
+    
+    hadir = stats_dict.get('HADIR', 0)
+    izin = stats_dict.get('IZIN', 0)
+    sakit = stats_dict.get('SAKIT', 0)
+    alpha = stats_dict.get('ALPHA', 0)
+    
+    # Working days in month (approximate)
+    import calendar
+    _, days_in_month = calendar.monthrange(now.year, now.month)
+    working_days = days_in_month - 4  # Rough estimate excluding weekends
+    
+    # === RECENT LOGS (Last 10) ===
+    recent_logs = AttendanceLog.objects.filter(employee=employee).order_by('-timestamp')[:10]
+    
+    # === MUTATION HISTORY ===
+    mutations = EmployeeMutation.objects.filter(employee=employee).order_by('-effective_date')[:5]
+    
+    # === SHIFT ASSIGNMENT ===
+    try:
+        shift_assignment = EmployeeShiftAssignment.objects.filter(
+            employee=employee,
+            is_active=True
+        ).select_related('shift_pattern').first()
+    except:
+        shift_assignment = None
+    
+    # === ATTENDANCE HEATMAP (Last 30 days) ===
+    thirty_days_ago = now - timedelta(days=30)
+    heatmap_logs = AttendanceLog.objects.filter(
+        employee=employee,
+        timestamp__gte=thirty_days_ago,
+        log_category='MASUK'
+    ).values('timestamp__date').annotate(count=Count('id'))
+    
+    attendance_dates = {str(log['timestamp__date']): log['count'] for log in heatmap_logs}
+    
+    context = {
+        'emp': employee,
+        'stats': {
+            'hadir': hadir,
+            'izin': izin,
+            'sakit': sakit,
+            'alpha': alpha,
+            'working_days': working_days,
+            'hadir_pct': round((hadir / max(working_days, 1)) * 100),
+        },
+        'recent_logs': recent_logs,
+        'mutations': mutations,
+        'shift_assignment': shift_assignment,
+        'attendance_dates': attendance_dates,
+        'current_month': now.strftime('%B %Y'),
+    }
+    
+    return render(request, 'portal/partials/_employee_detail.html', context)
+
+
+# =============================================================================
+# EMPLOYEE EDIT VIEW
+# =============================================================================
+
+@login_required
+def employee_edit_view(request, employee_id):
+    """
+    View untuk mengedit data karyawan.
+    GET: Render form edit dalam modal
+    POST: Simpan perubahan data
+    """
+    from attendance.models import Employee, Department, WorkLocation, ShiftPattern, EmployeeShiftAssignment
+    
+    # Permission Check: HRD/Admin/Superuser only
+    if not request.user.is_superuser:
+        if hasattr(request.user, 'employee_profile'):
+            if request.user.employee_profile.role not in ['ADMIN', 'HRD']:
+                return HttpResponse('<div class="alert alert-danger">Akses ditolak. Hanya HRD/Admin yang bisa mengedit data karyawan.</div>', status=403)
+        else:
+            return HttpResponse('<div class="alert alert-danger">Akses ditolak.</div>', status=403)
+    
+    employee = get_object_or_404(Employee, id=employee_id)
+    
+    if request.method == 'POST':
+        # Get form data
+        full_name = request.POST.get('full_name', '').strip()
+        employee_type = request.POST.get('employee_type', '')
+        department_id = request.POST.get('department', '')
+        phone_number = request.POST.get('phone_number', '').strip()
+        telegram_user_id = request.POST.get('telegram_user_id', '').strip()
+        device_user_id = request.POST.get('device_user_id', '').strip()
+        joined_date_str = request.POST.get('joined_date', '')
+        is_active = request.POST.get('is_active') == 'on'
+        shift_pattern_id = request.POST.get('shift_pattern', '')
+        
+        # Validation
+        if not full_name:
+            return HttpResponse('<div class="alert alert-warning">Nama lengkap wajib diisi.</div>')
+        
+        try:
+            with transaction.atomic():
+                # Update employee fields
+                employee.full_name = full_name
+                employee.employee_type = employee_type
+                employee.phone_number = phone_number if phone_number else None
+                employee.telegram_user_id = telegram_user_id if telegram_user_id else None
+                employee.is_active = is_active
+                
+                # Device User ID
+                if device_user_id:
+                    employee.device_user_id = int(device_user_id)
+                else:
+                    employee.device_user_id = None
+                
+                # Department
+                if department_id:
+                    employee.department_id = department_id
+                else:
+                    employee.department = None
+                
+                # Joined Date
+                if joined_date_str:
+                    from datetime import datetime
+                    employee.joined_date = datetime.strptime(joined_date_str, '%Y-%m-%d').date()
+                
+                employee.save()
+                
+                # Handle Shift Assignment
+                if shift_pattern_id:
+                    shift_pattern = get_object_or_404(ShiftPattern, id=shift_pattern_id)
+                    # Deactivate previous assignments
+                    EmployeeShiftAssignment.objects.filter(employee=employee, is_active=True).update(is_active=False)
+                    # Create new assignment
+                    EmployeeShiftAssignment.objects.create(
+                        employee=employee,
+                        shift_pattern=shift_pattern,
+                        is_active=True
+                    )
+            
+            # Success response - reload current employee detail
+            return HttpResponse(f'''
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle me-2"></i>
+                    Data <strong>{employee.full_name}</strong> berhasil diperbarui!
+                </div>
+                <script>
+                    setTimeout(() => {{
+                        // Close modal
+                        bootstrap.Modal.getInstance(document.getElementById('editEmployeeModal')).hide();
+                        // Reload employee detail
+                        htmx.ajax('GET', '/portal/employee/{employee.id}/', {{target: '#location-content-area', swap: 'innerHTML'}});
+                    }}, 1000);
+                </script>
+            ''')
+            
+        except Exception as e:
+            return HttpResponse(f'<div class="alert alert-danger">Error: {str(e)}</div>')
+    
+    # GET: Render form
+    departments = Department.objects.all()
+    shift_patterns = ShiftPattern.objects.all()
+    
+    # Get current shift assignment
+    current_shift = None
+    try:
+        current_shift = EmployeeShiftAssignment.objects.filter(
+            employee=employee, is_active=True
+        ).select_related('shift_pattern').first()
+    except:
+        pass
+    
+    context = {
+        'emp': employee,
+        'departments': departments,
+        'shift_patterns': shift_patterns,
+        'current_shift': current_shift,
+        'employee_types': Employee.TYPE_CHOICES,
+    }
+    
+    return render(request, 'portal/partials/_employee_edit_form.html', context)
+

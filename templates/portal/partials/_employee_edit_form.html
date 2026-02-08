@@ -1,0 +1,132 @@
+<!-- Employee Edit Form - Loaded via HTMX into modal -->
+<form id="editEmployeeForm" 
+      hx-post="{% url 'portal:employee_edit' emp.id %}"
+      hx-target="#editFormResponse"
+      hx-swap="innerHTML">
+    {% csrf_token %}
+    
+    <!-- Response Messages -->
+    <div id="editFormResponse"></div>
+    
+    <!-- 2 Column Layout -->
+    <div class="row g-4">
+        <!-- Left Column: Basic Info -->
+        <div class="col-md-6">
+            <h6 class="fw-bold text-primary mb-3">
+                <i class="fas fa-id-card me-2"></i>Informasi Dasar
+            </h6>
+            
+            <!-- NIK (readonly) -->
+            <div class="mb-3">
+                <label class="form-label fw-medium">NIK</label>
+                <input type="text" class="form-control bg-light" value="{{ emp.nik }}" readonly disabled>
+                <small class="text-muted">NIK tidak dapat diubah</small>
+            </div>
+            
+            <!-- Nama Lengkap -->
+            <div class="mb-3">
+                <label for="full_name" class="form-label fw-medium">Nama Lengkap <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="full_name" name="full_name" value="{{ emp.full_name }}" required>
+            </div>
+            
+            <!-- Tipe Karyawan -->
+            <div class="mb-3">
+                <label for="employee_type" class="form-label fw-medium">Tipe Karyawan</label>
+                <select class="form-select" id="employee_type" name="employee_type">
+                    {% for code, label in employee_types %}
+                    <option value="{{ code }}" {% if emp.employee_type == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <!-- Departemen -->
+            <div class="mb-3">
+                <label for="department" class="form-label fw-medium">Departemen</label>
+                <select class="form-select" id="department" name="department">
+                    <option value="">-- Tidak Ada --</option>
+                    {% for dept in departments %}
+                    <option value="{{ dept.id }}" {% if emp.department_id == dept.id %}selected{% endif %}>{{ dept.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <!-- Tanggal Bergabung -->
+            <div class="mb-3">
+                <label for="joined_date" class="form-label fw-medium">Tanggal Bergabung</label>
+                <input type="date" class="form-control" id="joined_date" name="joined_date" 
+                       value="{{ emp.joined_date|date:'Y-m-d' }}">
+            </div>
+        </div>
+        
+        <!-- Right Column: Contact & Device -->
+        <div class="col-md-6">
+            <h6 class="fw-bold text-primary mb-3">
+                <i class="fas fa-phone-alt me-2"></i>Kontak & Device
+            </h6>
+            
+            <!-- No. Telepon -->
+            <div class="mb-3">
+                <label for="phone_number" class="form-label fw-medium">No. Telepon</label>
+                <input type="text" class="form-control" id="phone_number" name="phone_number" 
+                       value="{{ emp.phone_number|default:'' }}" placeholder="08xx-xxxx-xxxx">
+            </div>
+            
+            <!-- Telegram ID -->
+            <div class="mb-3">
+                <label for="telegram_user_id" class="form-label fw-medium">Telegram User ID</label>
+                <input type="text" class="form-control" id="telegram_user_id" name="telegram_user_id" 
+                       value="{{ emp.telegram_user_id|default:'' }}" placeholder="ID dari bot Telegram">
+            </div>
+            
+            <!-- Device User ID -->
+            <div class="mb-3">
+                <label for="device_user_id" class="form-label fw-medium">Device User ID (Fingerprint)</label>
+                <input type="number" class="form-control" id="device_user_id" name="device_user_id" 
+                       value="{{ emp.device_user_id|default:'' }}" placeholder="ID di mesin absensi">
+            </div>
+            
+            <hr>
+            
+            <h6 class="fw-bold text-primary mb-3">
+                <i class="fas fa-clock me-2"></i>Shift & Status
+            </h6>
+            
+            <!-- Shift Pattern -->
+            <div class="mb-3">
+                <label for="shift_pattern" class="form-label fw-medium">Shift Pattern</label>
+                <select class="form-select" id="shift_pattern" name="shift_pattern">
+                    <option value="">-- Tidak Ada Shift --</option>
+                    {% for sp in shift_patterns %}
+                    <option value="{{ sp.id }}" {% if current_shift and current_shift.shift_pattern_id == sp.id %}selected{% endif %}>
+                        {{ sp.name }} ({{ sp.code }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <!-- Status Aktif -->
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="is_active" name="is_active" 
+                           {% if emp.is_active %}checked{% endif %} style="width: 3em; height: 1.5em;">
+                    <label class="form-check-label fw-medium ms-2" for="is_active">
+                        Karyawan Aktif
+                    </label>
+                </div>
+                <small class="text-muted">Nonaktifkan untuk karyawan yang sudah tidak bekerja</small>
+            </div>
+        </div>
+    </div>
+    
+    <hr class="my-4">
+    
+    <!-- Submit Buttons -->
+    <div class="d-flex justify-content-end gap-2">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+            <i class="fas fa-times me-1"></i> Batal
+        </button>
+        <button type="submit" class="btn btn-primary">
+            <i class="fas fa-save me-1"></i> Simpan Perubahan
+        </button>
+    </div>
+</form>

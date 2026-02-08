@@ -30,4 +30,13 @@ urlpatterns = [
     
     # Notification Action
     path('notification/<uuid:notification_id>/read/', views.mark_notification_read_htmx, name='mark_notification_read_htmx'),
+    
+    # Employee Mutation
+    path('mutate-employee/<uuid:employee_id>/', views.mutate_employee_view, name='mutate_employee'),
+    
+    # Employee Detail
+    path('employee/<uuid:employee_id>/', views.employee_detail_view, name='employee_detail'),
+    
+    # Employee Edit
+    path('employee/<uuid:employee_id>/edit/', views.employee_edit_view, name='employee_edit'),
 ]

@@ -88,6 +88,26 @@
         <!-- Tab Personalia -->
         <div class="tab-pane fade show active" id="employees" role="tabpanel" aria-labelledby="employees-tab">
             <div class="card border-0 shadow-sm">
+                <!-- Page Size Selector -->
+                <div class="card-header bg-white border-0 d-flex justify-content-between align-items-center py-2">
+                    <small class="text-muted">
+                        Menampilkan {{ employees_page.start_index }}-{{ employees_page.end_index }} dari {{ total_employees }} karyawan
+                    </small>
+                    <div class="d-flex align-items-center gap-2">
+                        <small class="text-muted">Tampilkan:</small>
+                        <select class="form-select form-select-sm" style="width: auto;"
+                                hx-get="{% url 'portal:location_detail' location.id %}"
+                                hx-target="#location-content-area"
+                                hx-swap="innerHTML"
+                                hx-include="[name='emp_page_size']"
+                                name="emp_page_size"
+                                onchange="htmx.ajax('GET', '{% url 'portal:location_detail' location.id %}?emp_page_size=' + this.value, {target: '#location-content-area', swap: 'innerHTML'})">
+                            {% for size in page_size_options %}
+                            <option value="{{ size }}" {% if size == emp_page_size %}selected{% endif %}>{{ size }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
@@ -125,9 +145,21 @@
                                         {% endif %}
                                     </td>
                                     <td class="text-end pe-4">
-                                        <button class="btn btn-sm btn-outline-primary rounded-pill px-3">
-                                            <i class="fas fa-edit me-1"></i> Detail
-                                        </button>
+                                        <div class="btn-group">
+                                            <button class="btn btn-sm btn-outline-primary rounded-pill px-3"
+                                                    hx-get="{% url 'portal:employee_detail' emp.id %}"
+                                                    hx-target="#location-content-area"
+                                                    hx-swap="innerHTML">
+                                                <i class="fas fa-eye me-1"></i> Detail
+                                            </button>
+                                            {% if user.is_superuser or user.employee_profile.role == 'HRD' or user.employee_profile.role == 'ADMIN' %}
+                                            <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3 ms-1" 
+                                                    onclick="openMutationModal('{{ emp.id }}', '{{ emp.full_name }}', '{{ emp.home_base.id }}', '{{ emp.home_base.name }}')"
+                                                    title="Mutasi Karyawan">
+                                                <i class="fas fa-exchange-alt me-1"></i> Mutasi
+                                            </button>
+                                            {% endif %}
+                                        </div>
                                     </td>
                                 </tr>
                                 {% empty %}
@@ -142,12 +174,70 @@
                         </table>
                     </div>
                 </div>
+                <!-- Pagination Controls for Employees -->
+                {% if employees_page.has_other_pages %}
+                <div class="card-footer bg-white border-0 py-2">
+                    <nav aria-label="Employee pagination">
+                        <ul class="pagination pagination-sm justify-content-center mb-0">
+                            {% if employees_page.has_previous %}
+                            <li class="page-item">
+                                <a class="page-link" href="#"
+                                   hx-get="{% url 'portal:location_detail' location.id %}?emp_page={{ employees_page.previous_page_number }}&emp_page_size={{ emp_page_size }}"
+                                   hx-target="#location-content-area"
+                                   hx-swap="innerHTML">
+                                    <i class="fas fa-chevron-left"></i>
+                                </a>
+                            </li>
+                            {% endif %}
+                            
+                            {% for num in employees_page.paginator.page_range %}
+                                {% if num == employees_page.number %}
+                                <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                                {% elif num > employees_page.number|add:'-3' and num < employees_page.number|add:'3' %}
+                                <li class="page-item">
+                                    <a class="page-link" href="#"
+                                       hx-get="{% url 'portal:location_detail' location.id %}?emp_page={{ num }}&emp_page_size={{ emp_page_size }}"
+                                       hx-target="#location-content-area"
+                                       hx-swap="innerHTML">{{ num }}</a>
+                                </li>
+                                {% endif %}
+                            {% endfor %}
+                            
+                            {% if employees_page.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="#"
+                                   hx-get="{% url 'portal:location_detail' location.id %}?emp_page={{ employees_page.next_page_number }}&emp_page_size={{ emp_page_size }}"
+                                   hx-target="#location-content-area"
+                                   hx-swap="innerHTML">
+                                    <i class="fas fa-chevron-right"></i>
+                                </a>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                </div>
+                {% endif %}
             </div>
         </div>
         
         <!-- Tab Absensi Harian -->
         <div class="tab-pane fade" id="attendance" role="tabpanel" aria-labelledby="attendance-tab">
             <div class="card border-0 shadow-sm">
+                <!-- Page Size Selector -->
+                <div class="card-header bg-white border-0 d-flex justify-content-between align-items-center py-2">
+                    <small class="text-muted">
+                        Menampilkan {{ logs_page.start_index }}-{{ logs_page.end_index }} dari {{ logs_page.paginator.count }} log
+                    </small>
+                    <div class="d-flex align-items-center gap-2">
+                        <small class="text-muted">Tampilkan:</small>
+                        <select class="form-select form-select-sm" style="width: auto;"
+                                onchange="htmx.ajax('GET', '{% url 'portal:location_detail' location.id %}?log_page_size=' + this.value, {target: '#location-content-area', swap: 'innerHTML'})">
+                            {% for size in page_size_options %}
+                            <option value="{{ size }}" {% if size == log_page_size %}selected{% endif %}>{{ size }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
@@ -197,6 +287,49 @@
                         </table>
                     </div>
                 </div>
+                <!-- Pagination Controls for Logs -->
+                {% if logs_page.has_other_pages %}
+                <div class="card-footer bg-white border-0 py-2">
+                    <nav aria-label="Log pagination">
+                        <ul class="pagination pagination-sm justify-content-center mb-0">
+                            {% if logs_page.has_previous %}
+                            <li class="page-item">
+                                <a class="page-link" href="#"
+                                   hx-get="{% url 'portal:location_detail' location.id %}?log_page={{ logs_page.previous_page_number }}&log_page_size={{ log_page_size }}"
+                                   hx-target="#location-content-area"
+                                   hx-swap="innerHTML">
+                                    <i class="fas fa-chevron-left"></i>
+                                </a>
+                            </li>
+                            {% endif %}
+                            
+                            {% for num in logs_page.paginator.page_range %}
+                                {% if num == logs_page.number %}
+                                <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                                {% elif num > logs_page.number|add:'-3' and num < logs_page.number|add:'3' %}
+                                <li class="page-item">
+                                    <a class="page-link" href="#"
+                                       hx-get="{% url 'portal:location_detail' location.id %}?log_page={{ num }}&log_page_size={{ log_page_size }}"
+                                       hx-target="#location-content-area"
+                                       hx-swap="innerHTML">{{ num }}</a>
+                                </li>
+                                {% endif %}
+                            {% endfor %}
+                            
+                            {% if logs_page.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="#"
+                                   hx-get="{% url 'portal:location_detail' location.id %}?log_page={{ logs_page.next_page_number }}&log_page_size={{ log_page_size }}"
+                                   hx-target="#location-content-area"
+                                   hx-swap="innerHTML">
+                                    <i class="fas fa-chevron-right"></i>
+                                </a>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>
