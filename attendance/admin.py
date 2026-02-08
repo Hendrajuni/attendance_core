@@ -386,8 +386,8 @@ class NewRegistrationAdmin(admin.ModelAdmin):
             if not emp.joined_date:
                 emp.joined_date = now.date()
             
-            # Auto-generate NIK if temporary
-            if emp.nik.startswith('TEMP-') or emp.nik.startswith('TELE-'):
+            # Auto-generate NIK if temporary (covers TEMP-, TELE-, WA. patterns)
+            if emp.nik.startswith('TEMP-') or emp.nik.startswith('TELE-') or emp.nik.startswith('WA.'):
                 emp.nik = self._generate_unique_nik(now)
                 nik_generated += 1
             
@@ -464,8 +464,8 @@ class NewRegistrationAdmin(admin.ModelAdmin):
                     if not emp.joined_date:
                         emp.joined_date = now.date()
                     
-                    # 4. Generate NIK if temporary
-                    if emp.nik.startswith('TEMP-') or emp.nik.startswith('TELE-'):
+                    # 4. Generate NIK if temporary (covers TEMP-, TELE-, WA. patterns)
+                    if emp.nik.startswith('TEMP-') or emp.nik.startswith('TELE-') or emp.nik.startswith('WA.'):
                         emp.nik = self._generate_unique_nik(now)
                         nik_generated += 1
                     

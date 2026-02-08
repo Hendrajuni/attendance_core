@@ -355,9 +355,9 @@ def sync_machine_htmx(request, device_id):
                     )
                     if created: 
                         created_count += 1
-                        # Remove limit to allow client-side pagination to handle all logs
+                        # Store tuple: (name, time_str, category) for rich display
                         time_str = timestamp.strftime("%H:%M")
-                        detailed_logs.append(f"{employee.full_name} ({time_str})")
+                        detailed_logs.append((employee.full_name, time_str, category))
             
             print(f"DEBUG: Created {created_count} new logs from {total_records} raw records.")
             current_time = timezone.now().strftime("%H:%M:%S")
@@ -415,13 +415,27 @@ def sync_machine_htmx(request, device_id):
            # Build HTML for new logs (Script Injection Method)
             extra_rows = ""
             if detailed_logs:
-                for log_detail in detailed_logs:
+                for name, att_time, category in detailed_logs:
+                    # Dynamic badge based on category
+                    if category in ('CHECKIN_1', 'SCAN_IN'):
+                        badge = '<span class="badge bg-success">Masuk</span>'
+                        text_class = 'text-success'
+                    elif category in ('CHECKOUT', 'SCAN_OUT'):
+                        badge = '<span class="badge bg-primary">Pulang</span>'
+                        text_class = 'text-primary'
+                    elif category == 'CHECKIN_2':
+                        badge = '<span class="badge bg-info">Cek-2</span>'
+                        text_class = 'text-info'
+                    else:
+                        badge = '<span class="badge bg-secondary">Absen</span>'
+                        text_class = 'text-light'
+                    
                     extra_rows += f'''
                     <tr>
-                        <td>{current_time}</td>
+                        <td>{att_time}</td>
                         <td>{device.name}</td>
-                        <td><span class="badge bg-info">Detail</span></td>
-                        <td class="text-info">{log_detail}</td>
+                        <td>{badge}</td>
+                        <td class="{text_class}">{name}</td>
                     </tr>
                     '''
             
@@ -531,24 +545,40 @@ def sync_wa_source_htmx(request, source_id):
         detailed_logs = []
         created_count = 0
         
+        # DEBUG: Print column names
+        print(f"DEBUG: Spreadsheet columns = {list(df.columns)}")
+        print(f"DEBUG: Total rows in spreadsheet = {len(df)}")
+        
         with transaction.atomic():
-            for _, row in df.iterrows():
+            for idx, row in df.iterrows():
                 tgl_str = str(row.get('TANGGAL', '')).strip()
                 jam_str = str(row.get('JAM ABSEN', '')).strip()
                 user_id = str(row.get('NOMOR WA', '')).strip()
                 
-                if not tgl_str or not jam_str: continue
+                if not tgl_str or not jam_str: 
+                    print(f"DEBUG: Row {idx} skipped - missing TANGGAL or JAM ABSEN")
+                    continue
                 
                 try:
                     full_ts_str = f"{tgl_str} {jam_str}"
                     timestamp = pd.to_datetime(full_ts_str, dayfirst=True).to_pydatetime()
                     if timezone.is_naive(timestamp):
                         timestamp = timezone.make_aware(timestamp)
-                        
+                    
+                    # Normalize phone number lookup (handles .0 suffix from float storage)
+                    # Try exact match first
                     employee = Employee.objects.filter(phone_number=user_id, is_active=True).first()
                     if not employee:
+                        # Try with .0 suffix (database might have stored as float)
+                        employee = Employee.objects.filter(phone_number=f"{user_id}.0", is_active=True).first()
+                    if not employee:
                         employee = Employee.objects.filter(telegram_user_id=user_id, is_active=True).first()
-                    if not employee: continue
+                    if not employee:
+                        # Try telegram_user_id with .0 suffix
+                        employee = Employee.objects.filter(telegram_user_id=f"{user_id}.0", is_active=True).first()
+                    if not employee: 
+                        print(f"DEBUG: Row {idx} - Employee not found for user_id={user_id}")
+                        continue
                     
                     category, _ = determine_category(employee, timestamp)
                     
@@ -562,9 +592,16 @@ def sync_wa_source_htmx(request, source_id):
                     )
                     if created: 
                         created_count += 1
+                        # Store tuple: (name, time_str, category) for rich display
                         time_str = timestamp.strftime("%H:%M")
-                        detailed_logs.append(f"{employee.full_name} ({time_str})")
-                except: continue
+                        detailed_logs.append((employee.full_name, time_str, category))
+                    else:
+                        print(f"DEBUG: Row {idx} - Log already exists for {employee.full_name} at {timestamp}")
+                except Exception as row_err:
+                    print(f"DEBUG: Row {idx} - Error: {row_err}")
+                    continue
+        
+        print(f"DEBUG: Created {created_count} new logs")
         
         # --- Update Last Activity ---
         source.last_activity = timezone.now()
@@ -613,13 +650,27 @@ def sync_wa_source_htmx(request, source_id):
         extra_rows = ""
         current_time = timezone.now().strftime("%H:%M:%S")
         
-        for detail in detailed_logs:
+        for name, att_time, category in detailed_logs:
+            # Dynamic badge based on category
+            if category in ('CHECKIN_1', 'SCAN_IN'):
+                badge = '<span class="badge bg-success">Masuk</span>'
+                text_class = 'text-success'
+            elif category in ('CHECKOUT', 'SCAN_OUT'):
+                badge = '<span class="badge bg-primary">Pulang</span>'
+                text_class = 'text-primary'
+            elif category == 'CHECKIN_2':
+                badge = '<span class="badge bg-info">Cek-2</span>'
+                text_class = 'text-info'
+            else:
+                badge = '<span class="badge bg-secondary">Absen</span>'
+                text_class = 'text-light'
+            
             extra_rows += f'''
             <tr>
-                <td>{current_time}</td>
+                <td>{att_time}</td>
                 <td>{source.name}</td>
-                <td><span class="badge bg-info">Detail</span></td>
-                <td class="text-info">{detail}</td>
+                <td>{badge}</td>
+                <td class="{text_class}">{name}</td>
             </tr>
             '''
         
