@@ -1,6 +1,13 @@
 from django.shortcuts import render
-from datetime import datetime
+from datetime import datetime, time, date, timedelta
 from django.contrib.auth.decorators import login_required
+from attendance.utils import get_employee_schedule
+
+# Constants
+SCHEDULE_IN = time(8, 0)
+SCHEDULE_OUT = time(17, 0)
+DEFAULT_SCHEDULE_IN = SCHEDULE_IN
+DEFAULT_SCHEDULE_OUT = SCHEDULE_OUT
 
 @login_required
 def dashboard(request):
@@ -1290,8 +1297,8 @@ def recap_matrix_view(request):
                 })
             
             # Standard Schedule (Hardcoded for now, can be moved to model later)
-            SCHEDULE_IN = timezone.datetime.strptime('08:00', '%H:%M').time()
-            SCHEDULE_OUT = timezone.datetime.strptime('17:00', '%H:%M').time()
+            # SCHEDULE_IN = timezone.datetime.strptime('08:00', '%H:%M').time()
+            # SCHEDULE_OUT = timezone.datetime.strptime('17:00', '%H:%M').time()
             
             # Holiday Object for Indonesia
             id_holidays = holidays.ID(years=[year, year-1])
@@ -1302,7 +1309,7 @@ def recap_matrix_view(request):
                 
                 day_stat = {
                     'date': d,
-                    'is_weekend': d.weekday() >= 5,
+                    'is_weekend': d.weekday() == 6,  # Only Sunday is weekend (holiday)
                     'is_holiday': d in id_holidays,
                     'holiday_name': id_holidays.get(d),
                     'schedule_in': '08:00',
@@ -1370,10 +1377,26 @@ def recap_matrix_view(request):
                     cin_time = local_in.time()
                     dummy_date = date(2000, 1, 1)
                     
-                    if cin_time > SCHEDULE_IN and not day_stat['is_holiday'] and not day_stat['is_weekend']:
-                        dt_in = timezone.datetime.combine(dummy_date, cin_time)
-                        dt_sch = timezone.datetime.combine(dummy_date, SCHEDULE_IN)
-                        diff = (dt_in - dt_sch).total_seconds() / 60
+                    # Dynamic Schedule & Late Tolerance
+                    daily_sch, shift_pattern = get_employee_schedule(personal_employee, d)
+                    
+                    # Default values
+                    sch_in = DEFAULT_SCHEDULE_IN
+                    tol = 0
+                    
+                    if daily_sch:
+                        sch_in = daily_sch.clock_in
+                        tol = daily_sch.late_tolerance
+                    
+                    # Threshold = Scheduled In + Tolerance
+                    dt_sch = datetime.combine(dummy_date, sch_in)
+                    dt_threshold = dt_sch + timedelta(minutes=tol)
+                    
+                    # Check if Late (Actual Time > Threshold)
+                    if cin_time > dt_threshold.time() and not day_stat['is_holiday'] and not day_stat['is_weekend']:
+                        dt_in = datetime.combine(dummy_date, cin_time)
+                        # Late calculated from Threshold Time (tolerance not counted as late)
+                        diff = (dt_in - dt_threshold).total_seconds() / 60
                         day_stat['late_minutes'] = int(diff)
                         summary_stats['late'] += int(diff)
                     
@@ -1390,10 +1413,23 @@ def recap_matrix_view(request):
                         
                         # Calculate Overtime
                         cout_time = local_out.time()
-                        if cout_time > SCHEDULE_OUT:
-                            dt_out = timezone.datetime.combine(dummy_date, cout_time)
-                            dt_sch_out = timezone.datetime.combine(dummy_date, SCHEDULE_OUT)
-                            diff = (dt_out - dt_sch_out).total_seconds() / 60
+                        
+                        # Dynamic Schedule Out with Overtime Tolerance
+                        sch_out = DEFAULT_SCHEDULE_OUT
+                        ot_tol = 0  # overtime tolerance in minutes
+                        if daily_sch:
+                            sch_out = daily_sch.clock_out
+                            ot_tol = daily_sch.overtime_tolerance
+                        
+                        # Calculate overtime threshold (clock_out + tolerance)
+                        dt_sch_out = datetime.combine(dummy_date, sch_out)
+                        dt_ot_threshold = dt_sch_out + timedelta(minutes=ot_tol)
+                        
+                        # Overtime only counts if employee leaves AFTER the threshold
+                        if cout_time > dt_ot_threshold.time():
+                            dt_out = datetime.combine(dummy_date, cout_time)
+                            # Overtime calculated from threshold time, not clock_out
+                            diff = (dt_out - dt_ot_threshold).total_seconds() / 60
                             day_stat['overtime_minutes'] = int(diff)
                             summary_stats['overtime'] += int(diff)
                     
@@ -1461,6 +1497,8 @@ def recap_matrix_view(request):
     employees = []
     matrix_data = {}
     date_range = []
+    fp_summary_stats = {}
+    wa_summary_data = {}
     
     if selected_location:
         # Get all sub-locations (include self)
@@ -1478,6 +1516,9 @@ def recap_matrix_view(request):
             _, days_in_month = monthrange(year, month)
             date_range = [date(year, month, day) for day in range(1, days_in_month + 1)]
             
+            # Define Schedule In locally to ensure it's available
+            # SCHEDULE_IN = time(8, 0)
+
             # Fetch logs for all employees
             logs = AttendanceLog.objects.filter(
                 employee__in=employees,
@@ -1493,11 +1534,17 @@ def recap_matrix_view(request):
                 employee_date_logs[log.employee_id][local_dt.date()].append(log)
             
             # Build matrix: { employee_id: { date_obj: status_code } }
+            
             # Holiday Object for Indonesia
             id_holidays = holidays.ID(years=[year, year-1])
+
+            # fp_summary_stats is already initialized above
+            # Ensure we iterate over specific employees if active_tab is relevant? 
+            # No, logic is fine.
             
             for emp in employees:
                 emp_matrix = {}
+                emp_stats = {'H': 0, 'A': 0, 'T': 0, 'S': 0, 'I': 0}
                 for d in date_range:
                     day_logs = employee_date_logs.get(emp.id, {}).get(d, [])
                     is_holiday = d in id_holidays
@@ -1509,26 +1556,84 @@ def recap_matrix_view(request):
                             'CHECKIN': 'H', 'SICK': 'S', 
                             'PERMIT': 'I', 'ALPHA': 'A'
                         }
-                        emp_matrix[d] = status_map.get(first_log.status, 'H')
+                        st = status_map.get(first_log.status, 'H')
+                        emp_matrix[d] = st
+                        
+                        # Stats Calculation
+                        if st == 'H':
+                            emp_stats['H'] += 1
+                            # Check Late
+                            # Check Late
+                            local_dt = timezone.localtime(first_log.timestamp)
+                            
+                            # Dynamic Schedule for Matrix
+                            # Note: This increases query count (N*30). 
+                            # If performance issues arise, consider bulk pre-fetching assignments.
+                            daily_sch, _ = get_employee_schedule(emp, d)
+                            
+                            sch_in = DEFAULT_SCHEDULE_IN
+                            tol = 0
+                            if daily_sch:
+                                sch_in = daily_sch.clock_in
+                                tol = daily_sch.late_tolerance
+                                
+                            dummy_date = date(2000, 1, 1)
+                            dt_sch = datetime.combine(dummy_date, sch_in)
+                            dt_threshold = dt_sch + timedelta(minutes=tol)
+                            
+                            # Only count late if NOT holiday and NOT Sunday
+                            is_weekend = d.weekday() == 6  # Sunday only
+                            
+                            # Round clock-in time to minutes (ignore seconds)
+                            # This ensures 08:10:05 is treated as 08:10:00
+                            clock_time_rounded = local_dt.time().replace(second=0, microsecond=0)
+                            threshold_time_rounded = dt_threshold.time().replace(second=0, microsecond=0)
+                            
+                            # DEBUG: Print late calculation details
+                            if emp.full_name and 'Joni' in emp.full_name:
+                                print(f"DEBUG MATRIX [{d}] {emp.full_name}: clock={local_dt.time()} -> rounded={clock_time_rounded}, threshold={threshold_time_rounded}, is_late={clock_time_rounded > threshold_time_rounded}")
+                            
+                            if clock_time_rounded > threshold_time_rounded and not is_holiday and not is_weekend:
+                                emp_stats['T'] += 1
+                        elif st == 'S':
+                            emp_stats['S'] += 1
+                        elif st == 'I':
+                            emp_stats['I'] += 1
+                        elif st == 'A':
+                            emp_stats['A'] += 1
+
                     else:
                         if is_holiday:
                             emp_matrix[d] = 'L' # Libur Nasional
-                        elif d.weekday() >= 5:
+                        elif d.weekday() == 6: # Sunday Only
                             emp_matrix[d] = 'L' # Libur Weekend
                         elif d < now.date():
                             emp_matrix[d] = 'A'
+                            emp_stats['A'] += 1
+                            # Check Leave for Alpha?
+                            # Optimally we should check leaves here too for FP matrix to be accurate
+                            # But for now let's stick to existing logic + stats
+                            # (Existing logic didn't check leaves for FP matrix AFAIK? 
+                            # Wait, line 1426 checks leave for PERSONAL view. Matrix view didn't seem to check leave?
+                            # Actually, let's keep it simple for now as requested: just summary cols logic)
                         else:
                             emp_matrix[d] = ''
                 
                 matrix_data[emp.id] = emp_matrix
-
+                fp_summary_stats[emp.id] = emp_stats
+            
     # Prepare Holidays Map for Template (Date String -> Name)
+    # MOVED OUTSIDE if mode == 'matrix' block to fix UnboundLocalError
     holidays_map = {}
     id_holidays = holidays.ID(years=[year, year-1]) 
+    
     for d in date_range:
         if d in id_holidays:
             # Key must be string to match template date filter
             holidays_map[d.strftime('%Y-%m-%d')] = id_holidays.get(d)
+        elif d.weekday() == 6:
+            # Explicitly mark Sundays for template coloring
+            holidays_map[d.strftime('%Y-%m-%d')] = "Minggu"
 
     # =========================================================================
     # WHATSAPP / TELEGRAM 5-POINT TRACKING
@@ -1543,24 +1648,34 @@ def recap_matrix_view(request):
     # Split employees by source type
     fingerprint_employees = []
     wa_employees = []
-    
+
     if employees:
-        # Get all employees who have TELEGRAM logs (WA)
-        wa_employee_ids = AttendanceLog.objects.filter(
+        # Get employees with confirmed log sources
+        has_wa_logs = set(AttendanceLog.objects.filter(
             employee__in=employees,
             source_type='TELEGRAM'
-        ).values_list('employee_id', flat=True).distinct()
+        ).values_list('employee_id', flat=True))
         
-        # Get employees with FINGERPRINT logs exclusively (no WA logs)
-        fp_employee_ids = AttendanceLog.objects.filter(
+        has_fp_logs = set(AttendanceLog.objects.filter(
             employee__in=employees,
             source_type='FINGERPRINT'
-        ).exclude(
-            employee_id__in=wa_employee_ids
-        ).values_list('employee_id', flat=True).distinct()
+        ).values_list('employee_id', flat=True))
         
-        fingerprint_employees = [e for e in employees if e.id in fp_employee_ids or e.id not in wa_employee_ids]
-        wa_employees = [e for e in employees if e.id in wa_employee_ids]
+        for e in employees:
+            # 1. Existing logs dictate category
+            if e.id in has_wa_logs:
+                wa_employees.append(e)
+            elif e.id in has_fp_logs:
+                fingerprint_employees.append(e)
+            else:
+                # 2. No logs yet? Use Heuristic based on Employee Type
+                # 'HARIAN' (Buruh Harian) -> WA (Lapangan)
+                # 'MANDOR' -> WA (Lapangan)
+                if e.employee_type in ['HARIAN', 'MANDOR']:
+                    wa_employees.append(e)
+                else:
+                    # Default for Staff / Others
+                    fingerprint_employees.append(e)
     
     # WA 5-Point Categories
     WA_CATEGORIES = ['MASUK', 'CHECKPOINT_1', 'ISTIRAHAT', 'CHECKPOINT_2', 'PULANG']
@@ -1646,37 +1761,58 @@ def recap_matrix_view(request):
                 
                 curr += timedelta(days=1)
         
-        # Calculate summary per employee (missing checkpoints, izin count)
+        # Calculate summary per employee
         wa_summary_data = {}
+        # We'll use a new dict for the 5-column stats to avoid breaking existing logic if needed
+        # But actually let's just add to wa_summary_data
+        
         for emp in wa_employees:
             wa_summary_data[emp.id] = {
-                'missing_pagi': 0,
-                'missing_cp1': 0,
-                'missing_istirahat': 0,
-                'missing_cp2': 0,
-                'missing_pulang': 0,
-                'izin_count': 0,
+                'missing_pagi': 0, 'missing_cp1': 0, 'missing_istirahat': 0,
+                'missing_cp2': 0, 'missing_pulang': 0, 'izin_count': 0,
                 'total_missing': 0,
+                # New Stats
+                'H': 0, 'A': 0, 'T': 0, 'S': 0, 'I': 0
             }
             for d in wa_date_range:
                 date_str = d.isoformat()
-                # Skip future dates, holidays, and Sundays
+                day_data = wa_matrix_data[emp.id][d]
+                
+                # Check Izin/Sakit first
+                izin_status = day_data.get('IZIN')
+                if izin_status:
+                    if 'SAKIT' in izin_status.upper():
+                        wa_summary_data[emp.id]['S'] += 1
+                    else:
+                        wa_summary_data[emp.id]['I'] += 1
+                    wa_summary_data[emp.id]['izin_count'] += 1
+                    # Don't count H/A/Missing if Izin
+                    continue
+                
+                # Check Hadir (Masuk)
+                masuk_time = day_data.get('MASUK')
+                if masuk_time:
+                    wa_summary_data[emp.id]['H'] += 1
+                    # Check Late
+                    # masuk_time is string "HH:MM"
+                    if masuk_time > "08:00":
+                        wa_summary_data[emp.id]['T'] += 1
+                else:
+                    # No Masuk
+                    # Check Alpha: Not holiday, Not Sunday, Past Date
+                    if d < now.date() and date_str not in holidays_set and d.weekday() != 6:
+                         wa_summary_data[emp.id]['A'] += 1
+                
+                # Skip stats for future/holidays for Missing Point Calculation
                 if d > now.date() or date_str in holidays_set or d.weekday() == 6:
                     continue
-                day_data = wa_matrix_data[emp.id][d]
-                if day_data.get('IZIN'):
-                    wa_summary_data[emp.id]['izin_count'] += 1
-                    continue  # Don't count as missing if Izin
-                if not day_data.get('MASUK'):
-                    wa_summary_data[emp.id]['missing_pagi'] += 1
-                if not day_data.get('CHECKPOINT_1'):
-                    wa_summary_data[emp.id]['missing_cp1'] += 1
-                if not day_data.get('ISTIRAHAT'):
-                    wa_summary_data[emp.id]['missing_istirahat'] += 1
-                if not day_data.get('CHECKPOINT_2'):
-                    wa_summary_data[emp.id]['missing_cp2'] += 1
-                if not day_data.get('PULANG'):
-                    wa_summary_data[emp.id]['missing_pulang'] += 1
+
+                if not day_data.get('MASUK'): wa_summary_data[emp.id]['missing_pagi'] += 1
+                if not day_data.get('CHECKPOINT_1'): wa_summary_data[emp.id]['missing_cp1'] += 1
+                if not day_data.get('ISTIRAHAT'): wa_summary_data[emp.id]['missing_istirahat'] += 1
+                if not day_data.get('CHECKPOINT_2'): wa_summary_data[emp.id]['missing_cp2'] += 1
+                if not day_data.get('PULANG'): wa_summary_data[emp.id]['missing_pulang'] += 1
+            
             wa_summary_data[emp.id]['total_missing'] = (
                 wa_summary_data[emp.id]['missing_pagi'] +
                 wa_summary_data[emp.id]['missing_cp1'] +
@@ -1693,7 +1829,12 @@ def recap_matrix_view(request):
     # If requests explicit tab via GET or if WA Employee ID is present -> WhatsApp
     if request.GET.get('tab') == 'whatsapp' or wa_employee_id or request.GET.get('active_tab') == 'whatsapp':
         active_tab = 'whatsapp'
-    
+
+    # Convert keys to string for template compatibility
+    print(f"DEBUG: Pre-Context. Matrix Size: {len(matrix_data)}. FP Stats Size: {len(fp_summary_stats)}")
+    fp_summary_stats_str = {str(k): v for k, v in fp_summary_stats.items()} if fp_summary_stats else {}
+    wa_summary_data_str = {str(k): v for k, v in wa_summary_data.items()} if wa_summary_data else {}
+
     context = {
         'selected_location': selected_location,
         'all_locations': all_locations,
@@ -1705,6 +1846,8 @@ def recap_matrix_view(request):
         'fingerprint_employees': fingerprint_employees,
         'wa_employees': wa_employees,
         'matrix_data': matrix_data,
+        'fp_summary_stats': fp_summary_stats_str,
+        'wa_summary_data': wa_summary_data_str,
         'date_range': date_range,
         'holidays_map': holidays_map,
         'selected_employee_id': employee_id,
@@ -1927,6 +2070,7 @@ def recap_matrix_view(request):
         
         # Fingerprint Employees (for Tab 1)
         'fingerprint_employees': fingerprint_employees,
+        'fp_summary_stats': fp_summary_stats_str, # RE-ADDED: Lost in context redefinition
         
         # WhatsApp / Telegram Context (for Tab 2)
         'wa_employees': wa_employees,

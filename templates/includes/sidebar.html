@@ -21,7 +21,7 @@
                 <a href="{% url 'portal:tree_explorer' %}"
                     class="nav-link text-white {% if request.resolver_match.url_name == 'tree_explorer' %}active bg-primary{% endif %} d-flex align-items-center">
                     <i class="fas fa-sitemap fa-fw me-3"></i>
-                    Pusat Data Wilayah
+                    Data Wilayah
                 </a>
             </li>
 
@@ -29,7 +29,7 @@
                 <a href="{% url 'portal:recap_matrix' %}"
                     class="nav-link text-white {% if request.resolver_match.url_name == 'recap_matrix' %}active bg-primary{% endif %} d-flex align-items-center">
                     <i class="fas fa-table fa-fw me-3"></i>
-                    Meja Kerja Rekapitulasi
+                    Rekapitulasi
                 </a>
             </li>
 
@@ -38,7 +38,7 @@
                 <a href="#submenu-sync" data-bs-toggle="collapse" class="nav-link text-white d-flex align-items-center align-items-center justify-content-between {% if 'sync' in request.resolver_match.url_name %}active bg-primary{% endif %}">
                     <div class="d-flex align-items-center">
                         <i class="fas fa-sync fa-fw me-3"></i>
-                        <span>Pusat Sinkronisasi</span>
+                        <span>Sinkronisasi</span>
                     </div>
                     <i class="fas fa-chevron-down small transition-icon"></i>
                 </a>

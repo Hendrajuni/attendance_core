@@ -9,16 +9,23 @@
     /* ========================
        Matrix Table Styling
        ======================== */
+    /* .table-matrix styles consolidated below */
     .table-matrix td, .table-matrix th {
         white-space: nowrap;
         vertical-align: middle;
         text-align: center;
-        padding: 0.2rem;
+        text-align: center;
+        padding: 0 !important; /* Extremely compact */
+        border: 1px solid #dee2e6 !important; /* Solid grid lines like WhatsApp table */
+    }
+    .table-matrix th {
+        border-bottom: 2px solid #dee2e6 !important;
     }
     .col-no { width: 40px; }
     .col-name { 
-        min-width: 250px; 
+        min-width: 350px; 
         text-align: left !important;
+        white-space: nowrap !important;
         position: sticky;
         left: 0;
         z-index: 100;
@@ -26,22 +33,43 @@
         border-right: 2px solid #dee2e6 !important;
         box-shadow: 2px 0 5px -2px rgba(0,0,0,0.1);
     }
+    .col-name a:hover { 
+        color: #0d6efd !important; 
+        text-decoration: underline !important; 
+    }
+    /* Sticky Header for Matrix Table */
     .table-matrix thead th {
         position: sticky;
         top: 0;
-        z-index: 90;
+        z-index: 100;
         background-color: #212529 !important;
         color: white;
     }
-    .table-matrix thead th.col-name { z-index: 110; }
-    .bg-holiday-column { background-color: #fff0f0 !important; }
+    /* Column # sticky to left */
+    .table-matrix thead th.col-no,
+    .table-matrix tbody td.col-no {
+        position: sticky;
+        left: 0;
+        z-index: 95;
+    }
+    .table-matrix thead th.col-no { z-index: 105; }
+    
+    /* Column Name sticky to left (after #) */
+    .table-matrix thead th.col-name { 
+        z-index: 110; 
+        left: 40px;
+    }
+    .bg-holiday-column { 
+        background-color: #ffcdd2 !important; /* Visible red for background */
+        color: #b71c1c !important; /* Dark red for text */
+    }
     
     .status-cell {
-        width: 32px; height: 32px;
-        line-height: 32px;
-        font-size: 0.85rem; font-weight: bold;
-        border-radius: 4px;
-        margin: 0 auto;
+        width: 22px; height: 22px;
+        line-height: 22px;
+        font-size: 0.7rem; font-weight: bold;
+        border-radius: 3px;
+        margin: 1px auto;
         cursor: pointer;
         transition: all 0.2s;
         display: flex; align-items: center; justify-content: center;
@@ -170,11 +198,14 @@
 
 {% block content %}
 <!-- FILTER SECTION -->
-<div class="row mb-4">
+<div class="row mb-2">
     <div class="col-12">
-        <div class="card border-0 shadow-sm rounded-4">
-            <div class="card-body p-4 bg-white">
-                <form method="get" class="row g-3 align-items-end">
+        <div class="card border-0 shadow-sm rounded-3">
+            <div class="card-body p-2 bg-white">
+                <!-- Filter Form -->
+                <form method="get" class="row g-2 align-items-end">
+                    
+                    <!-- Debug info removed -->
                     <input type="hidden" name="active_tab" value="{{ active_tab }}">
                     {% if can_select_location %}
                     <div class="col-md-3">
@@ -214,7 +245,7 @@
 </div>
 
 <!-- TABS NAVIGATION -->
-<ul class="nav nav-tabs mb-4" id="attendanceTabs" role="tablist">
+<ul class="nav nav-tabs mb-2" id="attendanceTabs" role="tablist">
     <li class="nav-item">
         <button class="nav-link {% if active_tab == 'fingerprint' %}active{% endif %}" id="fp-tab" data-bs-toggle="tab" data-bs-target="#tab-fingerprint" type="button" onclick="document.querySelector('[name=active_tab]').value='fingerprint'">
             <i class="fas fa-fingerprint me-2"></i> Fingerprint / Mesin
@@ -236,7 +267,7 @@
          ===================================================================== -->
     <div class="tab-pane fade {% if active_tab == 'fingerprint' %}show active{% endif %}" id="tab-fingerprint" role="tabpanel">
         <!-- FINGERPRINT FILTER (Employee) -->
-        <form method="get" class="mb-4">
+        <form method="get" class="mb-2">
             <input type="hidden" name="location_id" value="{{ selected_location.id }}">
             <input type="hidden" name="month" value="{{ selected_month }}">
             <input type="hidden" name="year" value="{{ selected_year }}">
@@ -291,48 +322,70 @@
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-bordered table-hover mb-0">
-                            <thead class="table-light">
+                        <table class="table table-sm table-bordered table-hover mb-0" style="font-size: 0.9rem;">
+                            <thead class="table-dark">
                                 <tr class="text-center">
-                                    <th style="width: 80px;">Tgl</th>
-                                    <th style="width: 60px;">Hari</th>
-                                    <th style="width: 70px;">Masuk</th>
-                                    <th style="width: 70px;">CP1</th>
-                                    <th style="width: 70px;">Ist</th>
-                                    <th style="width: 70px;">CP2</th>
-                                    <th style="width: 70px;">Pulang</th>
-                                    <th style="width: 100px;">Status</th>
+                                    <th style="width: 70px; padding: 8px;">Tgl</th>
+                                    <th style="width: 50px; padding: 8px;">Hari</th>
+                                    <th style="width: 80px; padding: 8px;">Masuk</th>
+                                    <th style="width: 80px; padding: 8px;">Pulang</th>
+                                    <th style="width: 60px; padding: 8px;">Telat</th>
+                                    <th style="width: 70px; padding: 8px;">Lembur</th>
+                                    <th style="width: 100px; padding: 8px;">Status</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {% for log in personal_logs %}
-                                <tr class="{% if log.is_holiday or log.is_weekend %}table-secondary{% endif %}">
-                                    <td class="text-center fw-bold">{{ log.date|date:"d M" }}</td>
-                                    <td class="text-center text-muted small">{{ log.date|date:"D" }}</td>
-                                    <td class="text-center {% if log.cp_masuk %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
-                                        {{ log.cp_masuk|default:"-" }}
+                                {% for day in personal_logs %}
+                                <tr class="{% if day.is_weekend or day.is_holiday %}table-secondary{% endif %}">
+                                    <td class="text-center py-1 fw-bold">{{ day.date|date:"d" }}</td>
+                                    <td class="text-center py-1 text-muted">{{ day.date|date:"D" }}</td>
+                                    
+                                    <!-- Masuk -->
+                                    <td class="text-center py-1">
+                                        {% if day.cp_masuk %}
+                                            <span class="fw-bold">{{ day.cp_masuk }}</span>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
                                     </td>
-                                    <td class="text-center {% if log.cp_1 %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
-                                        {{ log.cp_1|default:"-" }}
+                                    
+                                    <!-- Pulang -->
+                                    <td class="text-center py-1">
+                                        {% if day.cp_pulang %}
+                                            <span class="fw-bold">{{ day.cp_pulang }}</span>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
                                     </td>
-                                    <td class="text-center {% if log.cp_istirahat %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
-                                        {{ log.cp_istirahat|default:"-" }}
+
+                                    <!-- Telat -->
+                                    <td class="text-center py-1">
+                                        {% if day.late_minutes > 0 %}
+                                            <span class="badge bg-danger">{{ day.late_minutes }}m</span>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
                                     </td>
-                                    <td class="text-center {% if log.cp_2 %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
-                                        {{ log.cp_2|default:"-" }}
+
+                                    <!-- Lembur -->
+                                    <td class="text-center py-1">
+                                        {% if day.overtime_minutes > 0 %}
+                                            <span class="badge bg-success">+{{ day.overtime_minutes }}m</span>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
                                     </td>
-                                    <td class="text-center {% if log.cp_pulang %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
-                                        {{ log.cp_pulang|default:"-" }}
-                                    </td>
-                                    <td class="text-center">
-                                        {% if log.is_holiday %}
+                                    
+                                    <!-- Status -->
+                                    <td class="text-center py-1">
+                                        {% if day.is_holiday %}
                                             <span class="badge bg-secondary">Libur</span>
-                                        {% elif log.is_weekend %}
+                                        {% elif day.is_weekend %}
                                             <span class="badge bg-secondary">Minggu</span>
-                                        {% elif log.raw_status == 'CHECKIN' or log.clock_in != '-' %}
+                                        {% elif day.raw_status == 'CHECKIN' or day.clock_in != '-' %}
                                             <i class="fas fa-check-circle text-success"></i>
-                                            {% if log.late_minutes > 0 %}<small class="text-danger ms-1">+{{ log.late_minutes }}m</small>{% endif %}
-                                        {% elif 'Alpha' in log.status %}
+                                            {% if day.late_minutes > 0 %}<small class="text-danger ms-1">+{{ day.late_minutes }}m</small>{% endif %}
+                                        {% elif 'Alpha' in day.status %}
                                             <span class="badge bg-danger">Alpha</span>
                                         {% else %}
                                             <span class="text-muted">-</span>
@@ -404,35 +457,50 @@
             <!-- MATRIX VIEW (FINGERPRINT) -->
             <div class="card shadow border-0 rounded-4">
                 <div class="card-body p-0">
-                    <div class="table-responsive" style="max-height: 70vh;">
+                    <div style="max-height: 70vh; overflow: auto;">
                         <table class="table table-bordered table-matrix mb-0">
-                            <thead>
+                            <thead style="position: sticky; top: 0; z-index: 100;">
                                 <tr>
                                     <th class="text-center p-2 col-no">#</th>
                                     <th class="p-2 col-name">Nama Karyawan</th>
                                     {% for d in date_range %}
                                         {% with date_str=d|date:"Y-m-d" %}
+                                        <!-- Check Holiday: Map lookup -->
                                         {% with holiday_name=holidays_map|dict_get:date_str %}
-                                        <th class="text-center p-1 {% if d.weekday == 6 or holiday_name %}bg-holiday-column{% endif %}" style="min-width: 32px;" title="{{ holiday_name|default:'' }}">
-                                            <div style="font-size: 0.85rem;">{{ d|date:"d" }}</div>
-                                            <div style="font-size: 0.6rem; opacity: 0.7;">{{ d|date:"D"|slice:":2" }}</div>
+                                        <th class="text-center {% if holiday_name %}bg-holiday-column{% endif %}" style="min-width: 24px; padding: 0.75rem 0.1rem !important; vertical-align: middle;" title="{{ holiday_name|default:'' }}">
+                                            <div style="font-size: 0.85rem; line-height: 1.2;">{{ d|date:"d" }}</div>
+                                            <div style="font-size: 0.65rem; opacity: 0.7; line-height: 1;">{{ d|date:"D"|slice:":2" }}</div>
                                         </th>
                                         {% endwith %}
                                         {% endwith %}
                                     {% endfor %}
+                                    <!-- Summary Headers -->
+                                    <th class="text-center bg-light p-2" style="border-left: 2px solid #dee2e6; width: 40px;" title="Total Hadir">H</th>
+                                    <th class="text-center bg-light p-2" style="width: 40px;" title="Total Telat">T</th>
+                                    <th class="text-center bg-light p-2" style="width: 40px;" title="Total Alpha">A</th>
+                                    <th class="text-center bg-light p-2" style="width: 40px;" title="Total Sakit">S</th>
+                                    <th class="text-center bg-light p-2" style="width: 40px;" title="Total Izin">I</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for emp in fingerprint_employees %}
                                 <tr>
                                     <td class="text-center text-muted bg-white">{{ forloop.counter }}</td>
-                                    <td class="fw-bold col-name">{{ emp.full_name }}</td>
+                                    <td class="fw-bold col-name" style="padding: 0 0.5rem !important;">
+                                        <a href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&active_tab=fingerprint&employee_id={{ emp.id }}" 
+                                           class="text-decoration-none text-dark" 
+                                           title="Lihat Rekap Personal {{ emp.full_name }}"
+                                           style="display: block; line-height: 22px; font-size: 0.75rem;">
+                                             {{ emp.full_name }}
+                                        </a>
+                                    </td>
                                     {% for d in date_range %}
                                         {% with date_str=d|date:"Y-m-d" %}
                                         {% with status=matrix_data|dict_get:emp.id|dict_get:d %}
                                         {% with holiday_name=holidays_map|dict_get:date_str %}
-                                        <td class="p-1 {% if d.weekday == 6 or holiday_name %}bg-holiday-column{% endif %} text-center" 
-                                            style="cursor: pointer;"
+                                        <!-- Cell with conditional holiday class -->
+                                        <td class="text-center {% if holiday_name %}bg-holiday-column{% endif %}" 
+                                            style="cursor: pointer; padding: 0 !important; vertical-align: middle;"
                                             hx-get="{% url 'portal:fp_edit_cell' emp.id date_str %}"
                                             hx-target="#fp-edit-modal-content"
                                             hx-trigger="click"
@@ -446,6 +514,15 @@
                                         {% endwith %}
                                         {% endwith %}
                                     {% endfor %}
+                                    
+                                    <!-- Summary Cells -->
+                                    {% with stats=fp_summary_stats|dict_get:emp.id %}
+                                    <td class="text-center fw-bold bg-light" style="border-left: 2px solid #dee2e6; color: #198754;">{{ stats.H|default:0 }}</td>
+                                    <td class="text-center fw-bold bg-light" style="color: #fd7e14;">{{ stats.T|default:0 }}</td>
+                                    <td class="text-center fw-bold bg-light" style="color: #dc3545;">{{ stats.A|default:0 }}</td>
+                                    <td class="text-center fw-bold bg-light text-warning">{{ stats.S|default:0 }}</td>
+                                    <td class="text-center fw-bold bg-light text-info">{{ stats.I|default:0 }}</td>
+                                    {% endwith %}
                                 </tr>
                                 {% endfor %}
                             </tbody>
@@ -650,12 +727,14 @@
                                     {% for d in wa_date_range %}
                                         {% with date_str=d|date:"Y-m-d" %}
                                         {% with holiday_name=holidays_map|dict_get:date_str %}
-                                        <th colspan="5" class="{% if d.weekday == 6 or holiday_name %}bg-danger{% endif %}" style="border-left: 2px solid #444; padding: 2px;" title="{{ holiday_name|default:'' }}">
+                                        <th colspan="5" class="{% if holiday_name %}bg-danger{% endif %}" style="border-left: 2px solid #444; padding: 2px;" title="{{ holiday_name|default:'' }}">
                                             {{ d|date:"d" }}<br><small class="opacity-75">{{ d|date:"D"|slice:":2" }}</small>
                                         </th>
                                         {% endwith %}
                                         {% endwith %}
                                     {% endfor %}
+                                    <!-- SUMMARY COLUMNS RIGHT -->
+                                    <th colspan="5" class="bg-primary text-white" style="position: sticky; right: 0; z-index: 20; border-left: 2px solid #dee2e6;">Total Rekap</th>
                                 </tr>
                                 <!-- Row 2: Checkpoint Labels -->
                                 <tr>
@@ -673,6 +752,12 @@
                                         <th style="width: 32px; padding: 1px;" title="Checkpoint 2">2</th>
                                         <th style="width: 32px; padding: 1px;" title="Pulang">O</th>
                                     {% endfor %}
+                                    <!-- SUMMARY SUB-HEADERS RIGHT -->
+                                    <th style="width: 30px; padding: 4px; background: #e2e3e5; border-left: 2px solid #dee2e6;" title="Hadir">H</th>
+                                    <th style="width: 30px; padding: 4px; background: #e2e3e5;" title="Telat">T</th>
+                                    <th style="width: 30px; padding: 4px; background: #e2e3e5;" title="Alpha">A</th>
+                                    <th style="width: 30px; padding: 4px; background: #e2e3e5;" title="Sakit">S</th>
+                                    <th style="width: 30px; padding: 4px; background: #e2e3e5;" title="Izin">I</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -740,6 +825,12 @@
                                         {% endwith %}
                                         {% endwith %}
                                     {% endfor %}
+                                    <!-- SUMMARY CELLS RIGHT -->
+                                    <td class="text-center fw-bold bg-light" style="border-left: 2px solid #dee2e6; color: #198754;">{{ emp_summary.H }}</td>
+                                    <td class="text-center fw-bold bg-light" style="color: #fd7e14;">{{ emp_summary.T }}</td>
+                                    <td class="text-center fw-bold bg-light" style="color: #dc3545;">{{ emp_summary.A }}</td>
+                                    <td class="text-center fw-bold bg-light text-warning">{{ emp_summary.S }}</td>
+                                    <td class="text-center fw-bold bg-light text-info">{{ emp_summary.I }}</td>
                                 </tr>
                                 {% endwith %}
                                 {% empty %}

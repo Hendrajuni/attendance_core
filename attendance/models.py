@@ -110,6 +110,7 @@ class DailySchedule(models.Model):
     scan_out_start = models.TimeField(null=True, blank=True, help_text="Awal window scan pulang")
     scan_out_end = models.TimeField(null=True, blank=True, help_text="Akhir window scan pulang")
     late_tolerance = models.IntegerField(default=0, help_text="Toleransi keterlambatan (menit)")
+    overtime_tolerance = models.IntegerField(default=0, help_text="Toleransi lembur setelah jam pulang (menit). Contoh: 60 = lembur dihitung setelah 1 jam dari jam pulang.")
     
     # --- Telegram Specific (Multi-Point) ---
     enable_checkin_1 = models.BooleanField(default=False, help_text="Aktifkan Checkpoint 1")

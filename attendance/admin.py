@@ -103,7 +103,7 @@ class DailyScheduleAdmin(admin.ModelAdmin):
                 ('break_start', 'break_end'),
                 ('scan_in_start', 'scan_in_end'),
                 ('scan_out_start', 'scan_out_end'),
-                'late_tolerance',
+                ('late_tolerance', 'overtime_tolerance'),
             ),
             'description': 'Konfigurasi jam kerja dasar dan toleransi scan mesin fingerprint.'
         }),
