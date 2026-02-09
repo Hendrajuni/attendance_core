@@ -1,0 +1,767 @@
+{% extends 'base.html' %}
+{% load static portal_filters %}
+
+{% block title %}Meja Kerja Rekapitulasi{% endblock %}
+{% block page_title %}Meja Kerja Rekapitulasi{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* ========================
+       Matrix Table Styling
+       ======================== */
+    .table-matrix td, .table-matrix th {
+        white-space: nowrap;
+        vertical-align: middle;
+        text-align: center;
+        padding: 0.2rem;
+    }
+    .col-no { width: 40px; }
+    .col-name { 
+        min-width: 250px; 
+        text-align: left !important;
+        position: sticky;
+        left: 0;
+        z-index: 100;
+        background-color: #fff;
+        border-right: 2px solid #dee2e6 !important;
+        box-shadow: 2px 0 5px -2px rgba(0,0,0,0.1);
+    }
+    .table-matrix thead th {
+        position: sticky;
+        top: 0;
+        z-index: 90;
+        background-color: #212529 !important;
+        color: white;
+    }
+    .table-matrix thead th.col-name { z-index: 110; }
+    .bg-holiday-column { background-color: #fff0f0 !important; }
+    
+    .status-cell {
+        width: 32px; height: 32px;
+        line-height: 32px;
+        font-size: 0.85rem; font-weight: bold;
+        border-radius: 4px;
+        margin: 0 auto;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .cell-hadir { color: #198754; font-weight: bold; }
+    .cell-alpha { background-color: #dc3545; color: white; }
+    .cell-izin  { background-color: #ffc107; color: #212529; }
+    .cell-libur { color: #dc3545; }
+    .cell-empty { border: 1px dashed #e0e0e0; color: #adb5bd; }
+    .status-cell:hover { transform: scale(1.1); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+
+    /* ========================
+       Personal View (Calendar Row)
+       ======================== */
+    .premium-card {
+        border: none;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+        border-radius: 12px;
+        overflow: hidden;
+        background: #fff;
+    }
+    .personal-header-bg {
+        background: linear-gradient(120deg, #2c3e50, #4ca1af);
+        padding: 2rem;
+        color: white;
+    }
+    .stat-widget {
+        background: rgba(255,255,255,0.1);
+        border-radius: 10px;
+        padding: 1rem;
+        border: 1px solid rgba(255,255,255,0.2);
+        color: white;
+        text-align: center;
+        min-width: 90px;
+    }
+    .stat-widget .label { font-size: 0.7rem; text-transform: uppercase; opacity: 0.8; }
+    .stat-widget .value { font-size: 1.3rem; font-weight: 700; }
+    
+    .table-calendar { width: 100%; border-collapse: separate; border-spacing: 0; }
+    .table-calendar th {
+        background-color: #f8f9fa;
+        color: #6c757d;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        font-weight: 600;
+        padding: 1rem;
+        border-bottom: 1px solid #e9ecef;
+    }
+    .table-calendar td {
+        padding: 1rem;
+        vertical-align: middle;
+        border-bottom: 1px solid #f1f3f5;
+        background-color: #fff;
+    }
+    .table-calendar tr:hover td { background-color: #fafbfc; }
+    .date-box {
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        width: 55px; height: 55px;
+        border-radius: 8px;
+        background-color: #f8f9fa;
+    }
+    .date-box.is-holiday { background-color: #fff5f5; color: #e03131; }
+    .date-box.is-weekend { background-color: #f1f3f5; color: #adb5bd; }
+    .date-day { font-size: 1.4rem; font-weight: 800; line-height: 1; }
+    .date-weekday { font-size: 0.65rem; text-transform: uppercase; font-weight: 600; }
+    .time-schedule { font-size: 0.75rem; color: #868e96; }
+    .time-actual { font-size: 1rem; font-weight: 700; font-family: monospace; }
+    .text-late { color: #e03131 !important; }
+    .text-ontime { color: #2f9e44 !important; }
+    .hover-reveal { opacity: 0; transition: opacity 0.2s; }
+    .table-calendar tr:hover .hover-reveal { opacity: 1; }
+
+    /* ========================
+       Tab Styling
+       ======================== */
+    .nav-tabs .nav-link {
+        border: none;
+        color: #6c757d;
+        font-weight: 600;
+        padding: 1rem 1.5rem;
+        border-bottom: 3px solid transparent;
+    }
+    .nav-tabs .nav-link.active {
+        color: #2c3e50;
+        border-bottom-color: #4ca1af;
+        background: transparent;
+    }
+    .nav-tabs .nav-link:hover { color: #2c3e50; }
+    
+    /* ========================
+       WA 5-Point Table
+       ======================== */
+    .table-wa-daily { font-size: 0.85rem; }
+    .table-wa-daily th { 
+        background: #f8f9fa; 
+        font-size: 0.7rem; 
+        text-transform: uppercase; 
+        padding: 0.75rem 0.5rem;
+        text-align: center;
+    }
+    .table-wa-daily td { 
+        padding: 0.5rem; 
+        text-align: center; 
+        vertical-align: middle;
+    }
+    .checkpoint-cell {
+        font-family: 'SF Mono', monospace;
+        font-weight: 600;
+        font-size: 0.8rem;
+        padding: 4px 8px;
+        border-radius: 4px;
+    }
+    .checkpoint-filled { background: #ebfbee; color: #2b8a3e; }
+    .checkpoint-empty { color: #ced4da; }
+    .progress-mini {
+        height: 6px;
+        border-radius: 3px;
+        background: #e9ecef;
+    }
+    .progress-mini .progress-bar {
+        background: linear-gradient(90deg, #4ca1af, #2c3e50);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- FILTER SECTION -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm rounded-4">
+            <div class="card-body p-4 bg-white">
+                <form method="get" class="row g-3 align-items-end">
+                    <input type="hidden" name="active_tab" value="{{ active_tab }}">
+                    {% if can_select_location %}
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted text-uppercase">Lokasi</label>
+                        <select name="location_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                            {% for loc in all_locations %}
+                                <option value="{{ loc.id }}" {% if loc.id|stringformat:"s" == selected_location.id|stringformat:"s" %}selected{% endif %}>{{ loc.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endif %}
+                    <div class="col-md-2">
+                        <label class="form-label small fw-bold text-muted text-uppercase">Bulan</label>
+                        <select name="month" class="form-select form-select-sm">
+                            {% for m_num, m_name in month_names %}
+                                <option value="{{ m_num }}" {% if m_num == selected_month %}selected{% endif %}>{{ m_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small fw-bold text-muted text-uppercase">Tahun</label>
+                        <select name="year" class="form-select form-select-sm">
+                            {% for y in year_options %}
+                                <option value="{{ y }}" {% if y == selected_year %}selected{% endif %}>{{ y }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button type="submit" class="btn btn-dark btn-sm w-100 fw-bold py-2">
+                            <i class="fas fa-filter me-1"></i> Terapkan
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- TABS NAVIGATION -->
+<ul class="nav nav-tabs mb-4" id="attendanceTabs" role="tablist">
+    <li class="nav-item">
+        <button class="nav-link {% if active_tab == 'fingerprint' %}active{% endif %}" id="fp-tab" data-bs-toggle="tab" data-bs-target="#tab-fingerprint" type="button" onclick="document.querySelector('[name=active_tab]').value='fingerprint'">
+            <i class="fas fa-fingerprint me-2"></i> Fingerprint / Mesin
+            <span class="badge bg-secondary ms-2">{{ fingerprint_employees|length }}</span>
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link {% if active_tab == 'whatsapp' %}active{% endif %}" id="wa-tab" data-bs-toggle="tab" data-bs-target="#tab-whatsapp" type="button" onclick="document.querySelector('[name=active_tab]').value='whatsapp'">
+            <i class="fab fa-whatsapp me-2 text-success"></i> WhatsApp / Lapangan
+            <span class="badge bg-success ms-2">{{ wa_employees|length }}</span>
+        </button>
+    </li>
+</ul>
+
+<!-- TABS CONTENT -->
+<div class="tab-content">
+    <!-- =====================================================================
+         TAB 1: FINGERPRINT / MESIN
+         ===================================================================== -->
+    <div class="tab-pane fade {% if active_tab == 'fingerprint' %}show active{% endif %}" id="tab-fingerprint" role="tabpanel">
+        <!-- FINGERPRINT FILTER (Employee) -->
+        <form method="get" class="mb-4">
+            <input type="hidden" name="location_id" value="{{ selected_location.id }}">
+            <input type="hidden" name="month" value="{{ selected_month }}">
+            <input type="hidden" name="year" value="{{ selected_year }}">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label small fw-bold text-muted">Pilih Karyawan</label>
+                    <select name="employee_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                        <option value="">-- Semua Karyawan (Matrix) --</option>
+                        {% for emp in fingerprint_employees %}
+                            <option value="{{ emp.id }}" {% if selected_employee_id == emp.id|stringformat:"s" %}selected{% endif %}>{{ emp.full_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </form>
+
+        {% if mode == 'personal' %}
+            <!-- PERSONAL VIEW (FINGERPRINT) - 5 Checkpoint Classic Table -->
+            <div class="card shadow-sm border-0 rounded-4 mb-4">
+                <div class="card-header bg-dark text-white py-3">
+                    <div class="row align-items-center">
+                        <div class="col-md-6">
+                            <div class="d-flex align-items-center">
+                                <div class="bg-white text-dark rounded-circle d-flex align-items-center justify-content-center shadow-sm" style="width: 48px; height: 48px; font-size: 1.1rem; font-weight: 700;">
+                                    {{ personal_employee.full_name|slice:":1" }}
+                                </div>
+                                <div class="ms-3">
+                                    <h5 class="mb-0 fw-bold">{{ personal_employee.full_name }}</h5>
+                                    <small class="opacity-75">{{ personal_employee.nik }}</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 text-end">
+                            <span class="badge bg-primary fs-6 me-2">
+                                <i class="fas fa-clock me-1"></i> Telat: {{ summary_stats.late }}m
+                            </span>
+                            <span class="badge bg-success fs-6 me-2">
+                                <i class="fas fa-hourglass-half me-1"></i> Lembur: {{ summary_stats.overtime }}m
+                            </span>
+                            <span class="badge bg-danger fs-6">
+                                <i class="fas fa-times-circle me-1"></i> Alpha: {{ summary_stats.alpha }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-bordered table-hover mb-0">
+                            <thead class="table-light">
+                                <tr class="text-center">
+                                    <th style="width: 80px;">Tgl</th>
+                                    <th style="width: 60px;">Hari</th>
+                                    <th style="width: 70px;">Masuk</th>
+                                    <th style="width: 70px;">CP1</th>
+                                    <th style="width: 70px;">Ist</th>
+                                    <th style="width: 70px;">CP2</th>
+                                    <th style="width: 70px;">Pulang</th>
+                                    <th style="width: 100px;">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for log in personal_logs %}
+                                <tr class="{% if log.is_holiday or log.is_weekend %}table-secondary{% endif %}">
+                                    <td class="text-center fw-bold">{{ log.date|date:"d M" }}</td>
+                                    <td class="text-center text-muted small">{{ log.date|date:"D" }}</td>
+                                    <td class="text-center {% if log.cp_masuk %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
+                                        {{ log.cp_masuk|default:"-" }}
+                                    </td>
+                                    <td class="text-center {% if log.cp_1 %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
+                                        {{ log.cp_1|default:"-" }}
+                                    </td>
+                                    <td class="text-center {% if log.cp_istirahat %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
+                                        {{ log.cp_istirahat|default:"-" }}
+                                    </td>
+                                    <td class="text-center {% if log.cp_2 %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
+                                        {{ log.cp_2|default:"-" }}
+                                    </td>
+                                    <td class="text-center {% if log.cp_pulang %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
+                                        {{ log.cp_pulang|default:"-" }}
+                                    </td>
+                                    <td class="text-center">
+                                        {% if log.is_holiday %}
+                                            <span class="badge bg-secondary">Libur</span>
+                                        {% elif log.is_weekend %}
+                                            <span class="badge bg-secondary">Minggu</span>
+                                        {% elif log.raw_status == 'CHECKIN' or log.clock_in != '-' %}
+                                            <i class="fas fa-check-circle text-success"></i>
+                                            {% if log.late_minutes > 0 %}<small class="text-danger ms-1">+{{ log.late_minutes }}m</small>{% endif %}
+                                        {% elif 'Alpha' in log.status %}
+                                            <span class="badge bg-danger">Alpha</span>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- IZIN/CUTI SECTION -->
+            <div class="card shadow-sm border-0 rounded-4">
+                <div class="card-header bg-info text-white py-2">
+                    <i class="fas fa-calendar-plus me-2"></i> Input Izin/Cuti
+                </div>
+                <div class="card-body">
+                    <form hx-post="{% url 'portal:employee_leave_add' %}" 
+                          hx-target="#leave-list-container" 
+                          hx-swap="innerHTML"
+                          class="row g-3 align-items-end">
+                        {% csrf_token %}
+                        <input type="hidden" name="employee_id" value="{{ personal_employee.id }}">
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Tipe</label>
+                            <select name="leave_type" class="form-select form-select-sm" required>
+                                <option value="IZIN">Izin</option>
+                                <option value="SAKIT">Sakit</option>
+                                <option value="CUTI">Cuti Tahunan</option>
+                                <option value="CUTI_KHUSUS">Cuti Khusus</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Dari Tanggal</label>
+                            <input type="date" name="start_date" class="form-control form-control-sm" required 
+                                   value="{{ selected_year }}-{{ selected_month|stringformat:'02d' }}-01">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Sampai Tanggal</label>
+                            <input type="date" name="end_date" class="form-control form-control-sm" required
+                                   value="{{ selected_year }}-{{ selected_month|stringformat:'02d' }}-01">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Keterangan</label>
+                            <input type="text" name="notes" class="form-control form-control-sm" placeholder="Opsional...">
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-info btn-sm w-100">
+                                <i class="fas fa-plus me-1"></i> Simpan
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <hr class="my-3">
+                    
+                    <h6 class="text-muted mb-3"><i class="fas fa-history me-2"></i> Riwayat Izin/Cuti</h6>
+                    <div id="leave-list-container" 
+                         hx-get="{% url 'portal:employee_leave_list' personal_employee.id %}" 
+                         hx-trigger="load">
+                        <div class="text-center py-3 text-muted">
+                            <i class="fas fa-spinner fa-spin"></i> Memuat data...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% else %}
+            <!-- MATRIX VIEW (FINGERPRINT) -->
+            <div class="card shadow border-0 rounded-4">
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 70vh;">
+                        <table class="table table-bordered table-matrix mb-0">
+                            <thead>
+                                <tr>
+                                    <th class="text-center p-2 col-no">#</th>
+                                    <th class="p-2 col-name">Nama Karyawan</th>
+                                    {% for d in date_range %}
+                                        {% with date_str=d|date:"Y-m-d" %}
+                                        {% with holiday_name=holidays_map|dict_get:date_str %}
+                                        <th class="text-center p-1 {% if d.weekday == 6 or holiday_name %}bg-holiday-column{% endif %}" style="min-width: 32px;" title="{{ holiday_name|default:'' }}">
+                                            <div style="font-size: 0.85rem;">{{ d|date:"d" }}</div>
+                                            <div style="font-size: 0.6rem; opacity: 0.7;">{{ d|date:"D"|slice:":2" }}</div>
+                                        </th>
+                                        {% endwith %}
+                                        {% endwith %}
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for emp in fingerprint_employees %}
+                                <tr>
+                                    <td class="text-center text-muted bg-white">{{ forloop.counter }}</td>
+                                    <td class="fw-bold col-name">{{ emp.full_name }}</td>
+                                    {% for d in date_range %}
+                                        {% with date_str=d|date:"Y-m-d" %}
+                                        {% with status=matrix_data|dict_get:emp.id|dict_get:d %}
+                                        {% with holiday_name=holidays_map|dict_get:date_str %}
+                                        <td class="p-1 {% if d.weekday == 6 or holiday_name %}bg-holiday-column{% endif %}">
+                                            <div class="status-cell {% if status == 'H' %}cell-hadir{% elif status == 'A' %}cell-alpha{% elif status == 'S' or status == 'I' %}cell-izin{% elif status == 'L' %}cell-libur{% else %}cell-empty{% endif %}">
+                                                {% if status == 'H' %}H{% elif status == 'A' %}A{% elif status == 'S' %}S{% elif status == 'I' %}I{% elif status == 'L' %}-{% else %}+{% endif %}
+                                            </div>
+                                        </td>
+                                        {% endwith %}
+                                        {% endwith %}
+                                        {% endwith %}
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-footer bg-light p-2 text-center small">
+                        <span class="fw-bold text-success">H</span> Hadir &bull;
+                        <span class="badge bg-danger">A</span> Alpha &bull;
+                        <span class="badge bg-warning text-dark">S/I</span> Sakit/Izin &bull;
+                        <span class="text-danger">-</span> Libur
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- =====================================================================
+         TAB 2: WHATSAPP / LAPANGAN (SPREADSHEET FORMAT)
+         ===================================================================== -->
+    <div class="tab-pane fade {% if active_tab == 'whatsapp' %}show active{% endif %}" id="tab-whatsapp" role="tabpanel">
+        {% if wa_mode == 'personal' %}
+            <!-- WA PERSONAL VIEW (Monthly Detail for Single Employee) -->
+            <form method="get" class="mb-3">
+                <input type="hidden" name="active_tab" value="whatsapp">
+                <input type="hidden" name="location_id" value="{{ selected_location.id }}">
+                <input type="hidden" name="month" value="{{ selected_month }}">
+                <input type="hidden" name="year" value="{{ selected_year }}">
+                <div class="row g-2 align-items-end">
+                    <div class="col-auto">
+                        <select name="wa_employee_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                            <option value="">← Kembali ke Matrix</option>
+                            {% for emp in wa_employees %}
+                                <option value="{{ emp.id }}" {% if selected_wa_employee_id == emp.id|stringformat:"s" %}selected{% endif %}>{{ emp.full_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <a href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&active_tab=whatsapp" class="btn btn-warning btn-sm shadow-sm text-dark fw-bold">
+                            <i class="fas fa-arrow-left me-1"></i> Matrix
+                        </a>
+                    </div>
+                </div>
+            </form>
+            <div class="card shadow border-0 rounded-4 mb-4">
+                <div class="card-header bg-success text-white py-3">
+                    <div class="row align-items-center">
+                        <div class="col-md-6">
+                            <div class="d-flex align-items-center">
+                                <div class="bg-white text-dark rounded-circle d-flex align-items-center justify-content-center shadow-sm" style="width: 48px; height: 48px; font-size: 1.1rem; font-weight: 700;">
+                                    {{ wa_personal_employee.full_name|slice:":1" }}
+                                </div>
+                                <div class="ms-3">
+                                    <h5 class="mb-0 fw-bold">{{ wa_personal_employee.full_name }}</h5>
+                                    <small class="opacity-75"><i class="fab fa-whatsapp me-1"></i> {{ wa_personal_employee.nik }}</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 text-end">
+                            <span class="badge bg-primary fs-6 me-2">
+                                <i class="fas fa-clock me-1"></i> Telat: {{ wa_summary_stats.late }}m
+                            </span>
+                            <span class="badge bg-success fs-6 me-2">
+                                <i class="fas fa-hourglass-half me-1"></i> Lembur: {{ wa_summary_stats.overtime }}m
+                            </span>
+                            <span class="badge bg-danger fs-6">
+                                <i class="fas fa-times-circle me-1"></i> Alpha: {{ wa_summary_stats.alpha }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-bordered table-hover mb-0">
+                            <thead class="table-light text-center">
+                                <tr>
+                                    <th style="width: 80px;">Tgl</th>
+                                    <th style="width: 60px;">Hari</th>
+                                    <th>Pagi</th>
+                                    <th>CP1</th>
+                                    <th>Istirahat</th>
+                                    <th>CP2</th>
+                                    <th>Pulang</th>
+                                    <th style="width: 100px;">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            {% for day in wa_personal_logs %}
+                            <tr class="{% if day.is_holiday %}table-secondary{% elif day.is_weekend %}table-secondary{% endif %}">
+                                <td class="text-center fw-bold">{{ day.date|date:"d M" }}</td>
+                                <td class="text-center text-muted small">{{ day.date|date:"D" }}</td>
+                                {% for cat in wa_categories %}
+                                    {% with cp=day.checkpoints|dict_get:cat %}
+                                        <td class="text-center {% if cp and cp.time %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
+                                            {% if cp %}{{ cp.time }}{% else %}-{% endif %}
+                                        </td>
+                                    {% endwith %}
+                                {% endfor %}
+                                <td class="text-center">
+                                    {% if day.status == 'Hadir' or day.checkpoints.MASUK %}
+                                        <i class="fas fa-check-circle text-success"></i>
+                                        {% if day.late_minutes > 0 %}<small class="text-danger ms-1">+{{ day.late_minutes }}m</small>{% endif %}
+                                    {% elif day.status == 'Sakit' or 'Sakit' in day.status %}
+                                        <span class="badge bg-warning text-dark">Sakit</span>
+                                    {% elif day.status == 'Izin' or 'Izin' in day.status %}
+                                        <span class="badge bg-info text-dark">Izin</span>
+                                    {% elif day.status == 'Alpha' or 'Alpha' in day.status %}
+                                        <span class="badge bg-danger">Alpha</span>
+                                    {% elif day.is_holiday %}
+                                        <span class="badge bg-secondary">Libur</span>
+                                    {% elif day.is_weekend %}
+                                        <span class="badge bg-secondary">Minggu</span>
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="6" class="text-center text-muted py-3">Tidak ada data</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <!-- WA IZIN/CUTI SECTION -->
+            <div class="card shadow-sm border-0 rounded-4 mt-4">
+                <div class="card-header bg-info text-white py-2">
+                    <i class="fas fa-calendar-plus me-2"></i> Input Izin/Cuti (WA)
+                </div>
+                <div class="card-body">
+                    <form hx-post="{% url 'portal:employee_leave_add' %}" 
+                          hx-target="#wa-leave-list-container" 
+                          hx-swap="innerHTML"
+                          class="row g-3 align-items-end">
+                        {% csrf_token %}
+                        <input type="hidden" name="employee_id" value="{{ wa_personal_employee.id }}">
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Tipe</label>
+                            <select name="leave_type" class="form-select form-select-sm" required>
+                                <option value="IZIN">Izin</option>
+                                <option value="SAKIT">Sakit</option>
+                                <option value="CUTI">Cuti Tahunan</option>
+                                <option value="CUTI_KHUSUS">Cuti Khusus</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Dari Tanggal</label>
+                            <input type="date" name="start_date" class="form-control form-control-sm" required 
+                                   value="{{ selected_year }}-{{ selected_month|stringformat:'02d' }}-01">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Sampai Tanggal</label>
+                            <input type="date" name="end_date" class="form-control form-control-sm" required
+                                   value="{{ selected_year }}-{{ selected_month|stringformat:'02d' }}-01">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Keterangan</label>
+                            <input type="text" name="notes" class="form-control form-control-sm" placeholder="Opsional...">
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-info btn-sm w-100">
+                                <i class="fas fa-plus me-1"></i> Simpan
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <hr class="my-3">
+                    
+                    <h6 class="text-muted mb-3"><i class="fas fa-history me-2"></i> Riwayat Izin/Cuti</h6>
+                    <div id="wa-leave-list-container" 
+                         hx-get="{% url 'portal:employee_leave_list' wa_personal_employee.id %}" 
+                         hx-trigger="load">
+                        <div class="text-center py-3 text-muted">
+                            <i class="fas fa-spinner fa-spin"></i> Memuat data...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% else %}
+            <!-- WA MATRIX VIEW (Spreadsheet Style) -->
+            <div class="card shadow border-0 rounded-3">
+                <div class="card-header bg-success text-white py-2 d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong><i class="fab fa-whatsapp me-2"></i> Absensi WA - {{ selected_month }}/{{ selected_year }}</strong>
+                        <span class="badge bg-light text-success ms-2">{{ wa_employees|length }} Karyawan</span>
+                    </div>
+                    <div class="small opacity-75">
+                        <i class="fas fa-arrow-right me-1"></i> Scroll horizontal →
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 75vh; overflow: auto;">
+                        <table class="table table-sm table-bordered mb-0" style="font-size: 0.65rem; white-space: nowrap;">
+                            <thead class="table-dark text-center" style="position: sticky; top: 0; z-index: 10;">
+                                <!-- Row 1: Day Numbers -->
+                                <tr>
+                                    <th rowspan="2" style="min-width: 30px; position: sticky; left: 0; z-index: 20; background: #212529;">No</th>
+                                    <th rowspan="2" style="min-width: 140px; position: sticky; left: 30px; z-index: 20; background: #212529; text-align: left;">Nama</th>
+                                    <!-- SUMMARY COLUMNS -->
+                                    <th colspan="6" class="bg-warning text-dark" style="position: sticky; left: 170px; z-index: 20;">Σ Tidak Absen</th>
+                                    {% for d in wa_date_range %}
+                                        {% with date_str=d|date:"Y-m-d" %}
+                                        {% with holiday_name=holidays_map|dict_get:date_str %}
+                                        <th colspan="5" class="{% if d.weekday == 6 or holiday_name %}bg-danger{% endif %}" style="border-left: 2px solid #444; padding: 2px;" title="{{ holiday_name|default:'' }}">
+                                            {{ d|date:"d" }}<br><small class="opacity-75">{{ d|date:"D"|slice:":2" }}</small>
+                                        </th>
+                                        {% endwith %}
+                                        {% endwith %}
+                                    {% endfor %}
+                                </tr>
+                                <!-- Row 2: Checkpoint Labels -->
+                                <tr>
+                                    <!-- SUMMARY SUB-HEADERS -->
+                                    <th style="width: 25px; padding: 1px; background: #ffc107; color: #212529;" title="Missing Pagi">P</th>
+                                    <th style="width: 25px; padding: 1px; background: #ffc107; color: #212529;" title="Missing CP1">1</th>
+                                    <th style="width: 25px; padding: 1px; background: #ffc107; color: #212529;" title="Missing Istirahat">I</th>
+                                    <th style="width: 25px; padding: 1px; background: #ffc107; color: #212529;" title="Missing CP2">2</th>
+                                    <th style="width: 25px; padding: 1px; background: #ffc107; color: #212529;" title="Missing Pulang">O</th>
+                                    <th style="width: 25px; padding: 1px; background: #17a2b8; color: #fff;" title="Izin/Sakit">Iz</th>
+                                    {% for d in wa_date_range %}
+                                        <th style="width: 32px; padding: 1px; border-left: 2px solid #444;" title="Pagi">P</th>
+                                        <th style="width: 32px; padding: 1px;" title="Checkpoint 1">1</th>
+                                        <th style="width: 32px; padding: 1px;" title="Istirahat">I</th>
+                                        <th style="width: 32px; padding: 1px;" title="Checkpoint 2">2</th>
+                                        <th style="width: 32px; padding: 1px;" title="Pulang">O</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for emp in wa_employees %}
+                                {% with emp_summary=wa_summary_data|dict_get:emp.id %}
+                                <tr>
+                                    <td class="text-center text-muted" style="position: sticky; left: 0; z-index: 5; background: #fff;">{{ forloop.counter }}</td>
+                                    <td style="position: sticky; left: 30px; z-index: 5; background: #fff; font-weight: 600;">
+                                        <a href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&wa_employee_id={{ emp.id }}" class="text-dark text-decoration-none">
+                                            {{ emp.full_name|truncatechars:18 }}
+                                        </a>
+                                    </td>
+                                    <!-- SUMMARY CELLS -->
+                                    <td class="text-center {% if emp_summary.missing_pagi > 0 %}table-danger{% endif %}" style="background: #fff3cd; font-size: 0.65rem; font-weight: bold;">{{ emp_summary.missing_pagi|default:0 }}</td>
+                                    <td class="text-center {% if emp_summary.missing_cp1 > 0 %}table-danger{% endif %}" style="background: #fff3cd; font-size: 0.65rem; font-weight: bold;">{{ emp_summary.missing_cp1|default:0 }}</td>
+                                    <td class="text-center {% if emp_summary.missing_istirahat > 0 %}table-danger{% endif %}" style="background: #fff3cd; font-size: 0.65rem; font-weight: bold;">{{ emp_summary.missing_istirahat|default:0 }}</td>
+                                    <td class="text-center {% if emp_summary.missing_cp2 > 0 %}table-danger{% endif %}" style="background: #fff3cd; font-size: 0.65rem; font-weight: bold;">{{ emp_summary.missing_cp2|default:0 }}</td>
+                                    <td class="text-center {% if emp_summary.missing_pulang > 0 %}table-danger{% endif %}" style="background: #fff3cd; font-size: 0.65rem; font-weight: bold;">{{ emp_summary.missing_pulang|default:0 }}</td>
+                                    <td class="text-center" style="background: #d1ecf1; font-size: 0.65rem; font-weight: bold;">{{ emp_summary.izin_count|default:0 }}</td>
+                                    {% for d in wa_date_range %}
+                                        {% with emp_day_data=wa_matrix_data|dict_get:emp.id|dict_get:d %}
+                                        {% with date_str=d|date:"Y-m-d" %}
+                                        {% with holiday_name=holidays_map|dict_get:date_str %}
+                                            <!-- MASUK (Pagi) -->
+                                            <td class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="border-left: 1px solid #dee2e6; padding: 1px; cursor: pointer;" 
+                                                hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'MASUK' %}" 
+                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
+                                                {% with time=emp_day_data|dict_get:'MASUK' %}
+                                                    {% if time %}<span class="text-success" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
+                                                {% endwith %}
+                                            </td>
+                                            <!-- CHECKPOINT_1 -->
+                                            <td class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
+                                                hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'CHECKPOINT_1' %}" 
+                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
+                                                {% with time=emp_day_data|dict_get:'CHECKPOINT_1' %}
+                                                    {% if time %}<span class="text-primary" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
+                                                {% endwith %}
+                                            </td>
+                                            <!-- ISTIRAHAT -->
+                                            <td class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
+                                                hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'ISTIRAHAT' %}" 
+                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
+                                                {% with time=emp_day_data|dict_get:'ISTIRAHAT' %}
+                                                    {% if time %}<span class="text-secondary" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
+                                                {% endwith %}
+                                            </td>
+                                            <!-- CHECKPOINT_2 -->
+                                            <td class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
+                                                hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'CHECKPOINT_2' %}" 
+                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
+                                                {% with time=emp_day_data|dict_get:'CHECKPOINT_2' %}
+                                                    {% if time %}<span class="text-info" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
+                                                {% endwith %}
+                                            </td>
+                                            <!-- PULANG -->
+                                            <td class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
+                                                hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'PULANG' %}" 
+                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
+                                                {% with time=emp_day_data|dict_get:'PULANG' %}
+                                                    {% if time %}<span class="text-dark fw-bold" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
+                                                {% endwith %}
+                                            </td>
+                                        {% endwith %}
+                                        {% endwith %}
+                                        {% endwith %}
+                                    {% endfor %}
+                                </tr>
+                                {% endwith %}
+                                {% empty %}
+                                <tr><td colspan="100" class="text-center text-muted py-4">Tidak ada karyawan WA di lokasi ini</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card-footer bg-light py-2 small text-center">
+                    <strong>Σ Tidak Absen</strong>: Kolom kuning = jumlah hari tidak ada log &bull;
+                    <strong>P</strong>=Pagi &bull; <strong>1</strong>=CP1 &bull; <strong>I</strong>=Istirahat &bull; <strong>2</strong>=CP2 &bull; <strong>O</strong>=Pulang &bull; <strong>Iz</strong>=Izin/Sakit
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<div id="modal-container"></div>
+
+<!-- WA Edit Cell Modal -->
+<div class="modal fade" id="waEditModal" tabindex="-1" aria-labelledby="waEditModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content">
+            <div id="wa-edit-modal-content">
+                <div class="modal-body text-center py-4">
+                    <div class="spinner-border text-success" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (el) { return new bootstrap.Tooltip(el); });
+</script>
+{% endblock %}

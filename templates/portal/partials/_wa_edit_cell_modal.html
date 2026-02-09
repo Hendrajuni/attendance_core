@@ -1,0 +1,69 @@
+<!-- WA Edit Cell Modal Content -->
+<div class="modal-header bg-success text-white py-2">
+    <h6 class="modal-title mb-0">
+        <i class="fab fa-whatsapp me-1"></i>
+        {{ category_label }} - {{ date_str }}
+    </h6>
+    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+</div>
+<div class="modal-body">
+    <div class="small text-muted mb-3">
+        <strong>{{ employee.full_name }}</strong>
+    </div>
+    
+    <form hx-post="{% url 'portal:wa_save_cell' %}" hx-target="closest td" hx-swap="innerHTML">
+        {% csrf_token %}
+        <input type="hidden" name="employee_id" value="{{ employee.id }}">
+        <input type="hidden" name="date_str" value="{{ date_str }}">
+        <input type="hidden" name="category" value="{{ category }}">
+        
+        {% if existing_time %}
+        <div class="alert alert-info py-2 small mb-3">
+            <i class="fas fa-clock me-1"></i> Current: <strong>{{ existing_time }}</strong>
+            {% if existing_notes %}<br><small>{{ existing_notes }}</small>{% endif %}
+        </div>
+        {% endif %}
+        
+        {% if is_admin %}
+        <!-- ADMIN: Bisa set waktu -->
+        <div class="mb-3">
+            <label class="form-label small fw-bold">Set Waktu:</label>
+            <div class="input-group input-group-sm">
+                <input type="time" name="time_value" class="form-control" value="{{ existing_time|default:'08:00' }}">
+                <button type="submit" name="action" value="set_time" class="btn btn-success">
+                    <i class="fas fa-check"></i> Simpan
+                </button>
+            </div>
+        </div>
+        <hr>
+        {% endif %}
+        
+        <!-- SEMUA ROLE: Izin/Sakit buttons -->
+        <div class="d-flex gap-2 justify-content-center">
+            <button type="submit" name="action" value="izin" class="btn btn-warning btn-sm flex-fill">
+                <i class="fas fa-calendar-times"></i> Izin
+            </button>
+            <button type="submit" name="action" value="sakit" class="btn btn-danger btn-sm flex-fill">
+                <i class="fas fa-user-injured"></i> Sakit
+            </button>
+        </div>
+        
+        {% if existing_time %}
+        <hr>
+        <div class="text-center">
+            <button type="submit" name="action" value="delete" class="btn btn-outline-danger btn-sm">
+                <i class="fas fa-trash"></i> Hapus Log
+            </button>
+        </div>
+        {% endif %}
+    </form>
+</div>
+<div class="modal-footer py-2">
+    <small class="text-muted">
+        {% if is_admin %}
+        <i class="fas fa-shield-alt text-success"></i> Admin Mode
+        {% else %}
+        <i class="fas fa-user text-warning"></i> Kerani Mode (Hanya Izin/Sakit)
+        {% endif %}
+    </small>
+</div>

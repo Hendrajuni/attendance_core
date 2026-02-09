@@ -1,4 +1,5 @@
 from django.shortcuts import render
+from datetime import datetime
 from django.contrib.auth.decorators import login_required
 
 @login_required
@@ -119,7 +120,7 @@ from django.http import HttpResponse
 from django.views.decorators.http import require_POST
 from django.db import transaction
 from django.db.models import Q
-from attendance.models import FingerprintDevice, SpreadsheetSource, AttendanceLog, Employee, WorkLocation, EmployeeProfile
+from attendance.models import FingerprintDevice, SpreadsheetSource, AttendanceLog, Employee, WorkLocation, EmployeeProfile, EmployeeLeave
 
 @login_required
 def sync_logs_view(request):
@@ -1114,11 +1115,13 @@ def employee_edit_view(request, employee_id):
                     shift_pattern = get_object_or_404(ShiftPattern, id=shift_pattern_id)
                     # Deactivate previous assignments
                     EmployeeShiftAssignment.objects.filter(employee=employee, is_active=True).update(is_active=False)
-                    # Create new assignment
+                    # Create new assignment with effective_from date
+                    from django.utils import timezone
                     EmployeeShiftAssignment.objects.create(
                         employee=employee,
                         shift_pattern=shift_pattern,
-                        is_active=True
+                        is_active=True,
+                        effective_from=timezone.now().date()
                     )
             
             # Success response - reload current employee detail
@@ -1163,3 +1166,1161 @@ def employee_edit_view(request, employee_id):
     
     return render(request, 'portal/partials/_employee_edit_form.html', context)
 
+
+# =============================================================================
+# RECAP MATRIX VIEW (Meja Kerja Rekapitulasi)
+# =============================================================================
+
+@login_required
+def recap_matrix_view(request):
+    """
+    Meja Kerja Rekapitulasi - Matriks Absensi Bulanan
+    
+    RBAC Rules:
+    - KERANI: Hanya melihat lokasi sendiri (assigned_location)
+    - HRD/ADMIN: Bisa memilih lokasi apapun
+    """
+    from attendance.models import WorkLocation, Employee, AttendanceLog
+    from django.utils import timezone
+    from django.db.models import F
+    from calendar import monthrange
+    from datetime import date, timedelta
+    from collections import defaultdict
+    import holidays  # Holiday detection (Reload Triggered)
+    
+    # Get current date for defaults
+    now = timezone.now()
+    
+    # Get filter parameters
+    try:
+        month = int(request.GET.get('month', now.month))
+        year = int(request.GET.get('year', now.year))
+    except (ValueError, TypeError):
+        month = now.month
+        year = now.year
+    
+    # Validate month range
+    if month < 1 or month > 12:
+        month = now.month
+    
+    # =========================================================================
+    # RBAC: STRICT LOCATION FILTERING
+    # =========================================================================
+    selected_location = None
+    all_locations = []
+    user_role = None
+    can_select_location = False
+    profile = None  # Initialize profile to prevent UnboundLocalError
+    
+    if hasattr(request.user, 'employee_profile'):
+        profile = request.user.employee_profile
+        user_role = profile.role
+        
+        if profile.role == 'KERANI':
+            # KERANI: Force to assigned location only
+            selected_location = profile.assigned_location
+            can_select_location = False
+        else:
+            # HRD / ADMIN: Can select any location (leaf nodes only)
+            can_select_location = True
+            # Filter only leaf nodes: rght == lft + 1 indicates no children
+            all_locations = WorkLocation.objects.filter(rght=F('lft') + 1).order_by('tree_id', 'lft')
+            
+            # Check if location_id specified in GET
+            location_id = request.GET.get('location_id')
+            if location_id:
+                try:
+                    selected_location = WorkLocation.objects.get(id=location_id)
+                except WorkLocation.DoesNotExist:
+                    selected_location = None
+            
+            # Default to first location if not specified
+            if not selected_location and all_locations.exists():
+                selected_location = all_locations.first()
+    else:
+        # Superuser without profile
+        if request.user.is_superuser:
+            can_select_location = True
+            # Filter only leaf nodes: rght == lft + 1 indicates no children
+            all_locations = WorkLocation.objects.filter(rght=F('lft') + 1).order_by('tree_id', 'lft')
+            location_id = request.GET.get('location_id')
+            if location_id:
+                try:
+                    selected_location = WorkLocation.objects.get(id=location_id)
+                except WorkLocation.DoesNotExist:
+                    pass
+            if not selected_location and all_locations.exists():
+                selected_location = all_locations.first()
+    
+    # =========================================================================
+    # VIEW MODE SELECTION
+    # =========================================================================
+    employee_id = request.GET.get('employee_id')
+    mode = 'matrix'
+    personal_logs = []
+    summary_stats = {'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0}
+    personal_employee = None  # Will hold target employee in personal mode
+    
+    # If specific employee selected, switch to PERSONAL MODE
+    if employee_id:
+        try:
+            target_employee = Employee.objects.get(id=employee_id)
+            personal_employee = target_employee  # Set for template context
+            mode = 'personal'
+            
+            # Build date range for the month
+            _, days_in_month = monthrange(year, month)
+            date_range = [date(year, month, day) for day in range(1, days_in_month + 1)]
+            
+            # Fetch logs for this employee only
+            logs = AttendanceLog.objects.filter(
+                employee=target_employee,
+                timestamp__year=year,
+                timestamp__month=month
+            ).order_by('timestamp')
+            
+            # Group logs by LOCAL date (crucial for correct daily bucket)
+            daily_logs = defaultdict(list)
+            for log in logs:
+                # Convert to local time first!
+                local_dt = timezone.localtime(log.timestamp)
+                daily_logs[local_dt.date()].append({
+                    'log': log,
+                    'local_dt': local_dt
+                })
+            
+            # Standard Schedule (Hardcoded for now, can be moved to model later)
+            SCHEDULE_IN = timezone.datetime.strptime('08:00', '%H:%M').time()
+            SCHEDULE_OUT = timezone.datetime.strptime('17:00', '%H:%M').time()
+            
+            # Holiday Object for Indonesia
+            id_holidays = holidays.ID(years=[year, year-1])
+            
+            for d in date_range:
+                # Get records for this local date
+                day_records = daily_logs.get(d, [])
+                
+                day_stat = {
+                    'date': d,
+                    'is_weekend': d.weekday() >= 5,
+                    'is_holiday': d in id_holidays,
+                    'holiday_name': id_holidays.get(d),
+                    'schedule_in': '08:00',
+                    'schedule_out': '17:00',
+                    'clock_in': '-',
+                    'clock_out': '-',
+                    'late_minutes': 0,
+                    'overtime_minutes': 0,
+                    'status': '',
+                    'status_class': '',
+                    'raw_status': '',
+                    # 5 Checkpoint times
+                    'cp_masuk': None,
+                    'cp_1': None,
+                    'cp_istirahat': None,
+                    'cp_2': None,
+                    'cp_pulang': None,
+                    # Count filled checkpoints
+                    'checkpoints_filled': 0,
+                }
+                
+                if day_records:
+                    # Sort by time
+                    day_records.sort(key=lambda x: x['local_dt'])
+                    
+                    # Extract checkpoints from logs based on log_category
+                    for rec in day_records:
+                        log = rec['log']
+                        local_dt = rec['local_dt']
+                        time_str = local_dt.strftime('%H:%M')
+                        
+                        # Map log_category to checkpoint fields
+                        cat = getattr(log, 'log_category', None)
+                        if cat == 'MASUK':
+                            day_stat['cp_masuk'] = time_str
+                            day_stat['checkpoints_filled'] += 1
+                        elif cat == 'CP_1':
+                            day_stat['cp_1'] = time_str
+                            day_stat['checkpoints_filled'] += 1
+                        elif cat == 'ISTIRAHAT':
+                            day_stat['cp_istirahat'] = time_str
+                            day_stat['checkpoints_filled'] += 1
+                        elif cat == 'CP_2':
+                            day_stat['cp_2'] = time_str
+                            day_stat['checkpoints_filled'] += 1
+                        elif cat == 'PULANG':
+                            day_stat['cp_pulang'] = time_str
+                            day_stat['checkpoints_filled'] += 1
+                    
+                    # Fallback: If no log_category, use first/last for clock_in/out
+                    first_record = day_records[0]
+                    first_log = first_record['log']
+                    local_in = first_record['local_dt']
+                    
+                    day_stat['clock_in'] = local_in.strftime('%H:%M')
+                    day_stat['status'] = first_log.get_status_display() if hasattr(first_log, 'get_status_display') else ''
+                    day_stat['raw_status'] = getattr(first_log, 'status', '')
+                    
+                    # If cp_masuk not set from category, use first log
+                    if not day_stat['cp_masuk']:
+                        day_stat['cp_masuk'] = day_stat['clock_in']
+                        day_stat['checkpoints_filled'] += 1
+                    
+                    # Calculate Late
+                    cin_time = local_in.time()
+                    dummy_date = date(2000, 1, 1)
+                    
+                    if cin_time > SCHEDULE_IN and not day_stat['is_holiday'] and not day_stat['is_weekend']:
+                        dt_in = timezone.datetime.combine(dummy_date, cin_time)
+                        dt_sch = timezone.datetime.combine(dummy_date, SCHEDULE_IN)
+                        diff = (dt_in - dt_sch).total_seconds() / 60
+                        day_stat['late_minutes'] = int(diff)
+                        summary_stats['late'] += int(diff)
+                    
+                    # Clock Out (Last Record if > 1)
+                    if len(day_records) > 1:
+                        last_record = day_records[-1]
+                        local_out = last_record['local_dt']
+                        day_stat['clock_out'] = local_out.strftime('%H:%M')
+                        
+                        # If cp_pulang not set from category, use last log
+                        if not day_stat['cp_pulang']:
+                            day_stat['cp_pulang'] = day_stat['clock_out']
+                            day_stat['checkpoints_filled'] += 1
+                        
+                        # Calculate Overtime
+                        cout_time = local_out.time()
+                        if cout_time > SCHEDULE_OUT:
+                            dt_out = timezone.datetime.combine(dummy_date, cout_time)
+                            dt_sch_out = timezone.datetime.combine(dummy_date, SCHEDULE_OUT)
+                            diff = (dt_out - dt_sch_out).total_seconds() / 60
+                            day_stat['overtime_minutes'] = int(diff)
+                            summary_stats['overtime'] += int(diff)
+                    
+                    # Determine Status Class
+                    if first_log.status == 'CHECKIN':
+                        day_stat['status_class'] = 'text-success fw-bold'
+                        if day_stat['is_holiday']:
+                             day_stat['status'] += ' (Hari Libur)'
+                    elif first_log.status == 'SICK':
+                        day_stat['status_class'] = 'text-warning fw-bold'
+                        summary_stats['sick'] += 1
+                    elif first_log.status == 'PERMIT':
+                        day_stat['status_class'] = 'text-info fw-bold'
+                        summary_stats['permit'] += 1
+                    elif first_log.status == 'ALPHA':
+                        day_stat['status_class'] = 'text-danger fw-bold'
+                        summary_stats['alpha'] += 1
+                        
+                else:
+                    # No logs
+                    if day_stat['is_holiday']:
+                        day_stat['status'] = 'Libur: ' + (day_stat['holiday_name'] or '')
+                        day_stat['status_class'] = 'text-secondary'
+                    elif day_stat['is_weekend']:
+                        day_stat['status'] = 'Minggu'
+                        day_stat['status_class'] = 'text-secondary'
+
+                    elif d < now.date():
+                        # Check for Leave (Sakit/Izin/Cuti)
+                        leave = EmployeeLeave.objects.filter(
+                            employee=personal_employee,
+                            start_date__lte=d,
+                            end_date__gte=d
+                        ).first()
+                        
+                        if leave:
+                            day_stat['status'] = leave.get_leave_type_display()
+                            if leave.leave_type == 'SAKIT':
+                                day_stat['status_class'] = 'text-warning fw-bold'
+                                summary_stats['sick'] += 1
+                            elif leave.leave_type == 'IZIN':
+                                day_stat['status_class'] = 'text-info fw-bold'
+                                summary_stats['permit'] += 1
+                            elif leave.leave_type == 'CUTI':
+                                day_stat['status_class'] = 'text-success fw-bold'
+                                # summary_stats['leave'] += 1 # Add if needed
+                            else:
+                                day_stat['status_class'] = 'text-secondary'
+                        else:
+                            day_stat['status'] = 'Alpha'
+                            day_stat['status_class'] = 'text-danger fw-bold'
+                            summary_stats['alpha'] += 1
+                    else:
+                        day_stat['status'] = '-'
+                
+                personal_logs.append(day_stat)
+                
+        except Employee.DoesNotExist:
+            mode = 'matrix'
+            
+    
+    # =========================================================================
+    # BUILD MATRIX DATA (Only if Mode == MATRIX)
+    # =========================================================================
+    employees = []
+    matrix_data = {}
+    date_range = []
+    
+    if selected_location:
+        # Get all sub-locations (include self)
+        sub_locations = selected_location.get_descendants(include_self=True)
+        
+        # Get active employees in these locations
+        employees = Employee.objects.filter(
+            home_base__in=sub_locations,
+            is_verified=True,
+            is_active=True
+        ).select_related('department', 'home_base').order_by('full_name')
+        
+        if mode == 'matrix':
+            # Build date range for the month
+            _, days_in_month = monthrange(year, month)
+            date_range = [date(year, month, day) for day in range(1, days_in_month + 1)]
+            
+            # Fetch logs for all employees
+            logs = AttendanceLog.objects.filter(
+                employee__in=employees,
+                timestamp__year=year,
+                timestamp__month=month
+            ).select_related('employee').order_by('employee', 'timestamp')
+            
+            # Group logs by employee and date
+            employee_date_logs = defaultdict(lambda: defaultdict(list))
+            for log in logs:
+                # Convert to local time to ensure correct date bucket
+                local_dt = timezone.localtime(log.timestamp)
+                employee_date_logs[log.employee_id][local_dt.date()].append(log)
+            
+            # Build matrix: { employee_id: { date_obj: status_code } }
+            # Holiday Object for Indonesia
+            id_holidays = holidays.ID(years=[year, year-1])
+            
+            for emp in employees:
+                emp_matrix = {}
+                for d in date_range:
+                    day_logs = employee_date_logs.get(emp.id, {}).get(d, [])
+                    is_holiday = d in id_holidays
+                    
+                    if day_logs:
+                        # Check specific status from log
+                        first_log = day_logs[0]
+                        status_map = {
+                            'CHECKIN': 'H', 'SICK': 'S', 
+                            'PERMIT': 'I', 'ALPHA': 'A'
+                        }
+                        emp_matrix[d] = status_map.get(first_log.status, 'H')
+                    else:
+                        if is_holiday:
+                            emp_matrix[d] = 'L' # Libur Nasional
+                        elif d.weekday() >= 5:
+                            emp_matrix[d] = 'L' # Libur Weekend
+                        elif d < now.date():
+                            emp_matrix[d] = 'A'
+                        else:
+                            emp_matrix[d] = ''
+                
+                matrix_data[emp.id] = emp_matrix
+
+    # Prepare Holidays Map for Template (Date String -> Name)
+    holidays_map = {}
+    id_holidays = holidays.ID(years=[year, year-1]) 
+    for d in date_range:
+        if d in id_holidays:
+            # Key must be string to match template date filter
+            holidays_map[d.strftime('%Y-%m-%d')] = id_holidays.get(d)
+
+    # =========================================================================
+    # WHATSAPP / TELEGRAM 5-POINT TRACKING
+    # =========================================================================
+    # Parse specific date for WA Daily View (default: today)
+    wa_specific_date_str = request.GET.get('wa_date', now.date().isoformat())
+    try:
+        wa_specific_date = date.fromisoformat(wa_specific_date_str)
+    except ValueError:
+        wa_specific_date = now.date()
+    
+    # Split employees by source type
+    fingerprint_employees = []
+    wa_employees = []
+    
+    if employees:
+        # Get all employees who have TELEGRAM logs (WA)
+        wa_employee_ids = AttendanceLog.objects.filter(
+            employee__in=employees,
+            source_type='TELEGRAM'
+        ).values_list('employee_id', flat=True).distinct()
+        
+        # Get employees with FINGERPRINT logs exclusively (no WA logs)
+        fp_employee_ids = AttendanceLog.objects.filter(
+            employee__in=employees,
+            source_type='FINGERPRINT'
+        ).exclude(
+            employee_id__in=wa_employee_ids
+        ).values_list('employee_id', flat=True).distinct()
+        
+        fingerprint_employees = [e for e in employees if e.id in fp_employee_ids or e.id not in wa_employee_ids]
+        wa_employees = [e for e in employees if e.id in wa_employee_ids]
+    
+    # WA 5-Point Categories
+    WA_CATEGORIES = ['MASUK', 'CHECKPOINT_1', 'ISTIRAHAT', 'CHECKPOINT_2', 'PULANG']
+    WA_CATEGORY_ICONS = {
+        'MASUK': ('fa-sun', 'Pagi'),
+        'CHECKPOINT_1': ('fa-flag', 'CP1'),
+        'ISTIRAHAT': ('fa-mug-hot', 'Istirahat'),
+        'CHECKPOINT_2': ('fa-flag-checkered', 'CP2'),
+        'PULANG': ('fa-home', 'Pulang'),
+    }
+    
+    # WA Daily Data (Global View - All WA Employees for specific date)
+    wa_daily_data = {}
+    wa_employee_id = request.GET.get('wa_employee_id')
+    wa_mode = 'matrix' if not wa_employee_id else 'personal'
+    wa_personal_logs = []
+    wa_personal_employee = None  # Will hold target WA employee in personal mode
+    
+    # WA MATRIX DATA: { emp_id: { date: { category: time_str } } }
+    wa_matrix_data = {}
+    wa_summary_data = {}
+    
+    if wa_employees:
+        # Build date range for WA matrix (same as fingerprint)
+        _, wa_days_in_month = monthrange(year, month)
+        wa_date_range = [date(year, month, day) for day in range(1, wa_days_in_month + 1)]
+        
+        # Build set of holiday dates for quick lookup
+        holidays_set = set(holidays_map.keys())
+        
+        # Initialize matrix for all employees
+        for emp in wa_employees:
+            wa_matrix_data[emp.id] = {}
+            for d in wa_date_range:
+                wa_matrix_data[emp.id][d] = {cat: None for cat in WA_CATEGORIES}
+                wa_matrix_data[emp.id][d]['IZIN'] = None  # Track izin status
+        
+        # Fetch ALL logs for WA employees in this month
+        wa_month_logs = AttendanceLog.objects.filter(
+            employee__in=wa_employees,
+            timestamp__year=year,
+            timestamp__month=month,
+            source_type='TELEGRAM'
+        ).select_related('employee')
+        
+        # Fill in the matrix
+        for log in wa_month_logs:
+            local_time = timezone.localtime(log.timestamp)
+            log_date = local_time.date()
+            cat = log.log_category if log.log_category in WA_CATEGORIES else 'UNKNOWN'
+            if cat in WA_CATEGORIES and log_date in wa_matrix_data.get(log.employee_id, {}):
+                wa_matrix_data[log.employee_id][log_date][cat] = local_time.strftime('%H:%M')
+            # Check for izin/sakit (if stored in notes or specific field)
+            if hasattr(log, 'notes') and log.notes and ('IZIN' in log.notes.upper() or 'SAKIT' in log.notes.upper()):
+                wa_matrix_data[log.employee_id][log_date]['IZIN'] = log.notes[:10]
+        
+        # Fetch leaves for all WA employees in range (Inclusive)
+        wa_leaves = EmployeeLeave.objects.filter(
+            employee__in=wa_employees,
+            start_date__lte=wa_date_range[-1],
+            end_date__gte=wa_date_range[0]
+        )
+        
+        for leave in wa_leaves:
+            # Determine intersection with month
+            start = max(leave.start_date, wa_date_range[0])
+            end = min(leave.end_date, wa_date_range[-1])
+            
+            curr = start
+            while curr <= end:
+                # Ensure emp and date exist in matrix
+                if leave.employee_id in wa_matrix_data and curr in wa_matrix_data[leave.employee_id]:
+                     status_text = leave.get_leave_type_display()
+                     
+                     # 1. Set IZIN field (for Summary Calculation)
+                     wa_matrix_data[leave.employee_id][curr]['IZIN'] = status_text
+                     
+                     # 2. Update Display Cells if Empty (Visualize in Big Table)
+                     # Only if NO LOG exists strictly (check MASUK is None)
+                     if not wa_matrix_data[leave.employee_id][curr]['MASUK']:
+                         for cat in WA_CATEGORIES:
+                             wa_matrix_data[leave.employee_id][curr][cat] = status_text
+                
+                curr += timedelta(days=1)
+        
+        # Calculate summary per employee (missing checkpoints, izin count)
+        wa_summary_data = {}
+        for emp in wa_employees:
+            wa_summary_data[emp.id] = {
+                'missing_pagi': 0,
+                'missing_cp1': 0,
+                'missing_istirahat': 0,
+                'missing_cp2': 0,
+                'missing_pulang': 0,
+                'izin_count': 0,
+                'total_missing': 0,
+            }
+            for d in wa_date_range:
+                date_str = d.isoformat()
+                # Skip future dates, holidays, and Sundays
+                if d > now.date() or date_str in holidays_set or d.weekday() == 6:
+                    continue
+                day_data = wa_matrix_data[emp.id][d]
+                if day_data.get('IZIN'):
+                    wa_summary_data[emp.id]['izin_count'] += 1
+                    continue  # Don't count as missing if Izin
+                if not day_data.get('MASUK'):
+                    wa_summary_data[emp.id]['missing_pagi'] += 1
+                if not day_data.get('CHECKPOINT_1'):
+                    wa_summary_data[emp.id]['missing_cp1'] += 1
+                if not day_data.get('ISTIRAHAT'):
+                    wa_summary_data[emp.id]['missing_istirahat'] += 1
+                if not day_data.get('CHECKPOINT_2'):
+                    wa_summary_data[emp.id]['missing_cp2'] += 1
+                if not day_data.get('PULANG'):
+                    wa_summary_data[emp.id]['missing_pulang'] += 1
+            wa_summary_data[emp.id]['total_missing'] = (
+                wa_summary_data[emp.id]['missing_pagi'] +
+                wa_summary_data[emp.id]['missing_cp1'] +
+                wa_summary_data[emp.id]['missing_istirahat'] +
+                wa_summary_data[emp.id]['missing_cp2'] +
+                wa_summary_data[emp.id]['missing_pulang']
+            )
+        
+
+    # DETERMINE ACTIVE TAB
+    # Default to 'fingerprint'
+    active_tab = 'fingerprint'
+    
+    # If requests explicit tab via GET or if WA Employee ID is present -> WhatsApp
+    if request.GET.get('tab') == 'whatsapp' or wa_employee_id or request.GET.get('active_tab') == 'whatsapp':
+        active_tab = 'whatsapp'
+    
+    context = {
+        'selected_location': selected_location,
+        'all_locations': all_locations,
+        'can_select_location': can_select_location,
+        'month_names': [(i, date(2000, i, 1).strftime('%B')) for i in range(1, 13)],
+        'selected_month': month,
+        'year_options': range(now.year - 2, now.year + 2),
+        'selected_year': year,
+        'fingerprint_employees': fingerprint_employees,
+        'wa_employees': wa_employees,
+        'matrix_data': matrix_data,
+        'date_range': date_range,
+        'holidays_map': holidays_map,
+        'selected_employee_id': employee_id,
+        'mode': mode,
+        'personal_employee': personal_employee,
+        'personal_logs': personal_logs,
+        'summary_stats': summary_stats,
+        # WA Context
+        'wa_matrix_data': wa_matrix_data,
+        'wa_summary_data': wa_summary_data,
+        'wa_date_range': wa_date_range,
+        'wa_categories': WA_CATEGORIES,
+        'wa_mode': wa_mode,
+        'wa_personal_employee': wa_personal_employee,
+        'selected_wa_employee_id': wa_employee_id,
+        # Active Tab State
+        'active_tab': active_tab, 
+    }
+        
+    # WA Personal View (Monthly - Single Employee)
+    if wa_employee_id:
+        try:
+            wa_target_employee = Employee.objects.get(id=wa_employee_id)
+            wa_personal_employee = wa_target_employee  # Set for template context
+            _, days_in_month = monthrange(year, month)
+            wa_date_range = [date(year, month, day) for day in range(1, days_in_month + 1)]
+                
+            # Fetch all logs for this employee in the month (Remove strict source_type filter)
+            wa_month_logs = AttendanceLog.objects.filter(
+                employee=wa_target_employee,
+                timestamp__year=year,
+                timestamp__month=month
+            ).order_by('timestamp')
+            
+            # Group by date and category
+            wa_grouped = defaultdict(lambda: {cat: None for cat in WA_CATEGORIES})
+            for log in wa_month_logs:
+                local_dt = timezone.localtime(log.timestamp)
+                log_date = local_dt.date()
+                cat = log.log_category if log.log_category in WA_CATEGORIES else 'UNKNOWN'
+                if cat in WA_CATEGORIES:
+                    wa_grouped[log_date][cat] = {
+                        'time': local_dt.strftime('%H:%M'),
+                        'log': log,
+                    }
+            
+            # Initialize Summary Stats for WA
+            wa_summary_stats = {'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0}
+            
+            # Schedule Constants (Reuse standard or define here)
+            # Assuming standard 08:00 - 17:00 for calculation
+            SCHEDULE_IN = timezone.datetime.strptime('08:00', '%H:%M').time()
+            SCHEDULE_OUT = timezone.datetime.strptime('17:00', '%H:%M').time()
+            dummy_date = date(2000, 1, 1)
+
+            # Build personal logs list
+            for d in wa_date_range:
+                is_holiday = d in id_holidays
+                is_weekend = d.weekday() == 6  # Only Sunday is weekend
+                holiday_name = id_holidays.get(d)
+                
+                day_data = wa_grouped.get(d, {cat: None for cat in WA_CATEGORIES})
+                
+                # Count completed checkpoints
+                completed = sum(1 for cat in WA_CATEGORIES if day_data.get(cat))
+                progress = int((completed / 5) * 100)
+                
+                # Determine Status and Late/Overtime
+                status = '-'
+                status_class = ''
+                late_minutes = 0
+                
+                # Check for explicit log status (SICK/PERMIT/ALPHA from AttendanceLog)
+                # We check if any log in day_data has a special status
+                special_status_log = None
+                for cat in WA_CATEGORIES:
+                    entry = day_data.get(cat)
+                    if entry and entry.get('log'):
+                        log = entry['log']
+                        if log.status in ['SICK', 'PERMIT', 'ALPHA']:
+                            special_status_log = log
+                            break
+                
+                if special_status_log:
+                    st = special_status_log.status
+                    if st == 'SICK':
+                        status = 'Sakit'
+                        status_class = 'text-warning fw-bold'
+                        wa_summary_stats['sick'] += 1
+                    elif st == 'PERMIT':
+                        status = 'Izin'
+                        status_class = 'text-info fw-bold'
+                        wa_summary_stats['permit'] += 1
+                    elif st == 'ALPHA':
+                        status = 'Alpha'
+                        status_class = 'text-danger fw-bold'
+                        wa_summary_stats['alpha'] += 1
+                
+                # Check for approved Leave (Sakit/Izin/Cuti) from EmployeeLeave or Alpha/Holiday/Weekend
+                elif not day_data.get('MASUK'):
+                    leave = EmployeeLeave.objects.filter(
+                        employee=wa_personal_employee,
+                        start_date__lte=d,
+                        end_date__gte=d
+                    ).first()
+                    
+                    if leave:
+                        status = leave.get_leave_type_display()
+                        if leave.leave_type == 'SAKIT':
+                            status_class = 'text-warning fw-bold'
+                            wa_summary_stats['sick'] += 1
+                        elif leave.leave_type == 'IZIN':
+                            status_class = 'text-info fw-bold'
+                            wa_summary_stats['permit'] += 1
+                        elif leave.leave_type == 'CUTI':
+                            status_class = 'text-success fw-bold'
+                        else:
+                            status_class = 'text-secondary'
+                    else:
+                        # If NO leave found, check for Holiday, Weekend, or Alpha
+                        if is_holiday:
+                            status = 'Libur: ' + (holiday_name or '')
+                            status_class = 'text-secondary'
+                        elif is_weekend:
+                            status = 'Minggu'
+                            status_class = 'text-secondary'
+                        elif d < now.date():
+                            status = 'Alpha'
+                            status_class = 'text-danger fw-bold'
+                            wa_summary_stats['alpha'] += 1
+                        else:
+                            status = '-' # Future date
+
+                elif day_data.get('MASUK'):
+                    status = 'Hadir'
+                    status_class = 'text-success fw-bold'
+                    
+                    # Calculate Late
+                    try:
+                        check_in_time = datetime.strptime(day_data['MASUK']['time'], '%H:%M').time()
+                        if check_in_time > SCHEDULE_IN and not is_holiday and not is_weekend:
+                            dt_in = timezone.datetime.combine(dummy_date, check_in_time)
+                            dt_sch = timezone.datetime.combine(dummy_date, SCHEDULE_IN)
+                            diff = (dt_in - dt_sch).total_seconds() / 60
+                            late_minutes = int(diff)
+                            wa_summary_stats['late'] += late_minutes
+                    except (ValueError, TypeError):
+                        pass
+                        
+                    # Calculate Overtime (if PULANG exists)
+                    if day_data.get('PULANG'):
+                        try:
+                            check_out_time = datetime.strptime(day_data['PULANG']['time'], '%H:%M').time()
+                            if check_out_time > SCHEDULE_OUT:
+                                dt_out = timezone.datetime.combine(dummy_date, check_out_time)
+                                dt_sch_out = timezone.datetime.combine(dummy_date, SCHEDULE_OUT)
+                                diff = (dt_out - dt_sch_out).total_seconds() / 60
+                                wa_summary_stats['overtime'] += int(diff)
+                        except (ValueError, TypeError):
+                            pass
+
+                    if is_holiday:
+                         status += ' (Hari Libur)'
+                
+                wa_personal_logs.append({
+                    'date': d,
+                    'is_holiday': is_holiday,
+                    'is_weekend': is_weekend,
+                    'holiday_name': holiday_name,
+                    'checkpoints': day_data,
+                    'completed': completed,
+                    'progress': progress,
+                    'status': status,
+                    'status_class': status_class,
+                    'late_minutes': late_minutes,
+                })
+            
+            # Add wa_summary_stats to context data (merged later)
+            pass
+        except Employee.DoesNotExist:
+            wa_mode = 'daily'
+
+    # Generate month/year options
+    month_names = [
+        (1, 'Januari'), (2, 'Februari'), (3, 'Maret'), (4, 'April'),
+        (5, 'Mei'), (6, 'Juni'), (7, 'Juli'), (8, 'Agustus'),
+        (9, 'September'), (10, 'Oktober'), (11, 'November'), (12, 'Desember')
+    ]
+    year_options = list(range(now.year - 2, now.year + 2))
+    
+    # DETERMINE ACTIVE TAB
+    # Default to 'fingerprint'
+    active_tab = 'fingerprint'
+    
+    # If requests explicit tab via GET or if WA Employee ID is present -> WhatsApp
+    if request.GET.get('tab') == 'whatsapp' or wa_employee_id or request.GET.get('active_tab') == 'whatsapp':
+        active_tab = 'whatsapp'
+    
+    context = {
+        'page_title': 'Meja Kerja Rekapitulasi',
+        'selected_location': selected_location,
+        'all_locations': all_locations,
+        'can_select_location': can_select_location,
+        'user_role': user_role,
+        'employees': employees,
+        'matrix_data': matrix_data,
+        'date_range': date_range,
+        'selected_month': month,
+        'selected_year': year,
+        'month_names': month_names,
+        'year_options': year_options,
+        'holidays_map': holidays_map, 
+        
+        # Personal Mode Context (Fingerprint)
+        'mode': mode,
+        'personal_logs': personal_logs,
+        'summary_stats': summary_stats,
+        'selected_employee_id': str(employee_id) if employee_id else '',
+        'personal_employee': personal_employee,  # Employee object for personal mode
+        
+        # Fingerprint Employees (for Tab 1)
+        'fingerprint_employees': fingerprint_employees,
+        
+        # WhatsApp / Telegram Context (for Tab 2)
+        'wa_employees': wa_employees,
+        'wa_mode': wa_mode,
+        'wa_specific_date': wa_specific_date,
+        'wa_daily_data': wa_daily_data,
+        'wa_matrix_data': wa_matrix_data,
+        'wa_date_range': wa_date_range if wa_employees else date_range,
+        'wa_personal_logs': wa_personal_logs,
+        'wa_categories': WA_CATEGORIES,
+        'wa_category_icons': WA_CATEGORY_ICONS,
+        'wa_summary_data': wa_summary_data if wa_employees else {},
+        'wa_summary_stats': wa_summary_stats if 'wa_summary_stats' in locals() else {'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0},
+        'selected_wa_employee_id': str(wa_employee_id) if wa_employee_id else '',
+        'wa_personal_employee': wa_personal_employee,  # WA Employee object for personal mode
+        
+        # Role-based access
+        'user_role': profile.role if profile else 'KERANI',
+        
+        # Active Tab State
+        'active_tab': active_tab, 
+    }
+    
+    return render(request, 'portal/recap_matrix.html', context)
+
+
+# =============================================================================
+# EDIT ATTENDANCE MODAL (HTMX)
+# =============================================================================
+
+@login_required
+def edit_attendance_modal(request, employee_id, date_str):
+    """
+    HTMX: Load modal untuk edit/create attendance log.
+    
+    Args:
+        employee_id: UUID karyawan
+        date_str: Format YYYY-MM-DD
+    """
+    from attendance.models import Employee, AttendanceLog
+    from datetime import datetime
+    
+    employee = get_object_or_404(Employee, id=employee_id)
+    
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return HttpResponse('<div class="alert alert-danger">Format tanggal tidak valid</div>')
+    
+    # Check if log exists for this employee and date
+    existing_log = AttendanceLog.objects.filter(
+        employee=employee,
+        timestamp__date=target_date
+    ).first()
+    
+    # Status options
+    status_choices = [
+        ('CHECKIN', 'Hadir (H)'),
+        ('SICK', 'Sakit (S)'),
+        ('PERMIT', 'Izin (I)'),
+        ('ALPHA', 'Alpha (A)'),
+    ]
+    
+    context = {
+        'employee': employee,
+        'target_date': target_date,
+        'date_str': date_str,
+        'existing_log': existing_log,
+        'status_choices': status_choices,
+        'is_edit': existing_log is not None,
+    }
+    
+    return render(request, 'portal/partials/_modal_edit_log.html', context)
+
+
+@login_required
+def save_attendance_cell(request):
+    """
+    HTMX POST: Simpan/Update attendance log dan return cell fragment.
+    
+    Returns only the updated cell HTML for hx-swap="outerHTML".
+    """
+    from attendance.models import Employee, AttendanceLog
+    from datetime import datetime
+    from django.utils import timezone
+    
+    if request.method != 'POST':
+        return HttpResponse('<div class="alert alert-warning">Method not allowed</div>')
+    
+    employee_id = request.POST.get('employee_id')
+    date_str = request.POST.get('date_str')
+    status = request.POST.get('status')
+    clock_in = request.POST.get('clock_in')
+    clock_out = request.POST.get('clock_out')
+    notes = request.POST.get('notes', '')
+    
+    try:
+        employee = Employee.objects.get(id=employee_id)
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except (Employee.DoesNotExist, ValueError) as e:
+        return HttpResponse(f'<div class="alert alert-danger">Error: {str(e)}</div>')
+    
+    # Determine display status code
+    status_map = {
+        'CHECKIN': 'H',
+        'SICK': 'S',
+        'PERMIT': 'I',
+        'ALPHA': 'A',
+    }
+    display_status = status_map.get(status, 'A')
+    
+    # Check if log exists
+    existing_log = AttendanceLog.objects.filter(
+        employee=employee,
+        timestamp__date=target_date
+    ).first()
+    
+    now = timezone.now()
+    
+    if status == 'ALPHA':
+        # Delete existing log if marking as Alpha
+        if existing_log:
+            existing_log.delete()
+    else:
+        # Create or update log
+        if existing_log:
+            existing_log.status = status
+            existing_log.notes = notes
+            existing_log.save()
+        else:
+            # Create new log
+            # Parse clock_in time or use default 08:00
+            if clock_in:
+                try:
+                    time_parts = clock_in.split(':')
+                    log_datetime = timezone.make_aware(
+                        datetime.combine(target_date, datetime.strptime(clock_in, '%H:%M').time())
+                    )
+                except:
+                    log_datetime = timezone.make_aware(
+                        datetime.combine(target_date, datetime.strptime('08:00', '%H:%M').time())
+                    )
+            else:
+                log_datetime = timezone.make_aware(
+                    datetime.combine(target_date, datetime.strptime('08:00', '%H:%M').time())
+                )
+            
+            AttendanceLog.objects.create(
+                employee=employee,
+                timestamp=log_datetime,
+                status=status,
+                source_type='MANUAL',
+                notes=notes,
+                captured_at=now,
+            )
+    
+    # Return cell fragment with updated status
+    context = {
+        'employee': employee,
+        'target_date': target_date,
+        'date_str': date_str,
+        'status': display_status,
+        'is_holiday': target_date.weekday() >= 5,
+    }
+    
+    return render(request, 'portal/partials/_attendance_cell.html', context)
+
+
+# =============================================================================
+# WA CELL EDIT (HTMX) - Role-Based Access Control
+# =============================================================================
+
+@login_required
+def wa_edit_cell(request, employee_id, date_str, category):
+    """
+    HTMX: Load modal content untuk edit WA attendance cell.
+    Admin bisa set waktu, Kerani hanya bisa set Izin/Sakit.
+    """
+    from attendance.models import Employee, AttendanceLog
+    from datetime import datetime
+    
+    employee = Employee.objects.get(id=employee_id)
+    target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    
+    # Get user role
+    profile = getattr(request.user, 'employee_profile', None)
+    user_role = profile.role if profile else 'KERANI'
+    
+    # Check if log exists for this cell
+    existing_log = AttendanceLog.objects.filter(
+        employee=employee,
+        timestamp__date=target_date,
+        log_category=category,
+        source_type='TELEGRAM'
+    ).first()
+    
+    existing_time = existing_log.timestamp.strftime('%H:%M') if existing_log else ''
+    existing_notes = existing_log.notes if existing_log else ''
+    
+    # Category labels
+    category_labels = {
+        'MASUK': 'Pagi',
+        'CHECKPOINT_1': 'Checkpoint 1',
+        'ISTIRAHAT': 'Istirahat',
+        'CHECKPOINT_2': 'Checkpoint 2',
+        'PULANG': 'Pulang',
+    }
+    
+    context = {
+        'employee': employee,
+        'date_str': date_str,
+        'category': category,
+        'category_label': category_labels.get(category, category),
+        'user_role': user_role,
+        'existing_time': existing_time,
+        'existing_notes': existing_notes,
+        'is_admin': user_role in ['ADMIN', 'HRD'],
+    }
+    
+    return render(request, 'portal/partials/_wa_edit_cell_modal.html', context)
+
+
+@login_required
+@require_POST
+def wa_save_cell(request):
+    """
+    HTMX: Save WA attendance cell.
+    Admin bisa set waktu, Kerani hanya bisa set Izin/Sakit.
+    """
+    from attendance.models import Employee, AttendanceLog
+    from django.utils import timezone
+    from datetime import datetime
+    
+    employee_id = request.POST.get('employee_id')
+    date_str = request.POST.get('date_str')
+    category = request.POST.get('category')
+    action = request.POST.get('action')  # 'set_time', 'izin', 'sakit', 'delete'
+    time_value = request.POST.get('time_value', '')
+    
+    employee = Employee.objects.get(id=employee_id)
+    target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    
+    # Get user role
+    profile = getattr(request.user, 'employee_profile', None)
+    user_role = profile.role if profile else 'KERANI'
+    
+    # Delete existing log if any
+    existing_log = AttendanceLog.objects.filter(
+        employee=employee,
+        timestamp__date=target_date,
+        log_category=category,
+        source_type='TELEGRAM'
+    ).first()
+    
+    if action == 'delete':
+        if existing_log:
+            existing_log.delete()
+        return HttpResponse('<span class="text-muted opacity-25">-</span>')
+    
+    # Determine time and notes based on action
+    if action == 'izin':
+        log_time = '00:00'  # Placeholder time for izin
+        notes = 'IZIN'
+    elif action == 'sakit':
+        log_time = '00:00'
+        notes = 'SAKIT'
+    elif action == 'set_time' and user_role in ['ADMIN', 'HRD']:
+        log_time = time_value if time_value else '08:00'
+        notes = 'Manual Entry'
+    else:
+        # Kerani trying to set time without permission
+        return HttpResponse('<span class="text-danger">Tidak diizinkan</span>')
+    
+    # Create or update log
+    try:
+        log_datetime = timezone.make_aware(
+            datetime.combine(target_date, datetime.strptime(log_time, '%H:%M').time())
+        )
+    except:
+        log_datetime = timezone.make_aware(
+            datetime.combine(target_date, datetime.strptime('08:00', '%H:%M').time())
+        )
+    
+    if existing_log:
+        existing_log.timestamp = log_datetime
+        existing_log.notes = notes
+        existing_log.save()
+    else:
+        AttendanceLog.objects.create(
+            employee=employee,
+            timestamp=log_datetime,
+            log_category=category,
+            source_type='TELEGRAM',
+            notes=notes,
+        )
+    
+    # Return updated cell content
+    if action in ['izin', 'sakit']:
+        return HttpResponse(f'<span class="text-warning fw-bold" style="font-size: 0.6rem;">{action.upper()[:2]}</span>')
+    else:
+        return HttpResponse(f'<span class="text-success" style="font-size: 0.6rem;">{log_time}</span>')
+
+
+# =============================================================================
+# EMPLOYEE LEAVE CRUD ENDPOINTS
+# =============================================================================
+
+@login_required
+@require_POST
+def employee_leave_add(request):
+    """Add a new leave record for an employee"""
+    from attendance.models import Employee, EmployeeLeave
+    from django.utils import timezone
+    from datetime import datetime
+    
+    employee_id = request.POST.get('employee_id')
+    leave_type = request.POST.get('leave_type')
+    start_date_str = request.POST.get('start_date')
+    end_date_str = request.POST.get('end_date')
+    notes = request.POST.get('notes', '')
+    
+    try:
+        employee = Employee.objects.get(id=employee_id)
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        
+        if end_date < start_date:
+            return HttpResponse('<div class="alert alert-danger">Tanggal selesai harus setelah tanggal mulai</div>')
+        
+        leave = EmployeeLeave.objects.create(
+            employee=employee,
+            leave_type=leave_type,
+            start_date=start_date,
+            end_date=end_date,
+            notes=notes,
+            created_by=request.user
+        )
+        
+        # Determine target container from request headers (HTMX)
+        target_id = request.headers.get('HX-Target', 'leave-list-container')
+
+        # Return updated leave list HTML
+        return render(request, 'portal/_employee_leave_list.html', {
+            'leaves': employee.leaves.all()[:10],
+            'employee': employee,
+            'target_id': target_id
+        })
+        
+    except Employee.DoesNotExist:
+        return HttpResponse('<div class="alert alert-danger">Karyawan tidak ditemukan</div>')
+    except Exception as e:
+        return HttpResponse(f'<div class="alert alert-danger">Error: {str(e)}</div>')
+
+
+@login_required
+@require_POST
+def employee_leave_delete(request, leave_id):
+    """Delete a leave record"""
+    from attendance.models import EmployeeLeave
+    
+    try:
+        leave = EmployeeLeave.objects.get(id=leave_id)
+        employee = leave.employee
+        leave.delete()
+        
+        # Determine target container from request headers (HTMX)
+        target_id = request.headers.get('HX-Target', 'leave-list-container')
+
+        # Return updated leave list HTML
+        return render(request, 'portal/_employee_leave_list.html', {
+            'leaves': employee.leaves.all()[:10],
+            'employee': employee,
+            'target_id': target_id
+        })
+
+        
+    except EmployeeLeave.DoesNotExist:
+        return HttpResponse('<div class="alert alert-danger">Data tidak ditemukan</div>')
+
+
+@login_required
+def employee_leave_list(request, employee_id):
+    """Get leave list for an employee (HTMX)"""
+    from attendance.models import Employee
+    
+    try:
+        employee = Employee.objects.get(id=employee_id)
+        # Determine target container from request headers (HTMX)
+        target_id = request.headers.get('HX-Target', 'leave-list-container')
+
+        return render(request, 'portal/_employee_leave_list.html', {
+            'leaves': employee.leaves.all()[:10],
+            'employee': employee,
+            'target_id': target_id
+        })
+    except Employee.DoesNotExist:
+        return HttpResponse('<div class="alert alert-warning">Karyawan tidak ditemukan</div>')

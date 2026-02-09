@@ -385,3 +385,232 @@ class EmployeeMutation(models.Model):
 
     def __str__(self):
         return f"{self.employee.full_name}: {self.old_location} → {self.new_location} ({self.effective_date})"
+
+
+# =============================================================================
+# PHASE 4: MONTHLY REPORT & VALIDATION SYSTEM
+# =============================================================================
+
+class MonthlyReport(models.Model):
+    """
+    Dokumen Laporan Bulanan per Lokasi.
+    Membungkus data absensi untuk validasi berjenjang (Kerani → HRD → Accounting).
+    
+    Status Workflow:
+    DRAFT → SUBMITTED (Kerani lock) → VERIFIED (HRD approve) 
+                                    ↳ REJECTED (HRD tolak) → DRAFT
+                                    ↳ REQ_REVISI (Kerani minta buka kunci)
+    """
+    STATUS_CHOICES = [
+        ('DRAFT', 'Draft (Masih bisa diedit)'),
+        ('SUBMITTED', 'Dikunci Kerani (Menunggu HRD)'),
+        ('VERIFIED', 'Disetujui HRD'),
+        ('REQ_REVISI', 'Permintaan Revisi'),
+        ('REJECTED', 'Ditolak (Dikembalikan ke Draft)'),
+    ]
+    
+    MONTH_CHOICES = [(i, i) for i in range(1, 13)]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    # Lokasi & Periode
+    location = models.ForeignKey(
+        WorkLocation, 
+        on_delete=models.CASCADE, 
+        related_name="monthly_reports",
+        help_text="Lokasi kerja untuk laporan ini"
+    )
+    period_month = models.IntegerField(
+        choices=MONTH_CHOICES,
+        help_text="Bulan periode (1-12)"
+    )
+    period_year = models.IntegerField(
+        help_text="Tahun periode (Contoh: 2026)"
+    )
+    
+    # Status & Version Control
+    status = models.CharField(
+        max_length=15, 
+        choices=STATUS_CHOICES, 
+        default='DRAFT',
+        db_index=True
+    )
+    version = models.IntegerField(
+        default=0, 
+        help_text="Versi laporan (bertambah setiap revisi disetujui)"
+    )
+    
+    # Digital Stamps (Audit)
+    submitted_by = models.ForeignKey(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="reports_submitted",
+        help_text="Kerani yang mengunci laporan"
+    )
+    submitted_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Waktu laporan dikunci oleh Kerani"
+    )
+    
+    verified_by = models.ForeignKey(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="reports_verified",
+        help_text="HRD yang memverifikasi laporan"
+    )
+    verified_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Waktu laporan diverifikasi oleh HRD"
+    )
+    
+    # Notes & Metadata
+    notes = models.TextField(
+        blank=True, null=True,
+        help_text="Catatan revisi/penolakan/keterangan"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-period_year', '-period_month', 'location__code']
+        verbose_name = "Monthly Report"
+        verbose_name_plural = "Monthly Reports"
+        unique_together = ['location', 'period_month', 'period_year']
+        indexes = [
+            models.Index(fields=['period_year', 'period_month']),
+            models.Index(fields=['status']),
+        ]
+    
+    def __str__(self):
+        month_name = [
+            '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+            'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+        ][self.period_month]
+        return f"{self.location.code} - {month_name} {self.period_year} (v{self.version})"
+    
+    @property
+    def period_display(self):
+        """Human-readable period display."""
+        month_names = [
+            '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+            'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+        ]
+        return f"{month_names[self.period_month]} {self.period_year}"
+    
+    @property
+    def is_editable(self):
+        """Check if report can be edited (only DRAFT or REJECTED)."""
+        return self.status in ('DRAFT', 'REJECTED')
+    
+    @property
+    def is_locked(self):
+        """Check if report is locked (SUBMITTED or VERIFIED)."""
+        return self.status in ('SUBMITTED', 'VERIFIED')
+
+
+class ReportHistory(models.Model):
+    """
+    Audit Log untuk sejarah perubahan status laporan.
+    Mencatat siapa yang melakukan aksi dan kapan.
+    """
+    ACTION_CHOICES = [
+        ('CREATE', 'Laporan Dibuat'),
+        ('SUBMIT', 'Dikunci/Submit oleh Kerani'),
+        ('VERIFY', 'Diverifikasi oleh HRD'),
+        ('REJECT', 'Ditolak oleh HRD'),
+        ('REQUEST_REVISION', 'Permintaan Revisi'),
+        ('REOPEN', 'Dibuka Kembali ke Draft'),
+        ('UPDATE', 'Data Diperbarui'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    report = models.ForeignKey(
+        MonthlyReport,
+        on_delete=models.CASCADE,
+        related_name="history"
+    )
+    actor = models.ForeignKey(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="report_actions",
+        help_text="User yang melakukan aksi"
+    )
+    action = models.CharField(
+        max_length=20,
+        choices=ACTION_CHOICES,
+        db_index=True
+    )
+    
+    # Previous & New status for complete audit trail
+    previous_status = models.CharField(
+        max_length=15,
+        null=True, blank=True,
+        help_text="Status sebelum aksi"
+    )
+    new_status = models.CharField(
+        max_length=15,
+        null=True, blank=True,
+        help_text="Status setelah aksi"
+    )
+    
+    timestamp = models.DateTimeField(auto_now_add=True)
+    comment = models.TextField(
+        blank=True, null=True,
+        help_text="Alasan/catatan untuk aksi ini"
+    )
+    
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name = "Report History"
+        verbose_name_plural = "Report Histories"
+    
+    def __str__(self):
+        return f"{self.report} - {self.get_action_display()} ({self.timestamp.strftime('%d/%m/%Y %H:%M')})"
+
+
+class EmployeeLeave(models.Model):
+    """
+    Rekaman Izin/Cuti/Sakit Karyawan.
+    Mendukung range tanggal untuk cuti beberapa hari.
+    """
+    LEAVE_TYPES = [
+        ('IZIN', 'Izin'),
+        ('SAKIT', 'Sakit'),
+        ('CUTI', 'Cuti Tahunan'),
+        ('CUTI_KHUSUS', 'Cuti Khusus'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    employee = models.ForeignKey('Employee', on_delete=models.CASCADE, related_name='leaves')
+    leave_type = models.CharField(max_length=20, choices=LEAVE_TYPES)
+    start_date = models.DateField(help_text="Tanggal mulai izin/cuti")
+    end_date = models.DateField(help_text="Tanggal selesai izin/cuti")
+    notes = models.TextField(blank=True, help_text="Keterangan/alasan")
+    
+    created_by = models.ForeignKey(
+        'auth.User', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        related_name='created_leaves',
+        help_text="User yang menginput data ini"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-start_date']
+        verbose_name = "Employee Leave"
+        verbose_name_plural = "Employee Leaves"
+    
+    def __str__(self):
+        return f"{self.employee.full_name} - {self.get_leave_type_display()} ({self.start_date} - {self.end_date})"
+    
+    @property
+    def duration_days(self):
+        """Hitung durasi dalam hari"""
+        return (self.end_date - self.start_date).days + 1

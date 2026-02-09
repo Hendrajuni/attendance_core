@@ -25,6 +25,14 @@
                 </a>
             </li>
 
+            <li class="nav-item">
+                <a href="{% url 'portal:recap_matrix' %}"
+                    class="nav-link text-white {% if request.resolver_match.url_name == 'recap_matrix' %}active bg-primary{% endif %} d-flex align-items-center">
+                    <i class="fas fa-table fa-fw me-3"></i>
+                    Meja Kerja Rekapitulasi
+                </a>
+            </li>
+
             <!-- Sync Center Dropdown -->
             <li class="nav-item">
                 <a href="#submenu-sync" data-bs-toggle="collapse" class="nav-link text-white d-flex align-items-center align-items-center justify-content-between {% if 'sync' in request.resolver_match.url_name %}active bg-primary{% endif %}">

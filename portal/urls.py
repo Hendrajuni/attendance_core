@@ -39,4 +39,20 @@ urlpatterns = [
     
     # Employee Edit
     path('employee/<uuid:employee_id>/edit/', views.employee_edit_view, name='employee_edit'),
+    
+    # Recap Matrix (Meja Kerja Rekapitulasi)
+    path('recap-matrix/', views.recap_matrix_view, name='recap_matrix'),
+    
+    # Attendance Cell Edit (HTMX)
+    path('attendance/edit/<uuid:employee_id>/<str:date_str>/', views.edit_attendance_modal, name='edit_attendance_modal'),
+    path('attendance/save/', views.save_attendance_cell, name='save_attendance_cell'),
+    
+    # WA Cell Edit (HTMX)
+    path('wa/edit-cell/<uuid:employee_id>/<str:date_str>/<str:category>/', views.wa_edit_cell, name='wa_edit_cell'),
+    path('wa/save-cell/', views.wa_save_cell, name='wa_save_cell'),
+    
+    # Employee Leave CRUD (HTMX)
+    path('leave/add/', views.employee_leave_add, name='employee_leave_add'),
+    path('leave/delete/<uuid:leave_id>/', views.employee_leave_delete, name='employee_leave_delete'),
+    path('leave/list/<uuid:employee_id>/', views.employee_leave_list, name='employee_leave_list'),
 ]

@@ -1,0 +1,108 @@
+<!-- Modal Edit Attendance Log -->
+<div class="modal fade" id="editAttendanceModal" tabindex="-1" aria-labelledby="editAttendanceModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-primary text-white border-0">
+                <h5 class="modal-title" id="editAttendanceModalLabel">
+                    <i class="fas fa-edit me-2"></i>
+                    {% if is_edit %}Edit{% else %}Tambah{% endif %} Absensi
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form hx-post="{% url 'portal:save_attendance_cell' %}"
+                  hx-target="#cell-{{ employee.id }}-{{ date_str }}"
+                  hx-swap="outerHTML"
+                  hx-on::after-request="bootstrap.Modal.getInstance(document.getElementById('editAttendanceModal')).hide();">
+                {% csrf_token %}
+                <input type="hidden" name="employee_id" value="{{ employee.id }}">
+                <input type="hidden" name="date_str" value="{{ date_str }}">
+                
+                <div class="modal-body">
+                    <!-- Employee & Date Info -->
+                    <div class="alert alert-light border mb-4">
+                        <div class="row">
+                            <div class="col-6">
+                                <small class="text-muted">Karyawan</small>
+                                <div class="fw-bold">{{ employee.full_name }}</div>
+                                <small class="text-muted">{{ employee.nik }}</small>
+                            </div>
+                            <div class="col-6 text-end">
+                                <small class="text-muted">Tanggal</small>
+                                <div class="fw-bold">{{ target_date|date:"d M Y" }}</div>
+                                <small class="text-muted">{{ target_date|date:"l" }}</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Status Selection -->
+                    <div class="mb-4">
+                        <label class="form-label fw-medium">
+                            <i class="fas fa-check-circle me-1 text-primary"></i> Status Kehadiran
+                        </label>
+                        <div class="row g-2">
+                            {% for code, label in status_choices %}
+                            <div class="col-6">
+                                <input type="radio" class="btn-check" name="status" id="status-{{ code }}" value="{{ code }}"
+                                       {% if existing_log and existing_log.status == code %}checked{% endif %}
+                                       {% if not existing_log and code == 'ALPHA' %}checked{% endif %}>
+                                <label class="btn w-100 {% if code == 'CHECKIN' %}btn-outline-success{% elif code == 'SICK' or code == 'PERMIT' %}btn-outline-warning{% else %}btn-outline-danger{% endif %}" 
+                                       for="status-{{ code }}">
+                                    <i class="fas {% if code == 'CHECKIN' %}fa-check{% elif code == 'SICK' %}fa-medkit{% elif code == 'PERMIT' %}fa-file-alt{% else %}fa-times{% endif %} me-1"></i>
+                                    {{ label }}
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <!-- Time Fields (Collapsible) -->
+                    <div class="mb-3">
+                        <a class="text-decoration-none" data-bs-toggle="collapse" href="#timeFields" role="button">
+                            <i class="fas fa-clock me-1"></i> Detail Waktu (Opsional)
+                            <i class="fas fa-chevron-down ms-1 small"></i>
+                        </a>
+                        <div class="collapse {% if existing_log %}show{% endif %}" id="timeFields">
+                            <div class="row g-3 mt-2">
+                                <div class="col-6">
+                                    <label class="form-label small">Jam Masuk</label>
+                                    <input type="time" class="form-control" name="clock_in" 
+                                           value="{% if existing_log %}{{ existing_log.timestamp|time:'H:i' }}{% else %}08:00{% endif %}">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Jam Pulang</label>
+                                    <input type="time" class="form-control" name="clock_out" value="17:00">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Notes -->
+                    <div class="mb-3">
+                        <label class="form-label fw-medium">
+                            <i class="fas fa-sticky-note me-1 text-primary"></i> Keterangan
+                        </label>
+                        <textarea class="form-control" name="notes" rows="2" 
+                                  placeholder="Catatan tambahan (opsional)...">{% if existing_log %}{{ existing_log.notes }}{% endif %}</textarea>
+                    </div>
+                </div>
+                
+                <div class="modal-footer border-0 bg-light">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-1"></i> Batal
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-1"></i> Simpan Perubahan
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Auto-show modal when loaded via HTMX
+    (function() {
+        const modal = new bootstrap.Modal(document.getElementById('editAttendanceModal'));
+        modal.show();
+    })();
+</script>

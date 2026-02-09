@@ -10,7 +10,8 @@ from .models import (
     Department, Employee, AttendanceLog, WorkLocation, 
     FingerprintDevice, SpreadsheetSource,
     DailySchedule, ShiftPattern, EmployeeShiftAssignment,
-    NewRegistration, EmployeeMutation  # Proxy Model + Mutation
+    NewRegistration, EmployeeMutation,  # Proxy Model + Mutation
+    MonthlyReport, ReportHistory,  # Phase 4: Report System
 )
 
 
@@ -609,3 +610,99 @@ class EmployeeMutationAdmin(admin.ModelAdmin):
     
     def has_delete_permission(self, request, obj=None):
         return request.user.is_superuser  # Only superuser can delete (emergency)
+
+
+# =============================================================================
+# PHASE 4: MONTHLY REPORT & VALIDATION ADMIN
+# =============================================================================
+
+class ReportHistoryInline(admin.TabularInline):
+    """Inline display of report history for audit trail."""
+    model = ReportHistory
+    extra = 0
+    readonly_fields = ('timestamp', 'actor', 'action', 'previous_status', 'new_status', 'comment')
+    can_delete = False
+    ordering = ['-timestamp']
+    
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MonthlyReport)
+class MonthlyReportAdmin(admin.ModelAdmin):
+    """
+    Admin untuk mengelola Laporan Bulanan.
+    Menampilkan status, versi, dan stempel digital untuk tracking workflow.
+    """
+    list_display = (
+        'location', 'period_display', 'status', 'version',
+        'submitted_by', 'submitted_at', 'verified_by', 'verified_at'
+    )
+    list_filter = ('status', 'period_year', 'period_month', 'location')
+    search_fields = ('location__name', 'location__code', 'notes')
+    date_hierarchy = 'created_at'
+    ordering = ['-period_year', '-period_month', 'location__code']
+    
+    readonly_fields = (
+        'submitted_by', 'submitted_at', 'verified_by', 'verified_at',
+        'created_at', 'updated_at', 'version'
+    )
+    
+    inlines = [ReportHistoryInline]
+    
+    fieldsets = (
+        ('Identitas Laporan', {
+            'fields': (
+                'location',
+                ('period_month', 'period_year'),
+                ('status', 'version'),
+            )
+        }),
+        ('Stempel Digital (Audit Trail)', {
+            'fields': (
+                ('submitted_by', 'submitted_at'),
+                ('verified_by', 'verified_at'),
+            ),
+            'classes': ('collapse',),
+            'description': 'Informasi stempel digital untuk validasi berjenjang.'
+        }),
+        ('Catatan & Metadata', {
+            'fields': (
+                'notes',
+                ('created_at', 'updated_at'),
+            ),
+            'classes': ('collapse',),
+        }),
+    )
+    
+    def period_display(self, obj):
+        """Display period as readable string."""
+        return obj.period_display
+    period_display.short_description = 'Periode'
+    period_display.admin_order_field = 'period_month'
+
+
+@admin.register(ReportHistory)
+class ReportHistoryAdmin(admin.ModelAdmin):
+    """
+    Admin untuk melihat riwayat perubahan status laporan.
+    Readonly untuk menjaga integritas audit trail.
+    """
+    list_display = ('report', 'action', 'actor', 'previous_status', 'new_status', 'timestamp')
+    list_filter = ('action', 'timestamp', 'report__location')
+    search_fields = ('report__location__name', 'report__location__code', 'comment', 'actor__username')
+    date_hierarchy = 'timestamp'
+    ordering = ['-timestamp']
+    
+    readonly_fields = ('report', 'actor', 'action', 'previous_status', 'new_status', 'timestamp', 'comment')
+    
+    # Disable add/change/delete permissions (log only via system)
+    def has_add_permission(self, request):
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        return False
+    
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser  # Only superuser can delete (emergency)
+

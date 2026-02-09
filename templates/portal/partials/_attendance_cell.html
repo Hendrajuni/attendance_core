@@ -1,0 +1,25 @@
+{% load portal_filters %}
+{# Single attendance cell fragment - returned after save for hx-swap #}
+<td id="cell-{{ employee.id }}-{{ date_str }}" 
+    class="status-cell cell-{% if status == 'H' %}hadir{% elif status == 'A' %}alpha{% elif status == 'S' or status == 'I' %}izin{% elif is_holiday %}libur{% else %}empty{% endif %}"
+    {% if not is_holiday %}
+    hx-get="{% url 'portal:edit_attendance_modal' employee.id date_str %}"
+    hx-target="#modal-container"
+    hx-trigger="click"
+    {% endif %}>
+    <span class="cell-icon">
+        {% if status == 'H' %}
+            <i class="fas fa-check"></i>
+        {% elif status == 'A' %}
+            <i class="fas fa-times"></i>
+        {% elif status == 'S' %}
+            <i class="fas fa-medkit"></i>
+        {% elif status == 'I' %}
+            <i class="fas fa-file-alt"></i>
+        {% elif is_holiday %}
+            <i class="fas fa-moon"></i>
+        {% else %}
+            -
+        {% endif %}
+    </span>
+</td>
