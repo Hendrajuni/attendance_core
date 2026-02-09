@@ -250,6 +250,13 @@
                         {% endfor %}
                     </select>
                 </div>
+                {% if mode == 'personal' %}
+                <div class="col-md-2">
+                    <a href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&active_tab=fingerprint" class="btn btn-secondary btn-sm shadow-sm text-white fw-bold w-100">
+                        <i class="fas fa-arrow-left me-1"></i> Matrix
+                    </a>
+                </div>
+                {% endif %}
             </div>
         </form>
 
@@ -424,9 +431,15 @@
                                         {% with date_str=d|date:"Y-m-d" %}
                                         {% with status=matrix_data|dict_get:emp.id|dict_get:d %}
                                         {% with holiday_name=holidays_map|dict_get:date_str %}
-                                        <td class="p-1 {% if d.weekday == 6 or holiday_name %}bg-holiday-column{% endif %}">
-                                            <div class="status-cell {% if status == 'H' %}cell-hadir{% elif status == 'A' %}cell-alpha{% elif status == 'S' or status == 'I' %}cell-izin{% elif status == 'L' %}cell-libur{% else %}cell-empty{% endif %}">
-                                                {% if status == 'H' %}H{% elif status == 'A' %}A{% elif status == 'S' %}S{% elif status == 'I' %}I{% elif status == 'L' %}-{% else %}+{% endif %}
+                                        <td class="p-1 {% if d.weekday == 6 or holiday_name %}bg-holiday-column{% endif %} text-center" 
+                                            style="cursor: pointer;"
+                                            hx-get="{% url 'portal:fp_edit_cell' emp.id date_str %}"
+                                            hx-target="#fp-edit-modal-content"
+                                            hx-trigger="click"
+                                            data-bs-toggle="modal"
+                                            data-bs-target="#fpEditModal">
+                                            <div class="status-cell {% if status == 'H' %}cell-hadir{% elif status == 'A' %}cell-alpha{% elif status == 'S' or status == 'I' or status == 'CUTI' %}cell-izin{% elif status == 'L' %}cell-libur{% else %}cell-empty{% endif %}">
+                                                {% if status == 'H' %}H{% elif status == 'A' %}A{% elif status == 'S' %}S{% elif status == 'I' %}I{% elif status == 'CUTI' %}C{% elif status == 'L' %}-{% else %}+{% endif %}
                                             </div>
                                         </td>
                                         {% endwith %}
@@ -469,11 +482,13 @@
                             {% endfor %}
                         </select>
                     </div>
+                    {% if wa_mode == 'personal' %}
                     <div class="col-auto">
                         <a href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&active_tab=whatsapp" class="btn btn-warning btn-sm shadow-sm text-dark fw-bold">
                             <i class="fas fa-arrow-left me-1"></i> Matrix
                         </a>
                     </div>
+                    {% endif %}
                 </div>
             </form>
             <div class="card shadow border-0 rounded-4 mb-4">
@@ -752,6 +767,22 @@
             <div id="wa-edit-modal-content">
                 <div class="modal-body text-center py-4">
                     <div class="spinner-border text-success" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- FP Edit Cell Modal -->
+<div class="modal fade" id="fpEditModal" tabindex="-1" aria-labelledby="fpEditModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content">
+            <div id="fp-edit-modal-content">
+                <div class="modal-body text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
                         <span class="visually-hidden">Loading...</span>
                     </div>
                 </div>

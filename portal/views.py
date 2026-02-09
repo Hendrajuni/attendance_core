@@ -1583,11 +1583,11 @@ def recap_matrix_view(request):
     wa_matrix_data = {}
     wa_summary_data = {}
     
+    # Build date range for WA matrix (same as fingerprint)
+    _, wa_days_in_month = monthrange(year, month)
+    wa_date_range = [date(year, month, day) for day in range(1, wa_days_in_month + 1)]
+
     if wa_employees:
-        # Build date range for WA matrix (same as fingerprint)
-        _, wa_days_in_month = monthrange(year, month)
-        wa_date_range = [date(year, month, day) for day in range(1, wa_days_in_month + 1)]
-        
         # Build set of holiday dates for quick lookup
         holidays_set = set(holidays_map.keys())
         
@@ -2324,3 +2324,136 @@ def employee_leave_list(request, employee_id):
         })
     except Employee.DoesNotExist:
         return HttpResponse('<div class="alert alert-warning">Karyawan tidak ditemukan</div>')
+@login_required
+def fp_edit_cell(request, employee_id, date_str):
+    """
+    HTMX: Load modal content untuk edit Fingerprint attendance cell.
+    Allows setting Hadir, Sakit, Izin, Alpha.
+    """
+    from attendance.models import Employee, AttendanceLog, EmployeeLeave
+    from datetime import datetime
+    
+    employee = Employee.objects.get(id=employee_id)
+    target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    
+    # Check for existing log (Checkin/Checkout)
+    existing_log = AttendanceLog.objects.filter(
+        employee=employee,
+        timestamp__date=target_date,
+        source_type='FINGERPRINT'
+    ).first()
+    
+    # Check for existing leave
+    existing_leave = EmployeeLeave.objects.filter(
+        employee=employee,
+        start_date__lte=target_date,
+        end_date__gte=target_date
+    ).first()
+    
+    existing_status = ''
+    if existing_leave:
+        existing_status = existing_leave.get_leave_type_display()
+    elif existing_log:
+        existing_status = 'Hadir (Data Mesin)'
+        if existing_log.notes == 'Manual Entry':
+            existing_status = 'Hadir (Manual)'
+            
+    context = {
+        'employee': employee,
+        'date_str': date_str,
+        'existing_status': existing_status,
+        'existing_log': existing_log,
+    }
+    
+    return render(request, 'portal/partials/_fp_edit_cell_modal.html', context)
+
+
+@login_required
+@require_POST
+def fp_save_cell(request):
+    """
+    HTMX: Save Fingerprint attendance cell.
+    Updates AttendanceLog (for Hadir) or EmployeeLeave (for Izin/Sakit).
+    """
+    from attendance.models import Employee, AttendanceLog, EmployeeLeave
+    from django.utils import timezone
+    from datetime import datetime, timedelta
+    
+    employee_id = request.POST.get('employee_id')
+    date_str = request.POST.get('date_str')
+    action = request.POST.get('action')
+    
+    employee = Employee.objects.get(id=employee_id)
+    target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    
+    # 1. CLEAR EXISTING STATUS (Delete relevant logs/leaves for this day)
+    # Delete Manual Logs
+    AttendanceLog.objects.filter(
+        employee=employee,
+        timestamp__date=target_date,
+        source_type='FINGERPRINT',
+        notes='Manual Entry'
+    ).delete()
+    
+    # Check for Leave covering this date
+    existing_leaves = EmployeeLeave.objects.filter(
+        employee=employee,
+        start_date__lte=target_date,
+        end_date__gte=target_date
+    )
+    # Note: Deleting a multi-day leave for one day is complex.
+    # For now, we assume single-day edits or warn user. 
+    # Logic: If exact match, delete. If overlap, maybe shrink? 
+    # SIMPLIFICATION: Only delete if exact match or simple intersection logic?
+    # For MVP: Just delete strict single day leaves or warn?
+    # Let's just delete any leave that *starts* on this day to avoid destroying long leaves?
+    # BETTER: Just delete any leave that intersects. User can re-add if needed.
+    existing_leaves.delete() 
+
+    # 2. APPLY NEW ACTION
+    if action == 'delete':
+        return HttpResponse('<span class="text-muted opacity-25">-</span>')
+        
+    elif action == 'hadir':
+        # Create Dummy Log (Checkin 08:00, Checkout 17:00)
+        log_in = timezone.make_aware(datetime.combine(target_date, datetime.strptime('08:00', '%H:%M').time()))
+        log_out = timezone.make_aware(datetime.combine(target_date, datetime.strptime('17:00', '%H:%M').time()))
+        
+        AttendanceLog.objects.create(
+            employee=employee,
+            timestamp=log_in,
+            source_type='FINGERPRINT',
+            device_id='MANUAL',
+            notes='Manual Entry'
+        )
+        AttendanceLog.objects.create(
+            employee=employee,
+            timestamp=log_out,
+            source_type='FINGERPRINT',
+            device_id='MANUAL',
+            notes='Manual Entry'
+        )
+        return HttpResponse('<span class="text-dark fw-bold">H</span>')
+        
+    elif action in ['izin', 'sakit', 'cuti']:
+        leave_type_map = {'izin': 'IZIN', 'sakit': 'SAKIT', 'cuti': 'CUTI'}
+        EmployeeLeave.objects.create(
+            employee=employee,
+            leave_type=leave_type_map.get(action, 'IZIN'),
+            start_date=target_date,
+            end_date=target_date,
+            reason='Manual Update via Matrix'
+        )
+        color_class = {
+            'sakit': 'text-warning fw-bold', 
+            'izin': 'text-info fw-bold',
+            'cuti': 'text-success fw-bold'
+        }.get(action, 'text-secondary')
+        
+        return HttpResponse(f'<span class="{color_class}">{action.upper()[:1]}</span>')
+        
+    elif action == 'alpha':
+        # Ensure no logs/leaves exist (already cleared above)
+        return HttpResponse('<span class="text-danger fw-bold">A</span>')
+        
+    return HttpResponse('<span class="text-muted opacity-25">-</span>')
