@@ -11,7 +11,7 @@
         <strong>{{ employee.full_name }}</strong>
     </div>
     
-    <form hx-post="{% url 'portal:wa_save_cell' %}" hx-target="closest td" hx-swap="innerHTML">
+    <form hx-post="{% url 'portal:wa_save_cell' %}" hx-target="#{{ cell_id }}" hx-swap="innerHTML">
         {% csrf_token %}
         <input type="hidden" name="employee_id" value="{{ employee.id }}">
         <input type="hidden" name="date_str" value="{{ date_str }}">

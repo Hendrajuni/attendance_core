@@ -48,6 +48,18 @@ class BulkLocationAssignmentForm(forms.Form):
         empty_label="-- Pilih Lokasi --",
         help_text="Pilih lokasi kerja (Home Base) untuk karyawan terpilih"
     )
+    
+    METHOD_CHOICES = [
+        ('FINGERPRINT', 'Mesin Fingerprint'),
+        ('WHATSAPP', 'WhatsApp / Telegram'),
+        ('MANUAL', 'Manual / Lainnya'),
+    ]
+    attendance_method = forms.ChoiceField(
+        choices=METHOD_CHOICES,
+        initial='FINGERPRINT',
+        label="Metode Absensi",
+        help_text="Tentukan metode absensi utama untuk karyawan ini"
+    )
 
 
 # =============================================================================
@@ -387,8 +399,8 @@ class NewRegistrationAdmin(admin.ModelAdmin):
             if not emp.joined_date:
                 emp.joined_date = now.date()
             
-            # Auto-generate NIK if temporary (covers TEMP-, TELE-, WA. patterns)
-            if emp.nik.startswith('TEMP-') or emp.nik.startswith('TELE-') or emp.nik.startswith('WA.'):
+            # Auto-generate NIK if temporary (covers TEMP-, TELE-, WA., FG-, T. patterns)
+            if emp.nik.startswith(('TEMP-', 'TELE-', 'WA.', 'FG-', 'T.')):
                 emp.nik = self._generate_unique_nik(now)
                 nik_generated += 1
             
@@ -448,13 +460,15 @@ class NewRegistrationAdmin(admin.ModelAdmin):
             form = BulkLocationAssignmentForm(request.POST)
             if form.is_valid():
                 location = form.cleaned_data['location']
+                attendance_method = form.cleaned_data['attendance_method']
                 now = timezone.now()
                 count = 0
                 nik_generated = 0
 
                 for emp in queryset:
-                    # 1. Set Location
+                    # 1. Set Location & Method
                     emp.home_base = location
+                    emp.attendance_method = attendance_method
                     
                     # 2. Set Verified & Active
                     emp.is_verified = True
@@ -465,8 +479,8 @@ class NewRegistrationAdmin(admin.ModelAdmin):
                     if not emp.joined_date:
                         emp.joined_date = now.date()
                     
-                    # 4. Generate NIK if temporary (covers TEMP-, TELE-, WA. patterns)
-                    if emp.nik.startswith('TEMP-') or emp.nik.startswith('TELE-') or emp.nik.startswith('WA.'):
+                    # 4. Generate NIK if temporary (covers TEMP-, TELE-, WA., FG-, T. patterns)
+                    if emp.nik.startswith(('TEMP-', 'TELE-', 'WA.', 'FG-', 'T.')):
                         emp.nik = self._generate_unique_nik(now)
                         nik_generated += 1
                     

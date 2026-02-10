@@ -199,6 +199,14 @@ class Employee(models.Model):
     employee_type = models.CharField(max_length=10, choices=TYPE_CHOICES, default='HARIAN')
     department = models.ForeignKey(Department, on_delete=models.SET_NULL, null=True, blank=True, related_name="employees")
     
+    # Attendance Method (New Request)
+    METHOD_CHOICES = [
+        ('FINGERPRINT', 'Mesin Fingerprint'),
+        ('WHATSAPP', 'WhatsApp / Telegram'),
+        ('MANUAL', 'Manual / Lainnya'),
+    ]
+    attendance_method = models.CharField(max_length=20, choices=METHOD_CHOICES, default='FINGERPRINT', help_text="Metode absensi utama")
+    
     # Location Assignment
     home_base = models.ForeignKey(WorkLocation, on_delete=models.SET_NULL, null=True, blank=True, related_name="home_employees", help_text="Lokasi penempatan asli")
     
@@ -592,6 +600,7 @@ class EmployeeLeave(models.Model):
     start_date = models.DateField(help_text="Tanggal mulai izin/cuti")
     end_date = models.DateField(help_text="Tanggal selesai izin/cuti")
     notes = models.TextField(blank=True, help_text="Keterangan/alasan")
+    attachment = models.ImageField(upload_to='leaves/', blank=True, null=True, help_text="Bukti foto/dokumen")
     
     created_by = models.ForeignKey(
         'auth.User', 

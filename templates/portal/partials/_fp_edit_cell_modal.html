@@ -8,7 +8,8 @@
 </div>
 <div class="modal-body">
     
-    <form hx-post="{% url 'portal:fp_save_cell' %}" hx-target="closest td" hx-swap="outerHTML">
+    <form hx-post="{% url 'portal:fp_save_cell' %}" hx-target="#cell-{{ employee.id }}-{{ date_str }}" hx-swap="innerHTML"
+          hx-on::after-request="bootstrap.Modal.getInstance(document.getElementById('fpEditModal')).hide();">
         {% csrf_token %}
         <input type="hidden" name="employee_id" value="{{ employee.id }}">
         <input type="hidden" name="date_str" value="{{ date_str }}">

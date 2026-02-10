@@ -24,3 +24,8 @@ env/
 .vscode/
 *.swp
 *.swo
+
+# Debug and Repair
+debug_*
+repair_*
+response.html

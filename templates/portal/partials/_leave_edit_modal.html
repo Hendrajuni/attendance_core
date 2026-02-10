@@ -1,0 +1,59 @@
+<div class="modal-header bg-info text-white">
+    <h5 class="modal-title"><i class="fas fa-edit me-2"></i> Edit Izin/Cuti</h5>
+    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+</div>
+<div class="modal-body">
+    <form hx-post="{% url 'portal:employee_leave_update' leave.id %}" 
+          hx-target="#{{ target_id|default:'leave-list-container' }}"
+          hx-encoding="multipart/form-data"
+          enctype="multipart/form-data"
+          class="row g-3">
+        {% csrf_token %}
+        
+        <div class="col-md-6">
+            <label class="form-label small fw-bold">Tipe</label>
+            <select name="leave_type" class="form-select form-select-sm" required>
+                <option value="IZIN" {% if leave.leave_type == 'IZIN' %}selected{% endif %}>Izin</option>
+                <option value="SAKIT" {% if leave.leave_type == 'SAKIT' %}selected{% endif %}>Sakit</option>
+                <option value="CUTI" {% if leave.leave_type == 'CUTI' %}selected{% endif %}>Cuti Tahunan</option>
+                <option value="CUTI_KHUSUS" {% if leave.leave_type == 'CUTI_KHUSUS' %}selected{% endif %}>Cuti Khusus</option>
+            </select>
+        </div>
+        
+        <div class="col-md-6">
+            <label class="form-label small fw-bold">Bukti Foto (Opsional)</label>
+            <input type="file" name="attachment" class="form-control form-control-sm" accept="image/*">
+            {% if leave.attachment %}
+            <div class="mt-1 small">
+                <a href="{{ leave.attachment.url }}" target="_blank" class="text-decoration-none">
+                    <i class="fas fa-paperclip me-1"></i> Lihat bukti saat ini
+                </a>
+            </div>
+            {% endif %}
+        </div>
+        
+        <div class="col-md-6">
+            <label class="form-label small fw-bold">Dari Tanggal</label>
+            <input type="date" name="start_date" class="form-control form-control-sm" required 
+                   value="{{ leave.start_date|date:'Y-m-d' }}">
+        </div>
+        
+        <div class="col-md-6">
+            <label class="form-label small fw-bold">Sampai Tanggal</label>
+            <input type="date" name="end_date" class="form-control form-control-sm" required
+                   value="{{ leave.end_date|date:'Y-m-d' }}">
+        </div>
+        
+        <div class="col-12">
+            <label class="form-label small fw-bold">Keterangan</label>
+            <textarea name="notes" class="form-control form-control-sm" rows="2" placeholder="Keterangan/alasan...">{{ leave.notes }}</textarea>
+        </div>
+        
+        <div class="col-12 text-end mt-4">
+            <button type="button" class="btn btn-sm btn-secondary me-2" data-bs-dismiss="modal">Batal</button>
+            <button type="submit" class="btn btn-sm btn-info text-white" data-bs-dismiss="modal">
+                <i class="fas fa-save me-1"></i> Simpan Perubahan
+            </button>
+        </div>
+    </form>
+</div>

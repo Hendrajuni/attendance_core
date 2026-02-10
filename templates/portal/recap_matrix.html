@@ -233,6 +233,9 @@
                             {% endfor %}
                         </select>
                     </div>
+                    <!-- Hidden per_page to maintain state when changing filters -->
+                    <input type="hidden" name="per_page" value="{{ per_page }}">
+                    
                     <div class="col-md-2">
                         <button type="submit" class="btn btn-dark btn-sm w-100 fw-bold py-2">
                             <i class="fas fa-filter me-1"></i> Terapkan
@@ -247,16 +250,16 @@
 <!-- TABS NAVIGATION -->
 <ul class="nav nav-tabs mb-2" id="attendanceTabs" role="tablist">
     <li class="nav-item">
-        <button class="nav-link {% if active_tab == 'fingerprint' %}active{% endif %}" id="fp-tab" data-bs-toggle="tab" data-bs-target="#tab-fingerprint" type="button" onclick="document.querySelector('[name=active_tab]').value='fingerprint'">
+        <a class="nav-link {% if active_tab == 'fingerprint' %}active{% endif %}" id="fp-tab" href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&per_page={{ per_page }}&active_tab=fingerprint">
             <i class="fas fa-fingerprint me-2"></i> Fingerprint / Mesin
-            <span class="badge bg-secondary ms-2">{{ fingerprint_employees|length }}</span>
-        </button>
+            <span class="badge bg-secondary ms-2">{{ fp_count }}</span>
+        </a>
     </li>
     <li class="nav-item">
-        <button class="nav-link {% if active_tab == 'whatsapp' %}active{% endif %}" id="wa-tab" data-bs-toggle="tab" data-bs-target="#tab-whatsapp" type="button" onclick="document.querySelector('[name=active_tab]').value='whatsapp'">
+        <a class="nav-link {% if active_tab == 'whatsapp' %}active{% endif %}" id="wa-tab" href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&per_page={{ per_page }}&active_tab=whatsapp">
             <i class="fab fa-whatsapp me-2 text-success"></i> WhatsApp / Lapangan
-            <span class="badge bg-success ms-2">{{ wa_employees|length }}</span>
-        </button>
+            <span class="badge bg-success ms-2">{{ wa_count }}</span>
+        </a>
     </li>
 </ul>
 
@@ -273,12 +276,21 @@
             <input type="hidden" name="year" value="{{ selected_year }}">
             <div class="row g-2 align-items-end">
                 <div class="col-md-4">
-                    <label class="form-label small fw-bold text-muted">Pilih Karyawan</label>
-                    <select name="employee_id" class="form-select form-select-sm" onchange="this.form.submit()">
-                        <option value="">-- Semua Karyawan (Matrix) --</option>
-                        {% for emp in fingerprint_employees %}
-                            <option value="{{ emp.id }}" {% if selected_employee_id == emp.id|stringformat:"s" %}selected{% endif %}>{{ emp.full_name }}</option>
-                        {% endfor %}
+                    <label class="form-label small fw-bold text-muted">Cari Karyawan (Nama / NIK)</label>
+                    <div class="input-group input-group-sm">
+                        <input type="text" name="employee_search" class="form-control" placeholder="Ketik nama..." value="{{ employee_search }}">
+                        <button class="btn btn-outline-secondary" type="submit">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold text-muted">Baris per halaman</label>
+                    <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
+                        <option value="10" {% if per_page == 10 %}selected{% endif %}>10</option>
+                        <option value="20" {% if per_page == 20 %}selected{% endif %}>20</option>
+                        <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+                        <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
                     </select>
                 </div>
                 {% if mode == 'personal' %}
@@ -377,15 +389,22 @@
                                     </td>
                                     
                                     <!-- Status -->
+                                    <!-- Status -->
                                     <td class="text-center py-1">
-                                        {% if day.is_holiday %}
+                                        {% if 'SKT' in day.status|upper or 'SAKIT' in day.status|upper or 'SICK' in day.status|upper %}
+                                             <span class="badge bg-warning text-dark">Sakit</span>
+                                        {% elif 'IZIN' in day.status|upper or 'PERMIT' in day.status|upper %}
+                                             <span class="badge bg-info text-dark">Izin</span>
+                                        {% elif 'CUTI' in day.status|upper %}
+                                             <span class="badge bg-primary">Cuti</span>
+                                        {% elif day.is_holiday %}
                                             <span class="badge bg-secondary">Libur</span>
                                         {% elif day.is_weekend %}
                                             <span class="badge bg-secondary">Minggu</span>
                                         {% elif day.raw_status == 'CHECKIN' or day.clock_in != '-' %}
                                             <i class="fas fa-check-circle text-success"></i>
                                             {% if day.late_minutes > 0 %}<small class="text-danger ms-1">+{{ day.late_minutes }}m</small>{% endif %}
-                                        {% elif 'Alpha' in day.status %}
+                                        {% elif 'ALPHA' in day.status|upper %}
                                             <span class="badge bg-danger">Alpha</span>
                                         {% else %}
                                             <span class="text-muted">-</span>
@@ -408,6 +427,8 @@
                     <form hx-post="{% url 'portal:employee_leave_add' %}" 
                           hx-target="#leave-list-container" 
                           hx-swap="innerHTML"
+                          hx-encoding="multipart/form-data"
+                          enctype="multipart/form-data"
                           class="row g-3 align-items-end">
                         {% csrf_token %}
                         <input type="hidden" name="employee_id" value="{{ personal_employee.id }}">
@@ -430,7 +451,11 @@
                             <input type="date" name="end_date" class="form-control form-control-sm" required
                                    value="{{ selected_year }}-{{ selected_month|stringformat:'02d' }}-01">
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Bukti (Foto)</label>
+                            <input type="file" name="attachment" class="form-control form-control-sm" accept="image/*">
+                        </div>
+                        <div class="col-md-2">
                             <label class="form-label small fw-bold">Keterangan</label>
                             <input type="text" name="notes" class="form-control form-control-sm" placeholder="Opsional...">
                         </div>
@@ -490,7 +515,7 @@
                                         <a href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&active_tab=fingerprint&employee_id={{ emp.id }}" 
                                            class="text-decoration-none text-dark" 
                                            title="Lihat Rekap Personal {{ emp.full_name }}"
-                                           style="display: block; line-height: 22px; font-size: 0.75rem;">
+                                           style="display: block; line-height: 23px;">
                                              {{ emp.full_name }}
                                         </a>
                                     </td>
@@ -499,7 +524,8 @@
                                         {% with status=matrix_data|dict_get:emp.id|dict_get:d %}
                                         {% with holiday_name=holidays_map|dict_get:date_str %}
                                         <!-- Cell with conditional holiday class -->
-                                        <td class="text-center {% if holiday_name %}bg-holiday-column{% endif %}" 
+                                        <td id="cell-{{ emp.id }}-{{ date_str }}" 
+                                            class="text-center {% if holiday_name %}bg-holiday-column{% endif %}" 
                                             style="cursor: pointer; padding: 0 !important; vertical-align: middle;"
                                             hx-get="{% url 'portal:fp_edit_cell' emp.id date_str %}"
                                             hx-target="#fp-edit-modal-content"
@@ -517,11 +543,11 @@
                                     
                                     <!-- Summary Cells -->
                                     {% with stats=fp_summary_stats|dict_get:emp.id %}
-                                    <td class="text-center fw-bold bg-light" style="border-left: 2px solid #dee2e6; color: #198754;">{{ stats.H|default:0 }}</td>
-                                    <td class="text-center fw-bold bg-light" style="color: #fd7e14;">{{ stats.T|default:0 }}</td>
-                                    <td class="text-center fw-bold bg-light" style="color: #dc3545;">{{ stats.A|default:0 }}</td>
-                                    <td class="text-center fw-bold bg-light text-warning">{{ stats.S|default:0 }}</td>
-                                    <td class="text-center fw-bold bg-light text-info">{{ stats.I|default:0 }}</td>
+                                    <td id="stats-{{ emp.id }}-H" class="text-center fw-bold bg-light" style="border-left: 2px solid #dee2e6; color: #198754;">{{ stats.H|default:0 }}</td>
+                                    <td id="stats-{{ emp.id }}-T" class="text-center fw-bold bg-light" style="color: #fd7e14;">{{ stats.T|default:0 }}</td>
+                                    <td id="stats-{{ emp.id }}-A" class="text-center fw-bold bg-light" style="color: #dc3545;">{{ stats.A|default:0 }}</td>
+                                    <td id="stats-{{ emp.id }}-S" class="text-center fw-bold bg-light text-warning">{{ stats.S|default:0 }}</td>
+                                    <td id="stats-{{ emp.id }}-I" class="text-center fw-bold bg-light text-info">{{ stats.I|default:0 }}</td>
                                     {% endwith %}
                                 </tr>
                                 {% endfor %}
@@ -536,6 +562,42 @@
                     </div>
                 </div>
             </div>
+            
+            {% if page_obj and page_obj.has_other_pages %}
+            <nav aria-label="Page navigation" class="mt-3">
+                <ul class="pagination justify-content-center">
+                    {% if page_obj.has_previous %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}&location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&active_tab={{ active_tab }}&per_page={{ per_page }}&employee_search={{ employee_search }}&wa_employee_search={{ wa_employee_search }}" aria-label="Previous">
+                            <span aria-hidden="true">&laquo; Previous</span>
+                        </a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">&laquo; Previous</span>
+                    </li>
+                    {% endif %}
+
+                    <li class="page-item disabled">
+                        <span class="page-link">
+                            Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+                        </span>
+                    </li>
+
+                    {% if page_obj.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.next_page_number }}&location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&active_tab={{ active_tab }}&per_page={{ per_page }}&employee_search={{ employee_search }}&wa_employee_search={{ wa_employee_search }}" aria-label="Next">
+                            <span aria-hidden="true">Next &raquo;</span>
+                        </a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">Next &raquo;</span>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
         {% endif %}
     </div>
 
@@ -657,6 +719,8 @@
                     <form hx-post="{% url 'portal:employee_leave_add' %}" 
                           hx-target="#wa-leave-list-container" 
                           hx-swap="innerHTML"
+                          hx-encoding="multipart/form-data"
+                          enctype="multipart/form-data"
                           class="row g-3 align-items-end">
                         {% csrf_token %}
                         <input type="hidden" name="employee_id" value="{{ wa_personal_employee.id }}">
@@ -679,7 +743,11 @@
                             <input type="date" name="end_date" class="form-control form-control-sm" required
                                    value="{{ selected_year }}-{{ selected_month|stringformat:'02d' }}-01">
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Bukti (Foto)</label>
+                            <input type="file" name="attachment" class="form-control form-control-sm" accept="image/*">
+                        </div>
+                        <div class="col-md-2">
                             <label class="form-label small fw-bold">Keterangan</label>
                             <input type="text" name="notes" class="form-control form-control-sm" placeholder="Opsional...">
                         </div>
@@ -704,6 +772,24 @@
             </div>
         {% else %}
             <!-- WA MATRIX VIEW (Spreadsheet Style) -->
+            <form method="get" class="mb-2">
+                <input type="hidden" name="active_tab" value="whatsapp">
+                <input type="hidden" name="location_id" value="{{ selected_location.id }}">
+                <input type="hidden" name="month" value="{{ selected_month }}">
+                <input type="hidden" name="year" value="{{ selected_year }}">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold text-muted">Cari Karyawan (Nama / NIK)</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" name="wa_employee_search" class="form-control" placeholder="Ketik nama..." value="{{ wa_employee_search }}">
+                            <button class="btn btn-outline-success" type="submit">
+                                <i class="fas fa-search"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </form>
+
             <div class="card shadow border-0 rounded-3">
                 <div class="card-header bg-success text-white py-2 d-flex justify-content-between align-items-center">
                     <div>
@@ -782,7 +868,7 @@
                                         {% with date_str=d|date:"Y-m-d" %}
                                         {% with holiday_name=holidays_map|dict_get:date_str %}
                                             <!-- MASUK (Pagi) -->
-                                            <td class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="border-left: 1px solid #dee2e6; padding: 1px; cursor: pointer;" 
+                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-MASUK" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="border-left: 1px solid #dee2e6; padding: 1px; cursor: pointer;" 
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'MASUK' %}" 
                                                 hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
                                                 {% with time=emp_day_data|dict_get:'MASUK' %}
@@ -790,7 +876,7 @@
                                                 {% endwith %}
                                             </td>
                                             <!-- CHECKPOINT_1 -->
-                                            <td class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
+                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-CHECKPOINT_1" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'CHECKPOINT_1' %}" 
                                                 hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
                                                 {% with time=emp_day_data|dict_get:'CHECKPOINT_1' %}
@@ -798,7 +884,7 @@
                                                 {% endwith %}
                                             </td>
                                             <!-- ISTIRAHAT -->
-                                            <td class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
+                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-ISTIRAHAT" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'ISTIRAHAT' %}" 
                                                 hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
                                                 {% with time=emp_day_data|dict_get:'ISTIRAHAT' %}
@@ -806,7 +892,7 @@
                                                 {% endwith %}
                                             </td>
                                             <!-- CHECKPOINT_2 -->
-                                            <td class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
+                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-CHECKPOINT_2" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'CHECKPOINT_2' %}" 
                                                 hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
                                                 {% with time=emp_day_data|dict_get:'CHECKPOINT_2' %}
@@ -814,7 +900,7 @@
                                                 {% endwith %}
                                             </td>
                                             <!-- PULANG -->
-                                            <td class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
+                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-PULANG" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'PULANG' %}" 
                                                 hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
                                                 {% with time=emp_day_data|dict_get:'PULANG' %}
@@ -886,4 +972,17 @@
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
     tooltipTriggerList.map(function (el) { return new bootstrap.Tooltip(el); });
 </script>
+<!-- Leave Edit Modal -->
+<div class="modal fade" id="leaveEditModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content" id="leave-edit-modal-content">
+            <div class="p-3 text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}

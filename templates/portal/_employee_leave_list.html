@@ -25,15 +25,29 @@ Employee Leave List Fragment - used by HTMX for dynamic updates
             <td class="text-center">{{ leave.start_date|date:"d M Y" }}</td>
             <td class="text-center">{{ leave.end_date|date:"d M Y" }}</td>
             <td class="text-center">{{ leave.duration_days }} hari</td>
-            <td>{{ leave.notes|truncatechars:30 }}</td>
+            <td>
+                {{ leave.notes|truncatechars:30 }}
+                {% if leave.attachment %}
+                <br><a href="{{ leave.attachment.url }}" target="_blank" class="badge bg-light text-dark text-decoration-none border"><i class="fas fa-paperclip"></i> Bukti</a>
+                {% endif %}
+            </td>
             <td class="text-center">
-                <button class="btn btn-sm btn-outline-danger" 
-                    hx-post="{% url 'portal:employee_leave_delete' leave.id %}"
-                    hx-target="#{{ target_id|default:'leave-list-container' }}"
-                    hx-confirm="Hapus data izin/cuti ini?"
-                    hx-swap="innerHTML">
-                    <i class="fas fa-trash-alt"></i>
-                </button>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-info" 
+                        hx-get="{% url 'portal:employee_leave_edit' leave.id %}"
+                        hx-target="#leave-edit-modal-content"
+                        data-bs-toggle="modal" 
+                        data-bs-target="#leaveEditModal">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-outline-danger" 
+                        hx-post="{% url 'portal:employee_leave_delete' leave.id %}"
+                        hx-target="#{{ target_id|default:'leave-list-container' }}"
+                        hx-confirm="Hapus data izin/cuti ini?"
+                        hx-swap="innerHTML">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </div>
             </td>
         </tr>
         {% endfor %}

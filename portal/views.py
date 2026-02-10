@@ -1,6 +1,9 @@
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404
 from datetime import datetime, time, date, timedelta
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_POST
+from django.db import transaction
 from attendance.utils import get_employee_schedule
 
 # Constants
@@ -36,6 +39,13 @@ def tree_explorer(request):
             # get_descendants(include_self=True) handles the tree traversal efficiently
             locations = profile.assigned_location.get_descendants(include_self=True)
             
+    # Annotate with device and spreadsheet presence
+    from django.db.models import Count
+    locations = locations.annotate(
+        device_count=Count('devices', distinct=True),
+        wa_count=Count('spreadsheets', distinct=True)
+    )
+
     context = {
         'page_title': 'Pusat Data Wilayah',
         'locations': locations,
@@ -202,6 +212,8 @@ def sync_employee_machine_htmx(request, device_id):
             </tr>
         ''')
     
+    # ...
+    
     current_time = timezone.now().strftime("%H:%M:%S")
     
     if count > 0:
@@ -211,12 +223,14 @@ def sync_employee_machine_htmx(request, device_id):
         badge_html = f'<span class="badge bg-secondary">User: 0</span> <span class="badge bg-light text-dark border">Cek: {current_time}</span>'
         msg_text = "Tidak ada user baru (Up-to-date)"
         
-    # Build Detail Rows for Samples
-    extra_rows = ""
+    # Build content for SyncLogManager (JS)
+    # We will pass a single string containing all new TRs to the JS function
+    new_rows_html = ""
+    
     if samples:
         for sample in samples:
-            extra_rows += f'''
-            <tr hx-swap-oob="afterbegin:#sync-log-body">
+            new_rows_html += f'''
+            <tr>
                 <td>{current_time}</td>
                 <td>{device.name}</td>
                 <td><span class="badge bg-info">Detail</span></td>
@@ -224,15 +238,27 @@ def sync_employee_machine_htmx(request, device_id):
             </tr>
             '''
     
-    log_row = f'''
-        <tr hx-swap-oob="afterbegin:#sync-log-body">
+    new_rows_html += f'''
+        <tr>
             <td>{current_time}</td>
             <td>{device.name}</td>
             <td><span class="badge bg-{'success' if count > 0 else 'secondary'}">Sukses</span></td>
             <td>{msg_text}</td>
         </tr>
     '''
-    return HttpResponse(badge_html + extra_rows + log_row)
+    
+    # Escape inner quotes for JS string
+    new_rows_html = new_rows_html.replace('\n', '').replace('"', "'")
+    
+    # Return badge update (standard HTMX) + Script to update logs via Manager
+    return HttpResponse(f'''
+        {badge_html}
+        <script>
+            if (typeof SyncLogManager !== 'undefined') {{
+                SyncLogManager.addRows("{new_rows_html}");
+            }}
+        </script>
+    ''')
 
 
 @login_required
@@ -333,7 +359,7 @@ def sync_machine_htmx(request, device_id):
         from portal.models import Notification
         
         print("DEBUG: Connecting to ZK...")
-        zk = ZK(device.ip_address, port=device.port, timeout=5)
+        zk = ZK(device.ip_address, port=device.port, timeout=20)
         conn = zk.connect()
         
         if not conn:
@@ -1179,6 +1205,7 @@ def employee_edit_view(request, employee_id):
 # =============================================================================
 
 @login_required
+@never_cache
 def recap_matrix_view(request):
     """
     Meja Kerja Rekapitulasi - Matriks Absensi Bulanan
@@ -1224,9 +1251,44 @@ def recap_matrix_view(request):
         user_role = profile.role
         
         if profile.role == 'KERANI':
-            # KERANI: Force to assigned location only
-            selected_location = profile.assigned_location
-            can_select_location = False
+            # KERANI: Can see assigned location AND its descendants
+            if profile.assigned_location:
+                # Get descendants including self
+                user_locations = profile.assigned_location.get_descendants(include_self=True)
+                
+                # Filter only leaf nodes for the dropdown logic if that's the desired behavior, 
+                # OR allow selecting any node in their subtree.
+                # The prompt asks for "Maro Sebo" (Parent) AND "Afdeling 6" (Child).
+                # So we should probably allow all nodes in the subtree, or at least consistent with other views.
+                
+                # Let's populate all_locations with the subtree
+                all_locations = user_locations.order_by('tree_id', 'lft')
+                
+                # Allow selection if there's more than 1 location in the subtree
+                if all_locations.count() > 1:
+                    can_select_location = True
+                else:
+                    can_select_location = False
+                
+                # Handle selection
+                location_id = request.GET.get('location_id')
+                if location_id:
+                    try:
+                        # Ensure selected location is within their scope
+                        target_loc = WorkLocation.objects.get(id=location_id)
+                        if target_loc in user_locations:
+                            selected_location = target_loc
+                        else:
+                            # Fallback if tried to access unauthorized location
+                            selected_location = profile.assigned_location
+                    except WorkLocation.DoesNotExist:
+                        selected_location = profile.assigned_location
+                else:
+                     # Default to assigned location (Parent)
+                    selected_location = profile.assigned_location
+            else:
+                 # Fallback if no assigned location
+                 pass
         else:
             # HRD / ADMIN: Can select any location (leaf nodes only)
             can_select_location = True
@@ -1263,6 +1325,8 @@ def recap_matrix_view(request):
     # VIEW MODE SELECTION
     # =========================================================================
     employee_id = request.GET.get('employee_id')
+    employee_search = request.GET.get('employee_search', '').strip()
+    wa_employee_search = request.GET.get('wa_employee_search', '').strip()
     mode = 'matrix'
     personal_logs = []
     summary_stats = {'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0}
@@ -1332,6 +1396,7 @@ def recap_matrix_view(request):
                 }
                 
                 if day_records:
+                    # ... (existing logic) ...
                     # Sort by time
                     day_records.sort(key=lambda x: x['local_dt'])
                     
@@ -1450,38 +1515,40 @@ def recap_matrix_view(request):
                         
                 else:
                     # No logs
-                    if day_stat['is_holiday']:
+                    # Check for Leave FIRST (Priority over Holiday/Weekend/Alpha)
+                    leave = EmployeeLeave.objects.filter(
+                        employee=personal_employee,
+                        start_date__lte=d,
+                        end_date__gte=d
+                    ).first()
+                    
+                    if leave:
+                        day_stat['status'] = leave.get_leave_type_display()
+                        if leave.leave_type == 'SAKIT':
+                            day_stat['status_class'] = 'text-warning fw-bold'
+                            summary_stats['sick'] += 1
+                        elif leave.leave_type == 'IZIN':
+                            day_stat['status_class'] = 'text-info fw-bold'
+                            summary_stats['permit'] += 1
+                        elif leave.leave_type == 'CUTI':
+                            day_stat['status_class'] = 'text-success fw-bold'
+                            # summary_stats['leave'] += 1 
+                        else:
+                            day_stat['status_class'] = 'text-secondary'
+                            
+                    elif day_stat['is_holiday']:
                         day_stat['status'] = 'Libur: ' + (day_stat['holiday_name'] or '')
                         day_stat['status_class'] = 'text-secondary'
+                        
                     elif day_stat['is_weekend']:
                         day_stat['status'] = 'Minggu'
                         day_stat['status_class'] = 'text-secondary'
 
                     elif d < now.date():
-                        # Check for Leave (Sakit/Izin/Cuti)
-                        leave = EmployeeLeave.objects.filter(
-                            employee=personal_employee,
-                            start_date__lte=d,
-                            end_date__gte=d
-                        ).first()
+                        day_stat['status'] = 'Alpha'
+                        day_stat['status_class'] = 'text-danger fw-bold'
+                        summary_stats['alpha'] += 1
                         
-                        if leave:
-                            day_stat['status'] = leave.get_leave_type_display()
-                            if leave.leave_type == 'SAKIT':
-                                day_stat['status_class'] = 'text-warning fw-bold'
-                                summary_stats['sick'] += 1
-                            elif leave.leave_type == 'IZIN':
-                                day_stat['status_class'] = 'text-info fw-bold'
-                                summary_stats['permit'] += 1
-                            elif leave.leave_type == 'CUTI':
-                                day_stat['status_class'] = 'text-success fw-bold'
-                                # summary_stats['leave'] += 1 # Add if needed
-                            else:
-                                day_stat['status_class'] = 'text-secondary'
-                        else:
-                            day_stat['status'] = 'Alpha'
-                            day_stat['status_class'] = 'text-danger fw-bold'
-                            summary_stats['alpha'] += 1
                     else:
                         day_stat['status'] = '-'
                 
@@ -1511,15 +1578,80 @@ def recap_matrix_view(request):
             is_active=True
         ).select_related('department', 'home_base').order_by('full_name')
         
+        page_obj = None
         if mode == 'matrix':
+            # --- TAB AWARE PAGINATION ---
+            # Determine active tab
+            active_tab = request.GET.get('active_tab', 'fingerprint')
+            
+            # 1. Split QuerySets for Counts (Global for Location)
+            # Use Q objects to ensure coverage. Manual defaults to Fingerprint.
+            fp_qs = employees.filter(Q(attendance_method='FINGERPRINT') | Q(attendance_method='MANUAL')).exclude(attendance_method='WHATSAPP')
+            wa_qs = employees.filter(attendance_method='WHATSAPP')
+            
+            # --- SEARCH FILTERING ---
+            employee_search = request.GET.get('employee_search', '').strip()
+            wa_employee_search = request.GET.get('wa_employee_search', '').strip()
+            
+            if employee_search:
+                fp_qs = fp_qs.filter(Q(full_name__icontains=employee_search) | Q(nik__icontains=employee_search))
+                
+            if wa_employee_search:
+                wa_qs = wa_qs.filter(Q(full_name__icontains=wa_employee_search) | Q(nik__icontains=wa_employee_search))
+            
+            # ------------------------
+            
+            fp_count = fp_qs.count()
+            wa_count = wa_qs.count()
+            
+            # 2. Select Target QuerySet based on Active Tab
+            if active_tab == 'whatsapp':
+                target_qs = wa_qs
+            else:
+                target_qs = fp_qs
+
             # Build date range for the month
             _, days_in_month = monthrange(year, month)
             date_range = [date(year, month, day) for day in range(1, days_in_month + 1)]
             
-            # Define Schedule In locally to ensure it's available
-            # SCHEDULE_IN = time(8, 0)
+            # --- OPTIMIZATION 1: PAGINATION ---
+            from django.core.paginator import Paginator
+            
+            # Get per_page from request, default to 20
+            try:
+                per_page = int(request.GET.get('per_page', 20))
+                if per_page not in [10, 20, 50, 100]:
+                    per_page = 20
+            except ValueError:
+                per_page = 20
+            
+            paginator = Paginator(target_qs, per_page)
+            page_number = request.GET.get('page')
+            page_obj = paginator.get_page(page_number)
+            employees = page_obj.object_list # Slicing QuerySet
 
-            # Fetch logs for all employees
+            # --- OPTIMIZATION 2: BULK PREFETCH SHIFTS ---
+            from attendance.models import EmployeeShiftAssignment
+            # Fetch all active assignments for these specific employees
+            # We fetch assignments that overlap with the current month or are open-ended
+            month_start = date(year, month, 1)
+            month_end = date(year, month, days_in_month)
+            
+            bulk_assignments = EmployeeShiftAssignment.objects.filter(
+                employee__in=employees,
+                is_active=True
+            ).filter(
+                Q(effective_to__isnull=True) | Q(effective_to__gte=month_start)
+            ).filter(
+                effective_from__lte=month_end
+            ).select_related('shift_pattern').order_by('employee', '-effective_from')
+
+            # Map assignments to employee_id
+            assignment_map = defaultdict(list)
+            for asm in bulk_assignments:
+                assignment_map[asm.employee_id].append(asm)
+
+            # Fetch logs for PAGINATED employees only
             logs = AttendanceLog.objects.filter(
                 employee__in=employees,
                 timestamp__year=year,
@@ -1538,13 +1670,30 @@ def recap_matrix_view(request):
             # Holiday Object for Indonesia
             id_holidays = holidays.ID(years=[year, year-1])
 
-            # fp_summary_stats is already initialized above
-            # Ensure we iterate over specific employees if active_tab is relevant? 
-            # No, logic is fine.
+            # Fetch leaves for PAGINATED employees
+            leaves = EmployeeLeave.objects.filter(
+                employee__in=employees,
+                start_date__lte=date_range[-1],
+                end_date__gte=date_range[0]
+            )
             
+            # Map leaves to (emp_id, date) -> leave_type
+            employee_leaves_map = defaultdict(lambda: defaultdict(str))
+            for leave in leaves:
+                # Iterate dates for this leave
+                curr = max(leave.start_date, date_range[0])
+                end = min(leave.end_date, date_range[-1])
+                while curr <= end:
+                    employee_leaves_map[leave.employee_id][curr] = leave.leave_type
+                    curr += timedelta(days=1)
+
             for emp in employees:
                 emp_matrix = {}
                 emp_stats = {'H': 0, 'A': 0, 'T': 0, 'S': 0, 'I': 0}
+                
+                # Get employee's assignments from memory
+                emp_assignments = assignment_map.get(emp.id, [])
+
                 for d in date_range:
                     day_logs = employee_date_logs.get(emp.id, {}).get(d, [])
                     is_holiday = d in id_holidays
@@ -1563,13 +1712,16 @@ def recap_matrix_view(request):
                         if st == 'H':
                             emp_stats['H'] += 1
                             # Check Late
-                            # Check Late
                             local_dt = timezone.localtime(first_log.timestamp)
                             
-                            # Dynamic Schedule for Matrix
-                            # Note: This increases query count (N*30). 
-                            # If performance issues arise, consider bulk pre-fetching assignments.
-                            daily_sch, _ = get_employee_schedule(emp, d)
+                            # --- OPTIMIZED SCHEDULE RETRIEVAL ---
+                            # Find applicable assignment in memory
+                            daily_sch = None
+                            for asm in emp_assignments:
+                                if asm.effective_from <= d and (asm.effective_to is None or asm.effective_to >= d):
+                                    if asm.shift_pattern:
+                                        daily_sch = asm.shift_pattern.get_schedule_for_day(d.weekday())
+                                    break
                             
                             sch_in = DEFAULT_SCHEDULE_IN
                             tol = 0
@@ -1585,13 +1737,8 @@ def recap_matrix_view(request):
                             is_weekend = d.weekday() == 6  # Sunday only
                             
                             # Round clock-in time to minutes (ignore seconds)
-                            # This ensures 08:10:05 is treated as 08:10:00
                             clock_time_rounded = local_dt.time().replace(second=0, microsecond=0)
                             threshold_time_rounded = dt_threshold.time().replace(second=0, microsecond=0)
-                            
-                            # DEBUG: Print late calculation details
-                            if emp.full_name and 'Joni' in emp.full_name:
-                                print(f"DEBUG MATRIX [{d}] {emp.full_name}: clock={local_dt.time()} -> rounded={clock_time_rounded}, threshold={threshold_time_rounded}, is_late={clock_time_rounded > threshold_time_rounded}")
                             
                             if clock_time_rounded > threshold_time_rounded and not is_holiday and not is_weekend:
                                 emp_stats['T'] += 1
@@ -1603,19 +1750,27 @@ def recap_matrix_view(request):
                             emp_stats['A'] += 1
 
                     else:
-                        if is_holiday:
+                        # No logs - Check LEAVE first
+                        l_type = employee_leaves_map[emp.id].get(d)
+                        
+                        if l_type:
+                            code_map = {'IZIN': 'I', 'SAKIT': 'S', 'CUTI': 'C', 'CUTI_KHUSUS': 'C'}
+                            st = code_map.get(l_type, 'I')
+                            emp_matrix[d] = st
+                            # Map Cuti to Izin stats or leave it?
+                            # Existing stats only has H, A, T, S, I. Map C -> I or ignore?
+                            # Let's map C -> I for now as per minimal stats
+                            stat_key = 'I' if st == 'C' else st
+                            if stat_key in emp_stats:
+                                emp_stats[stat_key] += 1
+                                
+                        elif is_holiday:
                             emp_matrix[d] = 'L' # Libur Nasional
                         elif d.weekday() == 6: # Sunday Only
                             emp_matrix[d] = 'L' # Libur Weekend
                         elif d < now.date():
                             emp_matrix[d] = 'A'
                             emp_stats['A'] += 1
-                            # Check Leave for Alpha?
-                            # Optimally we should check leaves here too for FP matrix to be accurate
-                            # But for now let's stick to existing logic + stats
-                            # (Existing logic didn't check leaves for FP matrix AFAIK? 
-                            # Wait, line 1426 checks leave for PERSONAL view. Matrix view didn't seem to check leave?
-                            # Actually, let's keep it simple for now as requested: just summary cols logic)
                         else:
                             emp_matrix[d] = ''
                 
@@ -1662,19 +1817,25 @@ def recap_matrix_view(request):
         ).values_list('employee_id', flat=True))
         
         for e in employees:
-            # 1. Existing logs dictate category
+            # 1. Explicit Attendance Method (Preferred)
+            if e.attendance_method == 'FINGERPRINT':
+                fingerprint_employees.append(e)
+                continue
+            elif e.attendance_method == 'WHATSAPP':
+                wa_employees.append(e)
+                continue
+            
+            # 2. Fallback (Legacy Heuristics - for safety or 'MANUAL')
             if e.id in has_wa_logs:
                 wa_employees.append(e)
             elif e.id in has_fp_logs:
                 fingerprint_employees.append(e)
             else:
-                # 2. No logs yet? Use Heuristic based on Employee Type
-                # 'HARIAN' (Buruh Harian) -> WA (Lapangan)
-                # 'MANDOR' -> WA (Lapangan)
-                if e.employee_type in ['HARIAN', 'MANDOR']:
+                if e.device_user_id:
+                     fingerprint_employees.append(e)
+                elif e.employee_type in ['HARIAN', 'MANDOR']:
                     wa_employees.append(e)
                 else:
-                    # Default for Staff / Others
                     fingerprint_employees.append(e)
     
     # WA 5-Point Categories
@@ -2071,6 +2232,8 @@ def recap_matrix_view(request):
         # Fingerprint Employees (for Tab 1)
         'fingerprint_employees': fingerprint_employees,
         'fp_summary_stats': fp_summary_stats_str, # RE-ADDED: Lost in context redefinition
+        'fp_count': fp_count if 'fp_count' in locals() else len(fingerprint_employees),
+        'wa_count': wa_count if 'wa_count' in locals() else len(wa_employees),
         
         # WhatsApp / Telegram Context (for Tab 2)
         'wa_employees': wa_employees,
@@ -2086,12 +2249,18 @@ def recap_matrix_view(request):
         'wa_summary_stats': wa_summary_stats if 'wa_summary_stats' in locals() else {'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0},
         'selected_wa_employee_id': str(wa_employee_id) if wa_employee_id else '',
         'wa_personal_employee': wa_personal_employee,  # WA Employee object for personal mode
+        'employee_search': employee_search,
+        'wa_employee_search': wa_employee_search,
         
         # Role-based access
         'user_role': profile.role if profile else 'KERANI',
         
         # Active Tab State
         'active_tab': active_tab, 
+        
+        # Pagination Context
+        'per_page': per_page if 'per_page' in locals() else 20,
+        'page_obj': page_obj if 'page_obj' in locals() else None,
     }
     
     return render(request, 'portal/recap_matrix.html', context)
@@ -2288,6 +2457,7 @@ def wa_edit_cell(request, employee_id, date_str, category):
         'existing_time': existing_time,
         'existing_notes': existing_notes,
         'is_admin': user_role in ['ADMIN', 'HRD'],
+        'cell_id': f"wa-cell-{employee.id}-{date_str}-{category}", # Target ID for HTMX
     }
     
     return render(request, 'portal/partials/_wa_edit_cell_modal.html', context)
@@ -2295,12 +2465,14 @@ def wa_edit_cell(request, employee_id, date_str, category):
 
 @login_required
 @require_POST
+@transaction.atomic
 def wa_save_cell(request):
     """
     HTMX: Save WA attendance cell.
     Admin bisa set waktu, Kerani hanya bisa set Izin/Sakit.
+    Updates EmployeeLeave for Izin/Sakit to ensure sync with Personal View.
     """
-    from attendance.models import Employee, AttendanceLog
+    from attendance.models import Employee, AttendanceLog, EmployeeLeave
     from django.utils import timezone
     from datetime import datetime
     
@@ -2317,61 +2489,134 @@ def wa_save_cell(request):
     profile = getattr(request.user, 'employee_profile', None)
     user_role = profile.role if profile else 'KERANI'
     
-    # Delete existing log if any
-    existing_log = AttendanceLog.objects.filter(
-        employee=employee,
-        timestamp__date=target_date,
-        log_category=category,
-        source_type='TELEGRAM'
-    ).first()
-    
+    # 1. Handle DELETE action
     if action == 'delete':
-        if existing_log:
-            existing_log.delete()
+        # Delete specific log for this category
+        AttendanceLog.objects.filter(
+            employee=employee,
+            timestamp__date=target_date,
+            log_category=category,
+            source_type='TELEGRAM'
+        ).delete()
+        
+        # Also check if we should delete leave if it exists and we are clicking delete on a cell
+        # (Optional: might depend on business logic, for now focused on log)
+        
         return HttpResponse('<span class="text-muted opacity-25">-</span>')
     
-    # Determine time and notes based on action
-    if action == 'izin':
-        log_time = '00:00'  # Placeholder time for izin
-        notes = 'IZIN'
-    elif action == 'sakit':
-        log_time = '00:00'
-        notes = 'SAKIT'
-    elif action == 'set_time' and user_role in ['ADMIN', 'HRD']:
+    # 2. Handle IZIN/SAKIT (Create EmployeeLeave)
+    if action in ['izin', 'sakit']:
+        # Clear existing logs for this day to avoid ambiguity (optional, but cleaner)
+        # AttendanceLog.objects.filter(employee=employee, timestamp__date=target_date).delete()
+        
+        # Create/Update EmployeeLeave
+        leave_type_map = {'izin': 'IZIN', 'sakit': 'SAKIT'}
+        l_type = leave_type_map.get(action, 'IZIN')
+        
+        # Check if leave already exists for this day
+        existing_leave = EmployeeLeave.objects.filter(
+            employee=employee,
+            start_date__lte=target_date,
+            end_date__gte=target_date
+        ).first()
+        
+        if existing_leave:
+            existing_leave.leave_type = l_type
+            existing_leave.save()
+        else:
+            EmployeeLeave.objects.create(
+                employee=employee,
+                leave_type=l_type,
+                start_date=target_date,
+                end_date=target_date,
+                notes=f'Manual Update via WA Matrix ({category})',
+                created_by=request.user
+            )
+            
+        return HttpResponse(f'<span class="text-warning fw-bold" style="font-size: 0.6rem;">{action.upper()[:2]}</span>')
+
+    # 3. Handle SET TIME (Admin Only)
+    elif action == 'set_time':
+        if user_role not in ['ADMIN', 'HRD']:
+            return HttpResponse('<span class="text-danger">Tidak diizinkan</span>')
+            
         log_time = time_value if time_value else '08:00'
         notes = 'Manual Entry'
-    else:
-        # Kerani trying to set time without permission
-        return HttpResponse('<span class="text-danger">Tidak diizinkan</span>')
-    
-    # Create or update log
-    try:
-        log_datetime = timezone.make_aware(
-            datetime.combine(target_date, datetime.strptime(log_time, '%H:%M').time())
-        )
-    except:
-        log_datetime = timezone.make_aware(
-            datetime.combine(target_date, datetime.strptime('08:00', '%H:%M').time())
-        )
-    
-    if existing_log:
-        existing_log.timestamp = log_datetime
-        existing_log.notes = notes
-        existing_log.save()
-    else:
-        AttendanceLog.objects.create(
+        
+        # Calculate timestamp
+        try:
+            log_datetime = timezone.make_aware(
+                datetime.combine(target_date, datetime.strptime(log_time, '%H:%M').time())
+            )
+        except:
+            log_datetime = timezone.make_aware(
+                datetime.combine(target_date, datetime.strptime('08:00', '%H:%M').time())
+            )
+            
+        # Update or Create Log
+        existing_log = AttendanceLog.objects.filter(
             employee=employee,
-            timestamp=log_datetime,
+            timestamp__date=target_date,
             log_category=category,
-            source_type='TELEGRAM',
-            notes=notes,
-        )
+            source_type='TELEGRAM'
+        ).first()
+        
+        if existing_log:
+            existing_log.timestamp = log_datetime
+            existing_log.notes = notes
+            existing_log.save()
+        else:
+            AttendanceLog.objects.create(
+                employee=employee,
+                timestamp=log_datetime,
+                log_category=category,
+                source_type='TELEGRAM',
+                notes=notes,
+            )
+            
+        cell_html = f'<span class="text-success" style="font-size: 0.6rem;">{log_time}</span>'
     
-    # Return updated cell content
-    if action in ['izin', 'sakit']:
-        return HttpResponse(f'<span class="text-warning fw-bold" style="font-size: 0.6rem;">{action.upper()[:2]}</span>')
-    else:
-        return HttpResponse(f'<span class="text-success" style="font-size: 0.6rem;">{log_time}</span>')
+    # Validation fallback
+    if 'cell_html' not in locals():
+        if action in ['izin', 'sakit']:
+            cell_html = f'<span class="text-warning fw-bold" style="font-size: 0.6rem;">{action.upper()[:2]}</span>'
+        else:
+            cell_html = '<span class="text-danger">Error</span>'
+            
+    # 3. RECALCULATE MONTHLY STATS (Reactive Update - HTMX OOB)
+    # We need to import the stats function from views (it's defined in this file)
+    # Since it is a function in the same module, we can just call it if it's in scope, 
+    # but strictly speaking Python function ordering matters if not hoisted. 
+    # django views are usually all loaded.
+    
+    # Re-calculate stats
+    stats = get_employee_monthly_stats(employee, target_date.year, target_date.month)
+    
+    oob_html = ""
+    for key, val in stats.items():
+        td_id = f"stats-{employee.id}-{key}"
+        
+        # Match template styles
+        style = ""
+        cls = "text-center fw-bold bg-light"
+        
+        if key == 'H': 
+            style = 'border-left: 2px solid #dee2e6; color: #198754;'
+        elif key == 'T': 
+            style = 'color: #fd7e14;'
+        elif key == 'A': 
+            style = 'color: #dc3545;'
+        elif key == 'S': 
+            cls += " text-warning"
+        elif key == 'I': 
+            cls += " text-info"
+            
+        oob_html += f'<td id="{td_id}" hx-swap-oob="true" class="{cls}" style="{style}">{val}</td>'
+        
+    # Add script to close modal
+    close_script = '<script>bootstrap.Modal.getInstance(document.getElementById("waEditModal")).hide();</script>'
+        
+    return HttpResponse(cell_html + oob_html + close_script)
 
 
 # =============================================================================
@@ -2408,6 +2653,10 @@ def employee_leave_add(request):
             notes=notes,
             created_by=request.user
         )
+        
+        if 'attachment' in request.FILES:
+            leave.attachment = request.FILES['attachment']
+            leave.save()
         
         # Determine target container from request headers (HTMX)
         target_id = request.headers.get('HX-Target', 'leave-list-container')
@@ -2452,6 +2701,63 @@ def employee_leave_delete(request, leave_id):
 
 
 @login_required
+def employee_leave_edit(request, leave_id):
+    """Load modal content for editing a leave record"""
+    from attendance.models import EmployeeLeave
+    
+    try:
+        leave = EmployeeLeave.objects.get(id=leave_id)
+        return render(request, 'portal/partials/_leave_edit_modal.html', {'leave': leave})
+    except EmployeeLeave.DoesNotExist:
+        return HttpResponse('<div class="alert alert-danger">Data tidak ditemukan</div>')
+
+
+@login_required
+@require_POST
+def employee_leave_update(request, leave_id):
+    """Update a leave record"""
+    from attendance.models import EmployeeLeave
+    from datetime import datetime
+    
+    try:
+        leave = EmployeeLeave.objects.get(id=leave_id)
+        employee = leave.employee
+        
+        # Update fields
+        leave.leave_type = request.POST.get('leave_type')
+        start_date_str = request.POST.get('start_date')
+        end_date_str = request.POST.get('end_date')
+        leave.notes = request.POST.get('notes', '')
+        
+        leave.start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        leave.end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        
+        if leave.end_date < leave.start_date:
+            return HttpResponse('<div class="alert alert-danger">Tanggal selesai harus setelah tanggal mulai</div>')
+            
+        # Handle file upload if provided
+        if 'attachment' in request.FILES:
+            leave.attachment = request.FILES['attachment']
+            
+        leave.save()
+        
+        # Determine target container from request headers (HTMX)
+        target_id = request.headers.get('HX-Target', 'leave-list-container')
+
+        # Return updated leave list HTML
+        return render(request, 'portal/_employee_leave_list.html', {
+            'leaves': employee.leaves.all()[:10],
+            'employee': employee,
+            'target_id': target_id
+        })
+        
+    except EmployeeLeave.DoesNotExist:
+        return HttpResponse('<div class="alert alert-danger">Data tidak ditemukan</div>')
+    except Exception as e:
+        return HttpResponse(f'<div class="alert alert-danger">Error: {str(e)}</div>')
+
+
+@login_required
 def employee_leave_list(request, employee_id):
     """Get leave list for an employee (HTMX)"""
     from attendance.models import Employee
@@ -2468,6 +2774,111 @@ def employee_leave_list(request, employee_id):
         })
     except Employee.DoesNotExist:
         return HttpResponse('<div class="alert alert-warning">Karyawan tidak ditemukan</div>')
+def get_employee_monthly_stats(employee, year, month):
+    """
+    Calculate monthly stats for a single employee (H, T, A, S, I).
+    Used for partial updates (HTMX OOB).
+    """
+    from attendance.models import AttendanceLog, EmployeeLeave
+    from calendar import monthrange
+    from datetime import date, timedelta, datetime
+    import holidays
+    from django.utils import timezone
+    try:
+        from attendance.utils import get_employee_schedule
+    except ImportError:
+        get_employee_schedule = None
+
+    stats = {'H': 0, 'A': 0, 'T': 0, 'S': 0, 'I': 0}
+    
+    _, days_in_month = monthrange(year, month)
+    date_range = [date(year, month, day) for day in range(1, days_in_month + 1)]
+    id_holidays = holidays.ID(years=[year, year-1])
+    
+    # 1. Fetch Logs
+    logs = AttendanceLog.objects.filter(
+        employee=employee,
+        timestamp__year=year,
+        timestamp__month=month
+    ).order_by('timestamp')
+    
+    date_logs = {}
+    for log in logs:
+        local_dt = timezone.localtime(log.timestamp)
+        d = local_dt.date()
+        if d not in date_logs: date_logs[d] = []
+        date_logs[d].append(log)
+        
+    # 2. Fetch Leaves
+    leaves = EmployeeLeave.objects.filter(
+        employee=employee,
+        start_date__lte=date_range[-1],
+        end_date__gte=date_range[0]
+    )
+    leave_map = {}
+    for l in leaves:
+        curr = max(l.start_date, date_range[0])
+        end = min(l.end_date, date_range[-1])
+        while curr <= end:
+            leave_map[curr] = l.leave_type
+            curr += timedelta(days=1)
+            
+    now = timezone.now().date()
+    DEFAULT_SCHEDULE_IN = datetime.strptime('08:00', '%H:%M').time()
+    
+    for d in date_range:
+        day_logs_list = date_logs.get(d, [])
+        is_holiday = d in id_holidays
+        is_weekend = d.weekday() == 6
+        
+        if day_logs_list:
+            first_log = day_logs_list[0]
+            status_map = {
+                'CHECKIN': 'H', 'HADIR': 'H',
+                'SICK': 'S', 'SAKIT': 'S',
+                'PERMIT': 'I', 'IZIN': 'I',
+                'ALPHA': 'A'
+            }
+            st = status_map.get(first_log.status, 'H')
+            
+            if st == 'H':
+                stats['H'] += 1
+                # Late logic
+                if get_employee_schedule:
+                    daily_sch, _ = get_employee_schedule(employee, d)
+                    sch_in = daily_sch.clock_in if daily_sch else DEFAULT_SCHEDULE_IN
+                    tol = daily_sch.late_tolerance if daily_sch else 0
+                    
+                    # Dummy date logic
+                    dummy_date = date(2000, 1, 1)
+                    dt_sch = datetime.combine(dummy_date, sch_in)
+                    dt_threshold = dt_sch + timedelta(minutes=tol)
+                    
+                    local_dt = timezone.localtime(first_log.timestamp)
+                    clock_time = local_dt.time().replace(second=0, microsecond=0)
+                    threshold_time = dt_threshold.time().replace(second=0, microsecond=0)
+                    
+                    if clock_time > threshold_time and not is_holiday and not is_weekend:
+                        stats['T'] += 1
+            elif st == 'S': stats['S'] += 1
+            elif st == 'I': stats['I'] += 1
+            elif st == 'A': stats['A'] += 1
+            
+        else:
+            # Check leave
+            l_type = leave_map.get(d)
+            if l_type:
+                code_map = {'IZIN': 'I', 'SAKIT': 'S', 'CUTI': 'C', 'CUTI_KHUSUS': 'C'}
+                st = code_map.get(l_type, 'I')
+                if st == 'C': st = 'I'
+                if st in stats: stats[st] += 1
+            elif is_holiday: pass
+            elif is_weekend: pass
+            elif d < now:
+                stats['A'] += 1
+                
+    return stats
+
 @login_required
 def fp_edit_cell(request, employee_id, date_str):
     """
@@ -2514,6 +2925,7 @@ def fp_edit_cell(request, employee_id, date_str):
 
 @login_required
 @require_POST
+@transaction.atomic
 def fp_save_cell(request):
     """
     HTMX: Save Fingerprint attendance cell.
@@ -2521,83 +2933,105 @@ def fp_save_cell(request):
     """
     from attendance.models import Employee, AttendanceLog, EmployeeLeave
     from django.utils import timezone
+    from django.http import HttpResponse
     from datetime import datetime, timedelta
     
     employee_id = request.POST.get('employee_id')
     date_str = request.POST.get('date_str')
     action = request.POST.get('action')
     
-    employee = Employee.objects.get(id=employee_id)
-    target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-    
-    # 1. CLEAR EXISTING STATUS (Delete relevant logs/leaves for this day)
-    # Delete Manual Logs
-    AttendanceLog.objects.filter(
-        employee=employee,
-        timestamp__date=target_date,
-        source_type='FINGERPRINT',
-        notes='Manual Entry'
-    ).delete()
-    
-    # Check for Leave covering this date
-    existing_leaves = EmployeeLeave.objects.filter(
-        employee=employee,
-        start_date__lte=target_date,
-        end_date__gte=target_date
-    )
-    # Note: Deleting a multi-day leave for one day is complex.
-    # For now, we assume single-day edits or warn user. 
-    # Logic: If exact match, delete. If overlap, maybe shrink? 
-    # SIMPLIFICATION: Only delete if exact match or simple intersection logic?
-    # For MVP: Just delete strict single day leaves or warn?
-    # Let's just delete any leave that *starts* on this day to avoid destroying long leaves?
-    # BETTER: Just delete any leave that intersects. User can re-add if needed.
-    existing_leaves.delete() 
-
-    # 2. APPLY NEW ACTION
-    if action == 'delete':
-        return HttpResponse('<span class="text-muted opacity-25">-</span>')
+    try:
+        employee = Employee.objects.get(id=employee_id)
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         
-    elif action == 'hadir':
-        # Create Dummy Log (Checkin 08:00, Checkout 17:00)
-        log_in = timezone.make_aware(datetime.combine(target_date, datetime.strptime('08:00', '%H:%M').time()))
-        log_out = timezone.make_aware(datetime.combine(target_date, datetime.strptime('17:00', '%H:%M').time()))
-        
-        AttendanceLog.objects.create(
+        # 1. CLEAR EXISTING STATUS (Delete relevant logs/leaves for this day)
+        # Delete Manual Logs
+        AttendanceLog.objects.filter(
             employee=employee,
-            timestamp=log_in,
+            timestamp__date=target_date,
             source_type='FINGERPRINT',
-            device_id='MANUAL',
             notes='Manual Entry'
-        )
-        AttendanceLog.objects.create(
+        ).delete()
+        
+        # Check for Leave covering this date
+        # Note: We delete any leave intersecting this day for simplicity in this cell-based edit mode
+        EmployeeLeave.objects.filter(
             employee=employee,
-            timestamp=log_out,
-            source_type='FINGERPRINT',
-            device_id='MANUAL',
-            notes='Manual Entry'
-        )
-        return HttpResponse('<span class="text-dark fw-bold">H</span>')
+            start_date__lte=target_date,
+            end_date__gte=target_date
+        ).delete() 
+    
+        # 2. APPLY NEW ACTION
+        cell_content = "+"
+        css_class = "cell-empty"
         
-    elif action in ['izin', 'sakit', 'cuti']:
-        leave_type_map = {'izin': 'IZIN', 'sakit': 'SAKIT', 'cuti': 'CUTI'}
-        EmployeeLeave.objects.create(
-            employee=employee,
-            leave_type=leave_type_map.get(action, 'IZIN'),
-            start_date=target_date,
-            end_date=target_date,
-            reason='Manual Update via Matrix'
-        )
-        color_class = {
-            'sakit': 'text-warning fw-bold', 
-            'izin': 'text-info fw-bold',
-            'cuti': 'text-success fw-bold'
-        }.get(action, 'text-secondary')
+        if action == 'delete':
+             cell_content = "+"
+             css_class = "cell-empty"
+            
+        elif action == 'hadir':
+            # Create Dummy Log (Checkin 08:00, Checkout 17:00)
+            log_in = timezone.make_aware(datetime.combine(target_date, datetime.strptime('08:00', '%H:%M').time()))
+            log_out = timezone.make_aware(datetime.combine(target_date, datetime.strptime('17:00', '%H:%M').time()))
+            
+            AttendanceLog.objects.create(
+                employee=employee, timestamp=log_in, source_type='FINGERPRINT', device_id='MANUAL', notes='Manual Entry'
+            )
+            AttendanceLog.objects.create(
+                employee=employee, timestamp=log_out, source_type='FINGERPRINT', device_id='MANUAL', notes='Manual Entry'
+            )
+            cell_content = "H"
+            css_class = "cell-hadir"
+            
+        elif action in ['izin', 'sakit', 'cuti']:
+            leave_type_map = {'izin': 'IZIN', 'sakit': 'SAKIT', 'cuti': 'CUTI'}
+            l_type = leave_type_map.get(action, 'IZIN')
+            EmployeeLeave.objects.create(
+                employee=employee,
+                leave_type=l_type,
+                start_date=target_date,
+                end_date=target_date,
+                notes='Manual Update via Matrix'
+            )
+            
+            # Map back to status code for CSS
+            status_code_map = {'sakit': 'S', 'izin': 'I', 'cuti': 'C'}
+            code = status_code_map.get(action, 'I')
+            cell_content = code
+            css_class = "cell-izin"
+            
+        elif action == 'alpha':
+            # Ensure no logs/leaves exist (already cleared above)
+            cell_content = "A"
+            css_class = "cell-alpha"
+            
+        cell_html = f'<div class="status-cell {css_class}">{cell_content}</div>'
         
-        return HttpResponse(f'<span class="{color_class}">{action.upper()[:1]}</span>')
+        # 3. RECALCULATE MONTHLY STATS (Reactive Update - HTMX OOB)
+        stats = get_employee_monthly_stats(employee, target_date.year, target_date.month)
         
-    elif action == 'alpha':
-        # Ensure no logs/leaves exist (already cleared above)
-        return HttpResponse('<span class="text-danger fw-bold">A</span>')
+        oob_html = ""
+        for key, val in stats.items():
+            td_id = f"stats-{employee.id}-{key}"
+            
+            # Match template styles
+            style = ""
+            cls = "text-center fw-bold bg-light"
+            
+            if key == 'H': 
+                style = 'border-left: 2px solid #dee2e6; color: #198754;'
+            elif key == 'T': 
+                style = 'color: #fd7e14;'
+            elif key == 'A': 
+                style = 'color: #dc3545;'
+            elif key == 'S': 
+                cls += " text-warning"
+            elif key == 'I': 
+                cls += " text-info"
+                
+            oob_html += f'<td id="{td_id}" hx-swap-oob="true" class="{cls}" style="{style}">{val}</td>'
+            
+        return HttpResponse(cell_html + oob_html)
         
-    return HttpResponse('<span class="text-muted opacity-25">-</span>')
+    except Exception as e:
+        return HttpResponse(f'<div class="status-cell cell-empty" title="Error: {str(e)}">!</div>')

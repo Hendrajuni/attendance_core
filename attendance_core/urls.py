@@ -30,3 +30,9 @@ urlpatterns = [
     # Redirect root to portal login or dashboard
     path('', auth_views.LoginView.as_view(), name='root_login'), 
 ]
+
+from django.conf import settings
+from django.conf.urls.static import static
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

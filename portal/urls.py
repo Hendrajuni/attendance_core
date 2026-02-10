@@ -55,6 +55,8 @@ urlpatterns = [
     path('leave/add/', views.employee_leave_add, name='employee_leave_add'),
     path('leave/delete/<uuid:leave_id>/', views.employee_leave_delete, name='employee_leave_delete'),
     path('leave/list/<uuid:employee_id>/', views.employee_leave_list, name='employee_leave_list'),
+    path('leave/edit/<uuid:leave_id>/', views.employee_leave_edit, name='employee_leave_edit'),
+    path('leave/update/<uuid:leave_id>/', views.employee_leave_update, name='employee_leave_update'),
 
     # FP Cell Edit (HTMX)
     path('fp/edit-cell/<uuid:employee_id>/<str:date_str>/', views.fp_edit_cell, name='fp_edit_cell'),

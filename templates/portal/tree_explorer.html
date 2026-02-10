@@ -23,6 +23,15 @@
                                 <i class="fas fa-folder text-warning me-2"></i>
                                 <span class="fw-medium text-dark">{{ node.name }}</span>
                                 <small class="text-muted ms-2">({{ node.code }})</small>
+                                
+                                <!-- Source Indicators -->
+                                {% if node.device_count > 0 %}
+                                    <i class="fas fa-fingerprint text-secondary ms-2" title="Mesin Fingerprint Tersedia" style="font-size: 0.8rem;"></i>
+                                {% endif %}
+                                {% if node.wa_count > 0 %}
+                                    <i class="fab fa-whatsapp text-success ms-1" title="Absen via WhatsApp/Tele" style="font-size: 0.9rem;"></i>
+                                {% endif %}
+                                
                                 <div class="spinner-border spinner-border-sm text-primary ms-auto d-none htmx-indicator" role="status"></div>
                             </div>
                             {% if not node.is_leaf_node %}

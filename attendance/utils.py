@@ -279,13 +279,19 @@ def fetch_users_from_machine(device):
             # Check if exists by device_user_id
             if not Employee.objects.filter(device_user_id=user_id).exists():
                 # Create draft employee
+                # Fix: nik max_length is 20. 
+                # Use format: FG-{short_device_id}-{user_id}
+                # Example: FG-a705bb-4510
+                short_id = str(device.id)[-6:]
+                nik_val = f"FG-{short_id}-{user_id}"
+                
+                # Ensure it fits
+                if len(nik_val) > 20:
+                    nik_val = nik_val[:20]
+                
                 Employee.objects.create(
                     full_name=name if name else f"User {user_id}",
-                    # nik fallback or skip unique check if allows null. 
-                    # Assuming nik is unique, we might need a dummy NIK or check model constraint.
-                    # Best practice: leave NIK empty if nullable, or generate temp NIK.
-                    # For now, let's assume we create without NIK if model allows, or generate unique temp.
-                    nik=f"TEMP.{device.id}.{user_id}", 
+                    nik=nik_val, 
                     device_user_id=user_id,
                     is_verified=False,
                     home_base=device.location  # Assume home base is where they are found
