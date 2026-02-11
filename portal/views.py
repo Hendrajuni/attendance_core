@@ -1329,7 +1329,7 @@ def recap_matrix_view(request):
     wa_employee_search = request.GET.get('wa_employee_search', '').strip()
     mode = 'matrix'
     personal_logs = []
-    summary_stats = {'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0}
+    summary_stats = {'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0, 'hadir': 0, 'late_count': 0}
     personal_employee = None  # Will hold target employee in personal mode
     
     # If specific employee selected, switch to PERSONAL MODE
@@ -1409,7 +1409,9 @@ def recap_matrix_view(request):
                         # Map log_category to checkpoint fields
                         cat = getattr(log, 'log_category', None)
                         if cat == 'MASUK':
-                            day_stat['cp_masuk'] = time_str
+                            # Capture EARLIEST Masuk for display
+                            if not day_stat['cp_masuk']:
+                                day_stat['cp_masuk'] = time_str
                             day_stat['checkpoints_filled'] += 1
                         elif cat == 'CP_1':
                             day_stat['cp_1'] = time_str
@@ -1464,6 +1466,11 @@ def recap_matrix_view(request):
                         diff = (dt_in - dt_threshold).total_seconds() / 60
                         day_stat['late_minutes'] = int(diff)
                         summary_stats['late'] += int(diff)
+                        summary_stats['late_count'] += 1
+                    
+                    # Ensure 'HADIR' status also counts as Hadir
+                    if first_log.status == 'HADIR' and not day_stat['status_class']:
+                         summary_stats['hadir'] += 1
                     
                     # Clock Out (Last Record if > 1)
                     if len(day_records) > 1:
@@ -1501,6 +1508,7 @@ def recap_matrix_view(request):
                     # Determine Status Class
                     if first_log.status == 'CHECKIN':
                         day_stat['status_class'] = 'text-success fw-bold'
+                        summary_stats['hadir'] += 1
                         if day_stat['is_holiday']:
                              day_stat['status'] += ' (Hari Libur)'
                     elif first_log.status == 'SICK':
@@ -2056,7 +2064,11 @@ def recap_matrix_view(request):
                     }
             
             # Initialize Summary Stats for WA
-            wa_summary_stats = {'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0}
+            wa_summary_stats = {
+                'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0,
+                'missing_pagi': 0, 'missing_cp1': 0, 'missing_istirahat': 0,
+                'missing_cp2': 0, 'missing_pulang': 0, 'total_missing': 0
+            }
             
             # Schedule Constants (Reuse standard or define here)
             # Assuming standard 08:00 - 17:00 for calculation
@@ -2173,6 +2185,14 @@ def recap_matrix_view(request):
                     if is_holiday:
                          status += ' (Hari Libur)'
                 
+                # Check for missing checkpoints (skip future, holidays, weekends)
+                if not (d > now.date() or is_holiday or is_weekend):
+                    if not day_data.get('MASUK'): wa_summary_stats['missing_pagi'] += 1
+                    if not day_data.get('CHECKPOINT_1'): wa_summary_stats['missing_cp1'] += 1
+                    if not day_data.get('ISTIRAHAT'): wa_summary_stats['missing_istirahat'] += 1
+                    if not day_data.get('CHECKPOINT_2'): wa_summary_stats['missing_cp2'] += 1
+                    if not day_data.get('PULANG'): wa_summary_stats['missing_pulang'] += 1
+
                 wa_personal_logs.append({
                     'date': d,
                     'is_holiday': is_holiday,
@@ -2186,8 +2206,14 @@ def recap_matrix_view(request):
                     'late_minutes': late_minutes,
                 })
             
-            # Add wa_summary_stats to context data (merged later)
-            pass
+            # Calculate Total Missing
+            wa_summary_stats['total_missing'] = (
+                wa_summary_stats['missing_pagi'] +
+                wa_summary_stats['missing_cp1'] +
+                wa_summary_stats['missing_istirahat'] +
+                wa_summary_stats['missing_cp2'] +
+                wa_summary_stats['missing_pulang']
+            )
         except Employee.DoesNotExist:
             wa_mode = 'daily'
 

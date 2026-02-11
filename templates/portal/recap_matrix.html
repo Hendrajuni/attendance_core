@@ -320,15 +320,21 @@
                             </div>
                         </div>
                         <div class="col-md-6 text-end">
-                            <span class="badge bg-primary fs-6 me-2">
-                                <i class="fas fa-clock me-1"></i> Telat: {{ summary_stats.late }}m
-                            </span>
-                            <span class="badge bg-success fs-6 me-2">
-                                <i class="fas fa-hourglass-half me-1"></i> Lembur: {{ summary_stats.overtime }}m
-                            </span>
-                            <span class="badge bg-danger fs-6">
-                                <i class="fas fa-times-circle me-1"></i> Alpha: {{ summary_stats.alpha }}
-                            </span>
+                            <div class="d-flex align-items-center gap-3 justify-content-end">
+            <!-- HTASI Badges -->
+            <span class="badge bg-success" title="Hadir"><i class="fas fa-check-circle me-1"></i>H: {{ summary_stats.hadir }}</span>
+            <span class="badge bg-warning text-dark" title="Telat (Count)"><i class="fas fa-clock me-1"></i>T: {{ summary_stats.late_count }}</span>
+            <span class="badge bg-danger" title="Alpha"><i class="fas fa-times-circle me-1"></i>A: {{ summary_stats.alpha }}</span>
+            <span class="badge bg-info text-dark" title="Sakit"><i class="fas fa-notes-medical me-1"></i>S: {{ summary_stats.sick }}</span>
+            <span class="badge bg-info text-dark" title="Izin"><i class="fas fa-user-clock me-1"></i>I: {{ summary_stats.permit }}</span>
+            
+            <div class="vr mx-2"></div>
+            
+            <!-- Existing Stats -->
+            <span class="badge bg-primary"><i class="fas fa-clock me-1"></i>Telat: {{ summary_stats.late }}m</span>
+            <span class="badge bg-success"><i class="fas fa-hourglass-half me-1"></i>Lembur: {{ summary_stats.overtime }}m</span>
+            <span class="badge bg-danger"><i class="fas fa-times-circle me-1"></i>Alpha: {{ summary_stats.alpha }}</span>
+        </div>                    
                         </div>
                     </div>
                 </div>
@@ -645,7 +651,13 @@
                             </div>
                         </div>
                         <div class="col-md-6 text-end">
-                            <span class="badge bg-primary fs-6 me-2">
+                            <span class="badge bg-light text-dark border me-1" title="Missing Absen Pagi">Pagi: {{ wa_summary_stats.missing_pagi }}</span>
+                            <span class="badge bg-light text-dark border me-1" title="Missing Checkpoint 1">Check-1: {{ wa_summary_stats.missing_cp1 }}</span>
+                            <span class="badge bg-light text-dark border me-1" title="Missing Istirahat">Istirahat: {{ wa_summary_stats.missing_istirahat }}</span>
+                            <span class="badge bg-light text-dark border me-1" title="Missing Checkpoint 2">Check-2: {{ wa_summary_stats.missing_cp2 }}</span>
+                            <span class="badge bg-light text-dark border me-1" title="Missing Pulang">Pulang: {{ wa_summary_stats.missing_pulang }}</span>
+                            <span class="badge bg-info text-dark me-1" title="Izin / Sakit">Iz: {{ wa_summary_stats.sick|add:wa_summary_stats.permit }}</span>
+                            <span class="badge bg-primary fs-6 ms-2">
                                 <i class="fas fa-clock me-1"></i> Telat: {{ wa_summary_stats.late }}m
                             </span>
                             <span class="badge bg-success fs-6 me-2">
