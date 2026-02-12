@@ -1,25 +1,14 @@
-{% load portal_filters %}
-{# Single attendance cell fragment - returned after save for hx-swap #}
 <td id="cell-{{ employee.id }}-{{ date_str }}" 
-    class="status-cell cell-{% if status == 'H' %}hadir{% elif status == 'A' %}alpha{% elif status == 'S' or status == 'I' %}izin{% elif is_holiday %}libur{% else %}empty{% endif %}"
-    {% if not is_holiday %}
-    hx-get="{% url 'portal:edit_attendance_modal' employee.id date_str %}"
-    hx-target="#modal-container"
+    class="text-center {% if is_holiday %}bg-holiday-column{% endif %}" 
+    style="cursor: {% if is_locked %}default{% else %}pointer{% endif %}; padding: 0 !important; vertical-align: middle;"
+    {% if not is_locked %}
+    hx-get="{% url 'portal:fp_edit_cell' employee.id date_str %}"
+    hx-target="#fp-edit-modal-content"
     hx-trigger="click"
+    data-bs-toggle="modal"
+    data-bs-target="#fpEditModal"
     {% endif %}>
-    <span class="cell-icon">
-        {% if status == 'H' %}
-            <i class="fas fa-check"></i>
-        {% elif status == 'A' %}
-            <i class="fas fa-times"></i>
-        {% elif status == 'S' %}
-            <i class="fas fa-medkit"></i>
-        {% elif status == 'I' %}
-            <i class="fas fa-file-alt"></i>
-        {% elif is_holiday %}
-            <i class="fas fa-moon"></i>
-        {% else %}
-            -
-        {% endif %}
-    </span>
+    <div class="status-cell {% if status == 'H' %}cell-hadir{% elif status == 'A' %}cell-alpha{% elif status == 'S' or status == 'I' or status == 'CUTI' %}cell-izin{% elif status == 'L' %}cell-libur{% else %}cell-empty{% endif %}">
+        {% if status == 'H' %}H{% elif status == 'A' %}A{% elif status == 'S' %}S{% elif status == 'I' %}I{% elif status == 'CUTI' %}C{% elif status == 'L' %}-{% else %}+{% endif %}
+    </div>
 </td>

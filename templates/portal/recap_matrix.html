@@ -430,6 +430,7 @@
                     <i class="fas fa-calendar-plus me-2"></i> Input Izin/Cuti
                 </div>
                 <div class="card-body">
+                    {% if not is_locked %}
                     <form hx-post="{% url 'portal:employee_leave_add' %}" 
                           hx-target="#leave-list-container" 
                           hx-swap="innerHTML"
@@ -471,6 +472,11 @@
                             </button>
                         </div>
                     </form>
+                    {% else %}
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-lock me-2"></i> Laporan bulan ini sudah dikunci. Tidak bisa menambah data Izin/Cuti.
+                    </div>
+                    {% endif %}
                     
                     <hr class="my-3">
                     
@@ -531,13 +537,15 @@
                                         {% with holiday_name=holidays_map|dict_get:date_str %}
                                         <!-- Cell with conditional holiday class -->
                                         <td id="cell-{{ emp.id }}-{{ date_str }}" 
-                                            class="text-center {% if holiday_name %}bg-holiday-column{% endif %}" 
-                                            style="cursor: pointer; padding: 0 !important; vertical-align: middle;"
+                                            class="text-center {% if holiday_name %}bg-holiday-column{% endif %} {% if is_locked %}cursor-default{% else %}cursor-pointer hover-reveal{% endif %}" 
+                                            style="padding: 0 !important; vertical-align: middle;"
+                                            {% if not is_locked %}
                                             hx-get="{% url 'portal:fp_edit_cell' emp.id date_str %}"
                                             hx-target="#fp-edit-modal-content"
                                             hx-trigger="click"
                                             data-bs-toggle="modal"
-                                            data-bs-target="#fpEditModal">
+                                            data-bs-target="#fpEditModal"
+                                            {% endif %}>
                                             <div class="status-cell {% if status == 'H' %}cell-hadir{% elif status == 'A' %}cell-alpha{% elif status == 'S' or status == 'I' or status == 'CUTI' %}cell-izin{% elif status == 'L' %}cell-libur{% else %}cell-empty{% endif %}">
                                                 {% if status == 'H' %}H{% elif status == 'A' %}A{% elif status == 'S' %}S{% elif status == 'I' %}I{% elif status == 'CUTI' %}C{% elif status == 'L' %}-{% else %}+{% endif %}
                                             </div>
@@ -728,6 +736,7 @@
                     <i class="fas fa-calendar-plus me-2"></i> Input Izin/Cuti (WA)
                 </div>
                 <div class="card-body">
+                    {% if not is_locked %}
                     <form hx-post="{% url 'portal:employee_leave_add' %}" 
                           hx-target="#wa-leave-list-container" 
                           hx-swap="innerHTML"
@@ -769,6 +778,11 @@
                             </button>
                         </div>
                     </form>
+                    {% else %}
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-lock me-2"></i> Laporan bulan ini sudah dikunci. Tidak bisa menambah data Izin/Cuti.
+                    </div>
+                    {% endif %}
                     
                     <hr class="my-3">
                     
@@ -880,41 +894,51 @@
                                         {% with date_str=d|date:"Y-m-d" %}
                                         {% with holiday_name=holidays_map|dict_get:date_str %}
                                             <!-- MASUK (Pagi) -->
-                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-MASUK" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="border-left: 1px solid #dee2e6; padding: 1px; cursor: pointer;" 
+                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-MASUK" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %} {% if is_locked %}cursor-default{% else %}cursor-pointer hover-reveal{% endif %}" style="border-left: 1px solid #dee2e6; padding: 1px;" 
+                                                {% if not is_locked %}
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'MASUK' %}" 
-                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
+                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal"
+                                                {% endif %}>
                                                 {% with time=emp_day_data|dict_get:'MASUK' %}
                                                     {% if time %}<span class="text-success" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
                                                 {% endwith %}
                                             </td>
                                             <!-- CHECKPOINT_1 -->
-                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-CHECKPOINT_1" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
+                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-CHECKPOINT_1" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %} {% if is_locked %}cursor-default{% else %}cursor-pointer hover-reveal{% endif %}" style="padding: 1px;"
+                                                {% if not is_locked %}
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'CHECKPOINT_1' %}" 
-                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
+                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal"
+                                                {% endif %}>
                                                 {% with time=emp_day_data|dict_get:'CHECKPOINT_1' %}
                                                     {% if time %}<span class="text-primary" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
                                                 {% endwith %}
                                             </td>
                                             <!-- ISTIRAHAT -->
-                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-ISTIRAHAT" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
+                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-ISTIRAHAT" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %} {% if is_locked %}cursor-default{% else %}cursor-pointer hover-reveal{% endif %}" style="padding: 1px;"
+                                                {% if not is_locked %}
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'ISTIRAHAT' %}" 
-                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
+                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal"
+                                                {% endif %}>
                                                 {% with time=emp_day_data|dict_get:'ISTIRAHAT' %}
                                                     {% if time %}<span class="text-secondary" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
                                                 {% endwith %}
                                             </td>
                                             <!-- CHECKPOINT_2 -->
-                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-CHECKPOINT_2" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
+                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-CHECKPOINT_2" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %} {% if is_locked %}cursor-default{% else %}cursor-pointer hover-reveal{% endif %}" style="padding: 1px;"
+                                                {% if not is_locked %}
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'CHECKPOINT_2' %}" 
-                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
+                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal"
+                                                {% endif %}>
                                                 {% with time=emp_day_data|dict_get:'CHECKPOINT_2' %}
                                                     {% if time %}<span class="text-info" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
                                                 {% endwith %}
                                             </td>
                                             <!-- PULANG -->
-                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-PULANG" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %}" style="padding: 1px; cursor: pointer;"
+                                            <td id="wa-cell-{{ emp.id }}-{{ date_str }}-PULANG" class="text-center wa-cell {% if holiday_name %}bg-light{% endif %} {% if is_locked %}cursor-default{% else %}cursor-pointer hover-reveal{% endif %}" style="padding: 1px;"
+                                                {% if not is_locked %}
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'PULANG' %}" 
-                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal">
+                                                hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal"
+                                                {% endif %}>
                                                 {% with time=emp_day_data|dict_get:'PULANG' %}
                                                     {% if time %}<span class="text-dark fw-bold" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
                                                 {% endwith %}
@@ -996,5 +1020,193 @@
         </div>
     </div>
 </div>
+
+    <!-- ==============================================================================
+         STICKY FOOTER ACTION BAR (Validasi Laporan)
+         ============================================================================== -->
+    <!-- ==============================================================================
+         STICKY ACTION BAR (Footer Pengganti)
+         ============================================================================== -->
+    <div id="action-bar-container" class="fixed-bottom bg-white border-top shadow-lg py-3 px-4" style="z-index: 9999;">
+        <div class="container-fluid">
+            <div class="d-flex justify-content-between align-items-center">
+                
+                <div class="d-flex align-items-center">
+                    {% if not is_locked %}
+                        {% if report %}
+                        <div class="me-3">
+                            <span class="badge bg-warning text-dark border border-warning px-3 py-2 rounded-pill fs-6 shadow-sm">
+                                <i class="fas fa-pencil-alt me-2"></i>STATUS: DRAFT
+                            </span>
+                        </div>
+                        {% else %}
+                        <div class="me-3">
+                            <span class="badge bg-danger border border-danger px-3 py-2 rounded-pill fs-6 shadow-sm">
+                                <i class="fas fa-exclamation-triangle me-2"></i>STATUS: ERROR - {{ error_message }}
+                            </span>
+                            <small class="d-block text-danger mt-1">Loc: {{ selected_location }}</small>
+                            <small class="d-block text-muted mt-1">Report String: {{ debug_report_str }}</small>
+                        </div>
+                        {% endif %}
+                        <div class="text-muted small d-none d-md-block lh-1">
+                            <strong>Mode Edit Aktif</strong><br>
+                            Data tersimpan otomatis per sel.
+                        </div>
+                    {% else %}
+                        <div class="me-3">
+                            <span class="badge bg-success border border-success px-3 py-2 rounded-pill fs-6 shadow-sm">
+                                <i class="fas fa-lock me-2"></i>STATUS: {{ report.get_status_display|upper }}
+                            </span>
+                        </div>
+                        <div class="text-muted small">
+                            Diajukan oleh <strong>{{ report.submitted_by|default:"System" }}</strong><br>
+                            {{ report.submitted_at|date:"d M Y, H:i" }} WIB
+                        </div>
+                    {% endif %}
+                    
+                    {% if report and report.total_unlock_requests > 0 %}
+                    <div class="ms-3">
+                        <span class="badge bg-info text-dark border border-info px-3 py-2 rounded-pill fs-6 shadow-sm" 
+                              data-bs-toggle="tooltip" 
+                              title="Total permintaan edit yang diajukan ke HRD">
+                            <i class="fas fa-history me-2"></i>{{ report.total_unlock_requests }}x Request Edit
+                        </span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="d-flex gap-2">
+                    {% if not is_locked %}
+                        <a href="" class="btn btn-outline-secondary fw-bold shadow-sm">
+                            <i class="fas fa-sync-alt me-1"></i> Refresh
+                        </a>
+
+                    {% if report %}
+                    <button id="btn-publish-report" 
+                            class="btn btn-primary fw-bold px-4 shadow-sm" 
+                            hx-post="{% url 'portal:publish_report' report.id %}"
+                            hx-indicator="#publish-spinner">
+                        <i class="fas fa-paper-plane me-2"></i> PUBLISH LAPORAN
+                        <span id="publish-spinner" class="htmx-indicator spinner-border spinner-border-sm ms-2"></span>
+                    </button>
+                    
+                    <script>
+                        document.addEventListener('DOMContentLoaded', function() {
+                            document.body.addEventListener('htmx:confirm', function(evt) {
+                                if (evt.target.id === 'btn-publish-report') {
+                                    evt.preventDefault();
+                                    Swal.fire({
+                                        title: 'Publish Laporan?',
+                                        html: "Laporan akan <b>DIKUNCI</b> dan dikirim ke HRD.<br>Anda tidak dapat mengubah data setelah ini!",
+                                        icon: 'warning',
+                                        showCancelButton: true,
+                                        confirmButtonColor: '#198754',
+                                        cancelButtonColor: '#6c757d',
+                                        confirmButtonText: '<i class="fas fa-paper-plane me-2"></i>Ya, Publish Sekarang',
+                                        cancelButtonText: 'Batal',
+                                        reverseButtons: true,
+                                        focusCancel: true
+                                    }).then((result) => {
+                                        if (result.isConfirmed) {
+                                            evt.detail.issueRequest(true);
+                                        }
+                                    });
+                                }
+                            });
+                        });
+                    </script>
+                    {% else %}
+                    <button class="btn btn-secondary disabled" disabled>
+                        <i class="fas fa-spinner fa-spin me-2"></i> Report Not Found
+                    </button>
+                    {% endif %}
+                    {% else %}
+                        {% if user.is_superuser or user.employee_profile.role == 'HRD' %}
+                            
+                            {% if report.status == 'SUBMITTED' %}
+                                <button id="btn-verify-report" 
+                                        class="btn btn-success fw-bold px-4 shadow-sm" 
+                                        hx-post="{% url 'portal:verify_report' report.id %}"
+                                        hx-indicator="#verify-spinner">
+                                    <i class="fas fa-check-double me-2"></i> VERIFIKASI LAPORAN
+                                    <span id="verify-spinner" class="htmx-indicator spinner-border spinner-border-sm ms-2"></span>
+                                </button>
+                                
+                                <script>
+                                    document.addEventListener('DOMContentLoaded', function() {
+                                        document.body.addEventListener('htmx:confirm', function(evt) {
+                                            if (evt.target.id === 'btn-verify-report') {
+                                                evt.preventDefault();
+                                                Swal.fire({
+                                                    title: 'Verifikasi Laporan?',
+                                                    html: "Status laporan akan berubah menjadi <b>VERIFIED</b>.<br>Pastikan data sudah benar.",
+                                                    icon: 'question',
+                                                    showCancelButton: true,
+                                                    confirmButtonColor: '#198754',
+                                                    cancelButtonColor: '#6c757d',
+                                                    confirmButtonText: '<i class="fas fa-check-double me-2"></i>Ya, Verifikasi',
+                                                    cancelButtonText: 'Batal',
+                                                    reverseButtons: true,
+                                                    focusCancel: true
+                                                }).then((result) => {
+                                                    if (result.isConfirmed) {
+                                                        evt.detail.issueRequest(true);
+                                                    }
+                                                });
+                                            }
+                                        });
+                                    });
+                                </script>
+                                
+                            {% elif report.status == 'REQ_UNLOCK' %}
+                                <div class="btn-group shadow-sm">
+                                    <button class="btn btn-warning fw-bold px-4" 
+                                            hx-post="{% url 'portal:approve_unlock' report.id %}"
+                                            hx-confirm="Setujui pembukaan kunci? Laporan akan kembali ke status revisi/draft untuk diedit."
+                                            hx-indicator="#approve-spinner">
+                                        <i class="fas fa-unlock me-2"></i> SETUJUI BUKA KUNCI
+                                        <span id="approve-spinner" class="htmx-indicator spinner-border spinner-border-sm ms-2"></span>
+                                    </button>
+                                    <button class="btn btn-outline-danger fw-bold px-3" 
+                                            hx-post="{% url 'portal:reject_unlock' report.id %}"
+                                            hx-confirm="Tolak permintaan buka kunci?"
+                                            hx-indicator="#reject-spinner">
+                                        <i class="fas fa-times me-2"></i> TOLAK
+                                        <span id="reject-spinner" class="htmx-indicator spinner-border spinner-border-sm ms-2"></span>
+                                    </button>
+                                </div>
+                                
+                            {% else %}
+                                <button class="btn btn-outline-success disabled" disabled>
+                                    <i class="fas fa-check-circle me-2"></i> {{ report.get_status_display }}
+                                </button>
+                            {% endif %}
+                            
+                        {% else %}
+                            <!-- NON-HRD (Assume Kerani/Manager) -->
+                            {% if report.status == 'SUBMITTED' %}
+                                <button class="btn btn-warning fw-bold px-4 shadow-sm" 
+                                        hx-post="{% url 'portal:request_unlock' report.id %}"
+                                        hx-confirm="Ajukan permintaan edit ke HRD? Status akan berubah menjadi REQ_UNLOCK."
+                                        hx-indicator="#unlock-req-spinner">
+                                    <i class="fas fa-key me-2"></i> AJUKAN EDIT
+                                    <span id="unlock-req-spinner" class="htmx-indicator spinner-border spinner-border-sm ms-2"></span>
+                                </button>
+                            {% elif report.status == 'REQ_UNLOCK' %}
+                                <button class="btn btn-secondary disabled" disabled>
+                                    <i class="fas fa-hourglass-half me-2"></i> Menunggu Persetujuan HRD
+                                </button>
+                            {% else %}
+                                <button class="btn btn-secondary disabled" disabled>
+                                    <i class="fas fa-clock me-2"></i> {{ report.get_status_display }}
+                                </button>
+                            {% endif %}
+                        {% endif %}
+                    {% endif %}
+                </div>
+
+            </div>
+        </div>
+    </div>
 
 {% endblock %}

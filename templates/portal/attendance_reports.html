@@ -1,0 +1,468 @@
+{% extends 'base.html' %}
+{% load static humanize %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Page Header -->
+    <!-- Header Controls -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="h3 text-gray-800 mb-1">Arsip Laporan Absensi</h1>
+            <p class="text-muted mb-0">Monitor status dan aktivitas laporan bulanan.</p>
+        </div>
+        
+        <div class="d-flex gap-2 align-items-center">
+            <!-- Filter Form -->
+            <form class="d-flex gap-2 align-items-center" method="get">
+                <!-- Location Picker (RBAC) -->
+                {% if can_select_location %}
+                    <select name="location_id" class="form-select border-primary shadow-sm" onchange="this.form.submit()" style="min-width: 250px;">
+                        {% for loc in all_locations %}
+                            <option value="{{ loc.id }}" {% if loc.id == selected_location.id %}selected{% endif %}>
+                                {{ loc.name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                {% else %}
+                    <input type="hidden" name="location_id" value="{{ selected_location.id }}">
+                {% endif %}
+
+                <!-- Year Dropdown -->
+                <select name="year" class="form-select border-primary shadow-sm fw-bold" onchange="this.form.submit()" style="width: 100px;">
+                    {% for y in years_range %}
+                        <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            
+            <!-- View Toggles -->
+            <div class="btn-group shadow-sm ms-2">
+                <button type="button" class="btn btn-outline-secondary" id="btn-grid" onclick="switchView('grid')" data-bs-toggle="tooltip" title="Tampilan Grid">
+                    <i class="fas fa-th-large"></i>
+                </button>
+                <button type="button" class="btn btn-outline-secondary active" id="btn-list" onclick="switchView('list')" data-bs-toggle="tooltip" title="Tampilan List">
+                    <i class="fas fa-list"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Location Context Alert -->
+    {% if selected_location %}
+    <div class="alert alert-white border-start border-4 border-info shadow-sm mb-4">
+        <div class="d-flex align-items-center">
+            <div class="bg-info-soft p-3 rounded-circle me-3 text-info">
+                <i class="fas fa-building fa-2x"></i>
+            </div>
+            <div>
+                <h5 class="fw-bold mb-1 text-gray-800">{{ selected_location.name }}</h5>
+                <div class="text-muted small">
+                    <i class="fas fa-code me-1"></i> Kode: <strong>{{ selected_location.code }}</strong>
+                    <span class="mx-2">•</span>
+                    <i class="fas fa-calendar-alt me-1"></i> Tahun Buku: <strong>{{ year }}</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="alert alert-warning shadow-sm">
+        <i class="fas fa-exclamation-triangle me-2"></i>
+        Silakan pilih lokasi kerja terlebih dahulu.
+    </div>
+    {% endif %}
+
+    <!-- View Mode: GRID -->
+    <div id="view-grid" class="row g-4 fade-in d-none">
+        {% for month in months_data %}
+        <div class="col-md-6 col-xl-4">
+            <div class="card h-100 shadow-sm border-0 hover-lift transition-all">
+                <!-- Card Header -->
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center">
+                        <div class="bg-gray-100 rounded p-2 me-3 text-center" style="width: 50px;">
+                            <span class="d-block text-uppercase small fw-bold text-muted">{{ month.month_name|slice:":3" }}</span>
+                            <span class="h5 fw-bold mb-0 text-dark">{{ month.month_num }}</span>
+                        </div>
+                        <h5 class="fw-bold mb-0 text-gray-800">{{ month.month_name }}</h5>
+                    </div>
+                    
+                    {% if month.report %}
+                        <span class="badge bg-{{ month.status_class }} bg-opacity-10 text-{{ month.status_class }} border border-{{ month.status_class }} px-3 py-2 rounded-pill">
+                            {{ month.report.get_status_display }}
+                        </span>
+                    {% else %}
+                        <span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary px-3 py-2 rounded-pill">
+                            Belum Ada
+                        </span>
+                    {% endif %}
+                </div>
+                
+                <div class="card-body">
+                    {% if month.report %}
+                        {% if month.report.total_unlock_requests > 0 %}
+                            <div class="mb-3 text-center">
+                                <span class="badge bg-info text-dark border border-info px-3 py-2 rounded-pill shadow-sm"
+                                      data-bs-toggle="tooltip" title="Total permintaan edit: {{ month.report.total_unlock_requests }}">
+                                    <i class="fas fa-history me-2"></i> {{ month.report.total_unlock_requests }}x Request Edit
+                                </span>
+                            </div>
+                        {% endif %}
+
+                        <!-- Activity Info (Last Edit / Published) -->
+                        <div class="bg-light rounded p-3 mb-3 border border-light">
+                            <h6 class="text-uppercase text-muted small fw-bold mb-3 border-bottom pb-2">Aktivitas Terakhir</h6>
+                            
+                            <div class="d-flex align-items-start mb-2">
+                                <i class="far fa-clock mt-1 me-2 text-warning w-20px text-center"></i>
+                                <div>
+                                    <small class="d-block text-muted">{% if month.report.status == 'DRAFT' %}Diupdate{% else %}Dipublish{% endif %}</small>
+                                    <span class="fw-bold text-dark">
+                                        {% if month.report.status == 'DRAFT' %}
+                                            {{ month.report.updated_at|naturaltime|default:"-" }}
+                                        {% else %}
+                                            {{ month.report.submitted_at|naturaltime|default:"-" }}
+                                        {% endif %}
+                                    </span>
+                                </div>
+                            </div>
+                            
+                            <div class="d-flex align-items-start">
+                                <i class="far fa-user mt-1 me-2 text-primary w-20px text-center"></i>
+                                <div>
+                                    <small class="d-block text-muted">{% if month.report.status == 'DRAFT' %}Oleh{% else %}Oleh Kerani{% endif %}</small>
+                                    <span class="fw-bold text-dark text-truncate d-block" style="max-width: 200px;">
+                                        {% if month.report.status == 'DRAFT' %}
+                                            {{ month.report.last_modified_by.get_full_name|default:"System Log" }}
+                                        {% else %}
+                                            {{ month.report.submitted_by.get_full_name|default:"-" }}
+                                        {% endif %}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    {% else %}
+                        <!-- Empty State -->
+                        <div class="text-center py-4">
+                            <div class="mb-3 text-gray-300">
+                                <i class="far fa-file-alt fa-3x"></i>
+                            </div>
+                            <p class="text-muted mb-0 small">Belum ada data laporan untuk bulan ini.</p>
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <!-- Action Footer -->
+                <div class="card-footer bg-white border-top-0 pb-4 pt-0">
+                    <div class="d-grid gap-2">
+                        {% if month.report %}
+                            <!-- Action Buttons Based on Role & Status -->
+                            
+                            <!-- PRIMARY: Buka & Export -->
+                            <div class="btn-group w-100">
+                                <a href="{% url 'portal:recap_matrix' %}?location_id={{ selected_location.id }}&month={{ month.month_num }}&year={{ year }}" 
+                                   class="btn btn-outline-primary">
+                                    <i class="fas fa-eye me-1"></i> Buka {% if month.report.status == 'DRAFT' and user.employee_profile.role == 'KERANI' %}/ Edit{% endif %}
+                                </a>
+                                <button type="button" class="btn btn-primary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown">
+                                    <span class="visually-hidden">Toggle Dropdown</span>
+                                </button>
+                                <ul class="dropdown-menu">
+                                    <li>
+                                        <a class="dropdown-item" href="{% url 'portal:export_matrix_excel' month.report.id %}">
+                                            <i class="fas fa-file-excel text-success me-2"></i> Export Excel
+                                            {% if month.report.status == 'DRAFT' %}<span class="badge bg-warning text-dark ms-1">Draft</span>{% endif %}
+                                        </a>
+                                    </li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li>
+                                        <a class="dropdown-item" href="{% url 'portal:export_report_pdf' month.report.id %}?type=main" target="_blank">
+                                            <i class="fas fa-file-pdf text-danger me-2"></i> Laporan Utama (Legal)
+                                        </a>
+                                    </li>
+                                    <li>
+                                        {% if month.has_wa_data %}
+                                            <a class="dropdown-item" href="{% url 'portal:export_report_pdf' month.report.id %}?type=wa" target="_blank">
+                                                <i class="fas fa-list-alt text-info me-2"></i> Lampiran WA (Detail)
+                                            </a>
+                                        {% else %}
+                                            <span class="dropdown-item disabled text-muted" title="Tidak ada data absen WA">
+                                                <i class="fas fa-list-alt me-2"></i> Lampiran WA (Kosong)
+                                            </span>
+                                        {% endif %}
+                                    </li>
+                                </ul>
+                            </div>
+                            
+                            <!-- HRD: Verifikasi -->
+                            <!-- HRD: Verifikasi & Unlock Approval -->
+                            {% if user.is_superuser or user.employee_profile.role == 'HRD' %}
+                                <div class="mt-2 text-center">
+                                    {% if month.report.status == 'SUBMITTED' %}
+                                        <button class="btn btn-success w-100" 
+                                                hx-post="{% url 'portal:verify_report' month.report.id %}"
+                                                hx-confirm="Verifikasi laporan bulan ini? Status akan menjadi VERIFIED."
+                                                hx-swap="none">
+                                            <i class="fas fa-check-double me-2"></i> Verifikasi Laporan
+                                        </button>
+                                        
+                                    {% elif month.report.status == 'REQ_UNLOCK' %}
+                                        <div class="d-flex gap-2">
+                                            <button class="btn btn-warning w-50" 
+                                                    hx-post="{% url 'portal:approve_unlock' month.report.id %}"
+                                                    hx-confirm="Setujui buka kunci?" hx-swap="none" title="Setujui">
+                                                <i class="fas fa-unlock"></i> Setujui
+                                            </button>
+                                            <button class="btn btn-outline-danger w-50" 
+                                                    hx-post="{% url 'portal:reject_unlock' month.report.id %}"
+                                                    hx-confirm="Tolak buka kunci?" hx-swap="none" title="Tolak">
+                                                <i class="fas fa-times"></i> Tolak
+                                            </button>
+                                        </div>
+                                        
+                                    {% elif month.report.status == 'DRAFT' or month.report.status == 'REQ_REVISI' %}
+                                        <button class="btn btn-outline-secondary w-100 disabled" disabled>
+                                            <i class="fas fa-clock me-2"></i> Menunggu Finalisasi
+                                        </button>
+                                    {% else %}
+                                        <button class="btn btn-outline-success w-100 disabled" disabled>
+                                            <i class="fas fa-check-circle me-2"></i> {{ month.report.get_status_display }}
+                                        </button>
+                                    {% endif %}
+                                </div>
+                                
+                            {% else %}
+                                <!-- Non-HRD: Request Unlock -->
+                                <div class="mt-2 text-center">
+                                    {% if month.report.status == 'SUBMITTED' %}
+                                        <button class="btn btn-warning w-100" 
+                                                hx-post="{% url 'portal:request_unlock' month.report.id %}"
+                                                hx-confirm="Ajukan buka kunci untuk edit?" hx-swap="none">
+                                            <i class="fas fa-key me-2"></i> Ajukan Edit
+                                        </button>
+                                    {% elif month.report.status == 'REQ_UNLOCK' %}
+                                        <button class="btn btn-secondary w-100 disabled" disabled>
+                                            <i class="fas fa-hourglass-half me-2"></i> Menunggu Approval
+                                        </button>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                            
+                        {% else %}
+                            <!-- Create Action -->
+                            <a href="{% url 'portal:recap_matrix' %}?location_id={{ selected_location.id }}&month={{ month.month_num }}&year={{ year }}" 
+                               class="btn btn-primary shadow-sm">
+                                <i class="fas fa-plus-circle me-2"></i> Mulai Rekap Absensi
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- View Mode: LIST -->
+    <div id="view-list" class="fade-in">
+        <div class="card shadow-sm border-0 overflow-hidden">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="bg-light">
+                        <tr>
+                            <th class="ps-4 py-3 text-uppercase text-secondary small fw-bold">Bulan</th>
+                            <th class="py-3 text-uppercase text-secondary small fw-bold">Status</th>
+                            <th class="py-3 text-uppercase text-secondary small fw-bold">Info Revisi</th>
+                            <th class="py-3 text-uppercase text-secondary small fw-bold">Aktivitas Terakhir</th>
+                            <th class="text-end pe-4 py-3 text-uppercase text-secondary small fw-bold">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for month in months_data %}
+                        <tr>
+                            <td class="ps-4">
+                                <div class="d-flex align-items-center">
+                                    <div class="bg-gray-100 rounded p-2 me-3 text-center" style="width: 45px;">
+                                        <span class="h6 fw-bold mb-0 text-dark">{{ month.month_num }}</span>
+                                    </div>
+                                    <span class="fw-bold text-gray-800">{{ month.month_name }}</span>
+                                </div>
+                            </td>
+                            <td>
+                                {% if month.report %}
+                                    <span class="badge bg-{{ month.status_class }} bg-opacity-10 text-{{ month.status_class }} border border-{{ month.status_class }} px-3 py-1 rounded-pill">
+                                        {{ month.report.get_status_display }}
+                                    </span>
+                                {% else %}
+                                    <span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary px-3 py-1 rounded-pill">
+                                        Belum Ada
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if month.report and month.report.total_unlock_requests > 0 %}
+                                    <span class="badge bg-info text-dark border border-info px-2 py-1 rounded-pill" 
+                                          data-bs-toggle="tooltip" title="Total Permintaan Edit: {{ month.report.total_unlock_requests }}">
+                                        <i class="fas fa-history me-1"></i> {{ month.report.total_unlock_requests }}x Edit
+                                    </span>
+                                {% else %}
+                                    <span class="text-muted small">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if month.report %}
+                                    <div class="d-flex flex-column small">
+                                        <span class="text-dark fw-bold">
+                                            <i class="far fa-clock me-1 text-muted"></i> {{ month.report.updated_at|naturaltime|default:"-" }}
+                                        </span>
+                                        <span class="text-muted">
+                                            <i class="far fa-user me-1"></i> {{ month.report.last_modified_by.get_full_name|default:"System" }}
+                                        </span>
+                                    </div>
+                                {% else %}
+                                    <span class="text-muted small">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end pe-4">
+                                {% if month.report %}
+                                    <div class="btn-group btn-group-sm">
+                                        <a href="{% url 'portal:recap_matrix' %}?location_id={{ selected_location.id }}&month={{ month.month_num }}&year={{ year }}" 
+                                           class="btn btn-outline-primary" data-bs-toggle="tooltip" title="Buka Data Absensi">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
+                                        <button type="button" class="btn btn-primary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown">
+                                            <span class="visually-hidden">Toggle</span>
+                                        </button>
+                                        <ul class="dropdown-menu dropdown-menu-end">
+                                            <li>
+                                                <a class="dropdown-item" href="{% url 'portal:export_matrix_excel' month.report.id %}">
+                                                    <i class="fas fa-file-excel text-success me-2"></i> Export Excel
+                                                    {% if month.report.status == 'DRAFT' %}<span class="badge bg-warning text-dark ms-1">Draft</span>{% endif %}
+                                                </a>
+                                            </li>
+                                            <li><hr class="dropdown-divider"></li>
+                                            <li>
+                                                <a class="dropdown-item" href="{% url 'portal:export_report_pdf' month.report.id %}?type=main" target="_blank">
+                                                    <i class="fas fa-file-pdf text-danger me-2"></i> Laporan Utama (Legal)
+                                                </a>
+                                            </li>
+                                            <li>
+                                                {% if month.has_wa_data %}
+                                                    <a class="dropdown-item" href="{% url 'portal:export_report_pdf' month.report.id %}?type=wa" target="_blank">
+                                                        <i class="fas fa-list-alt text-info me-2"></i> Lampiran WA (Detail)
+                                                    </a>
+                                                {% else %}
+                                                    <span class="dropdown-item disabled text-muted" title="Tidak ada data absen WA">
+                                                        <i class="fas fa-list-alt me-2"></i> Lampiran WA (Kosong)
+                                                    </span>
+                                                {% endif %}
+                                            </li>
+                                        </ul>
+                                    </div>
+                                    
+                                    {% if user.is_superuser or user.employee_profile.role == 'HRD' %}
+                                        {% if month.report.status == 'SUBMITTED' %}
+                                            <button class="btn btn-sm btn-success ms-1" 
+                                                    hx-post="{% url 'portal:verify_report' month.report.id %}"
+                                                    hx-confirm="Verifikasi?" hx-swap="none"
+                                                    data-bs-toggle="tooltip" title="Verifikasi">
+                                                <i class="fas fa-check-double"></i>
+                                            </button>
+                                        {% elif month.report.status == 'REQ_UNLOCK' %}
+                                             <button class="btn btn-sm btn-warning ms-1" 
+                                                    hx-post="{% url 'portal:approve_unlock' month.report.id %}"
+                                                    hx-confirm="Setujui buka kunci?" hx-swap="none"
+                                                    data-bs-toggle="tooltip" title="Setujui Buka Kunci">
+                                                <i class="fas fa-unlock"></i>
+                                            </button>
+                                        {% else %}
+                                            <button class="btn btn-sm btn-outline-secondary ms-1 disabled" disabled
+                                                    data-bs-toggle="tooltip" title="{{ month.report.get_status_display }}">
+                                                <i class="fas fa-check"></i>
+                                            </button>
+                                        {% endif %}
+                                        
+                                    {% else %}
+                                        <!-- Non-HRD -->
+                                        {% if month.report.status == 'SUBMITTED' %}
+                                            <button class="btn btn-sm btn-warning ms-1" 
+                                                    hx-post="{% url 'portal:request_unlock' month.report.id %}"
+                                                    hx-confirm="Ajukan Edit?" hx-swap="none"
+                                                    data-bs-toggle="tooltip" title="Ajukan Edit">
+                                                <i class="fas fa-key"></i>
+                                            </button>
+                                        {% elif month.report.status == 'REQ_UNLOCK' %}
+                                            <button class="btn btn-sm btn-secondary ms-1 disabled" disabled
+                                                    data-bs-toggle="tooltip" title="Menunggu Approval HRD">
+                                                <i class="fas fa-hourglass-half"></i>
+                                            </button>
+                                        {% endif %}
+                                    {% endif %}
+                                {% else %}
+                                    <a href="{% url 'portal:recap_matrix' %}?location_id={{ selected_location.id }}&month={{ month.month_num }}&year={{ year }}" 
+                                       class="btn btn-sm btn-primary shadow-sm">
+                                        <i class="fas fa-plus me-1"></i> Buat
+                                    </a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .w-20px { width: 25px; }
+    .bg-info-soft { background-color: rgba(54, 185, 204, 0.1); }
+    .hover-lift { transition: transform 0.2s, box-shadow 0.2s; }
+    .hover-lift:hover { transform: translateY(-5px); box-shadow: 0 .5rem 1.5rem rgba(0,0,0,.08)!important; }
+    
+    /* Animation */
+    .fade-in { animation: fadeIn 0.3s ease-in-out; }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+</style>
+
+<script>
+    // Enable Tooltips
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl)
+    })
+
+    // View Switcher Logic
+    function switchView(view) {
+        const gridView = document.getElementById('view-grid');
+        const listView = document.getElementById('view-list');
+        const btnGrid = document.getElementById('btn-grid');
+        const btnList = document.getElementById('btn-list');
+
+        if (view === 'grid') {
+            gridView.classList.remove('d-none');
+            listView.classList.add('d-none');
+            
+            btnGrid.classList.add('active');
+            btnList.classList.remove('active');
+            
+            localStorage.setItem('attendance_report_view', 'grid');
+        } else {
+            gridView.classList.add('d-none');
+            listView.classList.remove('d-none');
+            
+            btnGrid.classList.remove('active');
+            btnList.classList.add('active');
+            
+            localStorage.setItem('attendance_report_view', 'list');
+        }
+    }
+
+    // Initialize View
+    document.addEventListener('DOMContentLoaded', function() {
+        const savedView = localStorage.getItem('attendance_report_view') || 'list';
+        switchView(savedView);
+    });
+</script>
+{% endblock %}

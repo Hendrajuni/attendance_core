@@ -6,5 +6,6 @@ gspread
 google-auth
 pandas
 requests
+openpyxl
 # Production only
 gunicorn

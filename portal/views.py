@@ -5,6 +5,12 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 from django.db import transaction
 from attendance.utils import get_employee_schedule
+from attendance.models import WorkLocation, MonthlyReport, Employee, AttendanceLog, EmployeeLeave
+from django.http import HttpResponse
+from django.urls import reverse
+import calendar
+import holidays
+from django.utils import timezone
 
 # Constants
 SCHEDULE_IN = time(8, 0)
@@ -21,6 +27,136 @@ def dashboard(request):
         'page_title': 'Dashboard',
     }
     return render(request, 'portal/dashboard.html', context)
+
+@login_required
+def attendance_reports_dashboard(request):
+    """
+    Dashboard Laporan Absensi (Digital Archive).
+    Menampilkan status laporan per bulan dalam setahun.
+    """
+    from attendance.models import WorkLocation, MonthlyReport
+    from django.utils import timezone
+    from django.db.models import F
+    
+    # 1. Determine Location (RBAC) - Copied from recap_matrix_view logic
+    selected_location = None
+    can_select_location = False
+    all_locations = WorkLocation.objects.none()
+
+    if hasattr(request.user, 'employee_profile'):
+        profile = request.user.employee_profile
+        if profile.assigned_location:
+            selected_location = profile.assigned_location
+        
+        # Admin / HRD / Accounting can switch locations
+        if profile.role in ['ADMIN', 'HRD', 'ACCOUNTING']:
+            can_select_location = True
+            # Hanya ambil lokasi Leaf Node (PKS, Kebun) yang punya data absensi
+            all_locations = WorkLocation.objects.filter(rght=F('lft') + 1).order_by('tree_id', 'lft')
+            
+            # Allow filter override
+            location_id = request.GET.get('location_id')
+            if location_id:
+                try:
+                    selected_location = WorkLocation.objects.get(id=location_id)
+                except WorkLocation.DoesNotExist:
+                    pass
+            
+            # Default to first location if none selected (or if assigned_location is not in list)
+            if not selected_location and all_locations.exists():
+                selected_location = all_locations.first()
+    else:
+        # Fallback for superuser
+        if request.user.is_superuser or request.user.is_staff:
+            can_select_location = True
+            all_locations = WorkLocation.objects.filter(rght=F('lft') + 1).order_by('tree_id', 'lft')
+            location_id = request.GET.get('location_id')
+            if location_id:
+                try:
+                    selected_location = WorkLocation.objects.get(id=location_id)
+                except WorkLocation.DoesNotExist:
+                    pass
+            if not selected_location and all_locations.exists():
+                selected_location = all_locations.first()
+
+    # 2. Determine Year
+    current_year = timezone.now().year
+    try:
+        year = int(request.GET.get('year', current_year))
+    except (ValueError, TypeError):
+        year = current_year
+    
+    # 3. Build Month Cards Data
+    months_data = []
+    
+    # Pre-fetch reports for query optimization
+    reports_map = {}
+    wa_months_with_data = set()
+
+    if selected_location:
+        reports = MonthlyReport.objects.filter(
+            location=selected_location,
+            period_year=year
+        )
+        for r in reports:
+            reports_map[r.period_month] = r
+            
+        # Pre-fetch months that have WA data
+        from attendance.models import AttendanceLog
+        from django.db.models import Q
+        
+        # Check logs directly for WA/Telegram indicators, regardless of employee's current setting.
+        # Indicators: source_type='TELEGRAM' or verification_method='WA'
+        wa_logs = AttendanceLog.objects.filter(
+            timestamp__year=year,
+            employee__home_base=selected_location
+        ).filter(
+            Q(source_type='TELEGRAM') | Q(verification_method='WA') | Q(employee__attendance_method__in=['WHATSAPP', 'WA'])
+        ).values_list('timestamp__month', flat=True).distinct()
+        
+        wa_months_with_data = set(wa_logs)
+            
+    month_names = [
+        '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+        'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ]
+
+    for m in range(1, 13):
+        report = reports_map.get(m)
+        has_wa_data = m in wa_months_with_data
+        
+        status_class = 'secondary' # Default empty/gray
+        if report:
+            if report.status == 'DRAFT':
+                status_class = 'warning' # Kuning
+            elif report.status == 'SUBMITTED':
+                status_class = 'info'    # Biru
+            elif report.status == 'VERIFIED':
+                status_class = 'success' # Hijau
+            elif report.status == 'REQ_REVISI':
+                status_class = 'danger'  # Merah
+            elif report.status == 'REJECTED':
+                status_class = 'danger'
+        
+        months_data.append({
+            'month_num': m,
+            'month_name': month_names[m],
+            'report': report,
+            'status_class': status_class,
+            'has_wa_data': has_wa_data
+        })
+
+    context = {
+        'page_title': 'Dashboard Laporan Absensi',
+        'selected_location': selected_location,
+        'all_locations': all_locations,
+        'can_select_location': can_select_location,
+        'year': year,
+        'months_data': months_data,
+        'years_range': range(current_year - 2, current_year + 2),
+    }
+    
+    return render(request, 'portal/attendance_reports.html', context)
 
 @login_required
 def tree_explorer(request):
@@ -1289,29 +1425,29 @@ def recap_matrix_view(request):
             else:
                  # Fallback if no assigned location
                  pass
-        else:
-            # HRD / ADMIN: Can select any location (leaf nodes only)
+        if profile.role in ['ADMIN', 'HRD', 'ACCOUNTING']:
             can_select_location = True
-            # Filter only leaf nodes: rght == lft + 1 indicates no children
-            all_locations = WorkLocation.objects.filter(rght=F('lft') + 1).order_by('tree_id', 'lft')
+            # Allow selecting ANY location (not just leaf nodes)
+            all_locations = WorkLocation.objects.all().order_by('tree_id', 'lft')
             
-            # Check if location_id specified in GET
+            # Allow filter override
             location_id = request.GET.get('location_id')
             if location_id:
                 try:
                     selected_location = WorkLocation.objects.get(id=location_id)
                 except WorkLocation.DoesNotExist:
-                    selected_location = None
+                    pass
             
-            # Default to first location if not specified
+            # Default to first location if none selected (or if assigned_location is not in list)
             if not selected_location and all_locations.exists():
                 selected_location = all_locations.first()
     else:
-        # Superuser without profile
-        if request.user.is_superuser:
+        # Fallback for superuser/staff without employee_profile
+        if request.user.is_superuser or request.user.is_staff:
             can_select_location = True
-            # Filter only leaf nodes: rght == lft + 1 indicates no children
-            all_locations = WorkLocation.objects.filter(rght=F('lft') + 1).order_by('tree_id', 'lft')
+            # Allow selecting ANY location
+            all_locations = WorkLocation.objects.all().order_by('tree_id', 'lft')
+            
             location_id = request.GET.get('location_id')
             if location_id:
                 try:
@@ -1320,6 +1456,93 @@ def recap_matrix_view(request):
                     pass
             if not selected_location and all_locations.exists():
                 selected_location = all_locations.first()
+
+    # --- DEBUG LOCATION SELECTION ---
+    try:
+        debug_log_path = 'd:\\dev\\attendance_core\\debug_location.txt'
+        with open(debug_log_path, 'a') as f:
+            f.write(f"\n[{timezone.now()}] Location Selection Debug:\n")
+            f.write(f"User: {request.user} (Superuser: {request.user.is_superuser})\n")
+            if hasattr(request.user, 'employee_profile'):
+                f.write(f"Profile: {request.user.employee_profile}\n")
+                f.write(f"Assigned Location: {request.user.employee_profile.assigned_location}\n")
+            else:
+                f.write("Profile: None\n")
+            f.write(f"Selected Location: {selected_location}\n")
+    except Exception as e:
+        print(f"Log Error: {e}")
+    # --------------------------------
+    # =========================================================================
+    # MONTHLY REPORT WORKFLOW (Draft -> Publish -> Locked)
+    # =========================================================================
+    from attendance.models import MonthlyReport
+    from django.utils import timezone
+    
+    report = None
+    is_locked = False
+    error_message = "" # Initialize variable
+    
+    if selected_location:
+        # === FIX: Pastikan Parameter adalah Integer ===
+        # Ini mencegah mismatch query jika 'month' dari URL berbentuk string
+        try:
+            month_int = int(month)
+            year_int = int(year)
+        except (ValueError, TypeError):
+            month_int = timezone.now().month
+            year_int = timezone.now().year
+
+        # === LOGIC UTAMA: AUTO-GET OR CREATE REPORT ===
+        # Coba ambil report yang ada, atau buat baru jika parameter tidak cocok
+        try:
+            # === LOGIC UTAMA: AUTO-GET OR CREATE REPORT ===
+            try:
+                report, created = MonthlyReport.objects.get_or_create(
+                    location=selected_location,
+                    period_month=month_int,
+                    period_year=year_int,
+                    defaults={
+                        'status': 'DRAFT',
+                        'version': 0
+                    }
+                )
+                
+                # if created:
+                #      print(f"[DEBUG] MonthlyReport Created: {report}")
+                # else:
+                #      print(f"[DEBUG] MonthlyReport Fetched: {report}")
+
+            except Exception as e:
+                # If get_or_create fails (unlikely, maybe unexpected kwargs), capture it
+                err_msg = f"get_or_create failed: {str(e)}"
+                print(f"[ERROR] {err_msg}")
+                raise e # Propagate to outer try/except for UI handling
+            
+            # === Tentukan Status Lock ===
+            # Lock edit jika status bukan DRAFT dan bukan REQ_REVISI
+            is_locked = report.status not in ['DRAFT', 'REQ_REVISI']
+            
+        except Exception as e:
+            err_msg = f"Failed to get/create report: {str(e)}"
+            import traceback
+            error_message = f"{str(e)} | Truncated Trace: {traceback.format_exc()[:300]}" # Capture for UI
+            
+            print(f"[ERROR] {err_msg}")
+            
+            # Show error to user in UI
+            from django.contrib import messages
+            messages.error(request, err_msg)
+            
+            traceback.print_exc()
+            report = None
+            is_locked = False
+            error_message = str(e) # Pass to context
+    else:
+        # Fallback if no location selected
+        from django.contrib import messages
+        messages.warning(request, "Lokasi kerja tidak ditemukan atau belum dipilih.")
+        print("[DEBUG] selected_location is None, skipping MonthlyReport")
+        error_message = "No Location Selected"
     
     # =========================================================================
     # VIEW MODE SELECTION
@@ -2033,8 +2256,23 @@ def recap_matrix_view(request):
         'wa_personal_employee': wa_personal_employee,
         'selected_wa_employee_id': wa_employee_id,
         # Active Tab State
-        'active_tab': active_tab, 
+        'active_tab': active_tab,
+        # Monthly Report Workflow
+        'report': report,
+        'monthly_report_obj': report, # UNIQUE NAME
+        'is_locked': is_locked,
+        'error_message': error_message,
+        'debug_report_str': str(report) if report else 'None',
     }
+    
+    print(f"[DEBUG] Final Context Report: {context.get('report')} (Type: {type(context.get('report'))})")
+    print(f"[DEBUG] Final Context Error: {context.get('error_message')}")
+
+    try:
+        with open('d:\\dev\\attendance_core\\debug_trace.txt', 'a') as f:
+            f.write(f"[{timezone.now()}] FINAL CONTEXT - Report: {context.get('report')} | Type: {type(context.get('report'))} | Error: {context.get('error_message')}\n")
+    except:
+        pass
         
     # WA Personal View (Monthly - Single Employee)
     if wa_employee_id:
@@ -2225,6 +2463,7 @@ def recap_matrix_view(request):
     ]
     year_options = list(range(now.year - 2, now.year + 2))
     
+    
     # DETERMINE ACTIVE TAB
     # Default to 'fingerprint'
     active_tab = 'fingerprint'
@@ -2248,6 +2487,11 @@ def recap_matrix_view(request):
         'year_options': year_options,
         'holidays_map': holidays_map, 
         
+        # Monthly Report Workflow
+        'report': report,
+        'is_locked': is_locked,
+        'error_message': error_message,
+
         # Personal Mode Context (Fingerprint)
         'mode': mode,
         'personal_logs': personal_logs,
@@ -2257,7 +2501,7 @@ def recap_matrix_view(request):
         
         # Fingerprint Employees (for Tab 1)
         'fingerprint_employees': fingerprint_employees,
-        'fp_summary_stats': fp_summary_stats_str, # RE-ADDED: Lost in context redefinition
+        'fp_summary_stats': fp_summary_stats_str, 
         'fp_count': fp_count if 'fp_count' in locals() else len(fingerprint_employees),
         'wa_count': wa_count if 'wa_count' in locals() else len(wa_employees),
         
@@ -2366,8 +2610,28 @@ def save_attendance_cell(request):
         employee = Employee.objects.get(id=employee_id)
         target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
     except (Employee.DoesNotExist, ValueError) as e:
-        return HttpResponse(f'<div class="alert alert-danger">Error: {str(e)}</div>')
-    
+        return HttpResponse(f'<div class="status-cell cell-empty">!</div>')
+        
+    # =========================================================================
+    # LOCKING CHECK
+    # =========================================================================
+    from attendance.models import MonthlyReport
+    is_locked = False
+    try:
+        # Check if report exists and is locked
+        report = MonthlyReport.objects.filter(
+            location=employee.home_base, # Assumes employee assigned to this location
+            period_month=target_date.month,
+            period_year=target_date.year
+        ).first()
+        
+        if report and report.status != 'DRAFT' and report.status != 'REQ_REVISI':
+            is_locked = True
+            return HttpResponse('<div class="status-cell cell-empty" title="Laporan Terkunci"><i class="fas fa-lock"></i></div>')
+            
+    except Exception:
+        pass # Fail safe, allow edit if check fails (or handle stricter)
+
     # Determine display status code
     status_map = {
         'CHECKIN': 'H',
@@ -2428,7 +2692,8 @@ def save_attendance_cell(request):
         'target_date': target_date,
         'date_str': date_str,
         'status': display_status,
-        'is_holiday': target_date.weekday() >= 5,
+        'is_holiday': target_date.weekday() >= 5, # Simple check, ideally use holiday lib
+        'is_locked': is_locked,
     }
     
     return render(request, 'portal/partials/_attendance_cell.html', context)
@@ -2501,6 +2766,7 @@ def wa_save_cell(request):
     from attendance.models import Employee, AttendanceLog, EmployeeLeave
     from django.utils import timezone
     from datetime import datetime
+    from attendance.models import MonthlyReport # Added import for MonthlyReport
     
     employee_id = request.POST.get('employee_id')
     date_str = request.POST.get('date_str')
@@ -2508,8 +2774,31 @@ def wa_save_cell(request):
     action = request.POST.get('action')  # 'set_time', 'izin', 'sakit', 'delete'
     time_value = request.POST.get('time_value', '')
     
-    employee = Employee.objects.get(id=employee_id)
-    target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    try:
+        employee = Employee.objects.get(id=employee_id)
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except (Employee.DoesNotExist, ValueError):
+        return HttpResponse('<div class="status-cell cell-empty">!</div>')
+
+    # =========================================================================
+    # LOCKING CHECK
+    # =========================================================================
+    try:
+        # Check if report exists and is locked
+        report = MonthlyReport.objects.filter(
+            location=employee.home_base,
+            period_month=target_date.month,
+            period_year=target_date.year
+        ).first()
+        
+        if report and report.status != 'DRAFT' and report.status != 'REQ_REVISI':
+             # Return Locked Icon (Context-aware: inside a td, but here we return cell content usually)
+             # Wait, wa_save_cell returns... let's check what it returns.
+             # It likely returns the cell fragment.
+             return HttpResponse('<span class="text-muted"><i class="fas fa-lock"></i></span>')
+            
+    except Exception:
+        pass 
     
     # Get user role
     profile = getattr(request.user, 'employee_profile', None)
@@ -2670,7 +2959,19 @@ def employee_leave_add(request):
         
         if end_date < start_date:
             return HttpResponse('<div class="alert alert-danger">Tanggal selesai harus setelah tanggal mulai</div>')
-        
+            
+        # =====================================================================
+        # LOCKING CHECK
+        # =====================================================================
+        from attendance.models import MonthlyReport
+        lock_report = MonthlyReport.objects.filter(
+            location=employee.home_base,
+            period_month=start_date.month,
+            period_year=start_date.year
+        ).first()
+        if lock_report and lock_report.status not in ('DRAFT', 'REQ_REVISI'):
+            return HttpResponse('<div class="alert alert-danger">Laporan bulan ini sudah dikunci. Tidak bisa menambah data.</div>')
+            
         leave = EmployeeLeave.objects.create(
             employee=employee,
             leave_type=leave_type,
@@ -2709,6 +3010,19 @@ def employee_leave_delete(request, leave_id):
     try:
         leave = EmployeeLeave.objects.get(id=leave_id)
         employee = leave.employee
+        
+        # =====================================================================
+        # LOCKING CHECK
+        # =====================================================================
+        from attendance.models import MonthlyReport
+        lock_report = MonthlyReport.objects.filter(
+            location=employee.home_base,
+            period_month=leave.start_date.month,
+            period_year=leave.start_date.year
+        ).first()
+        if lock_report and lock_report.status not in ('DRAFT', 'REQ_REVISI'):
+            return HttpResponse('<div class="alert alert-danger">Laporan bulan ini sudah dikunci. Tidak bisa menghapus data.</div>')
+            
         leave.delete()
         
         # Determine target container from request headers (HTMX)
@@ -2758,6 +3072,29 @@ def employee_leave_update(request, leave_id):
         leave.start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
         leave.end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
         
+        # =====================================================================
+        # LOCKING CHECK
+        # =====================================================================
+        from attendance.models import MonthlyReport
+        # Check Original Date
+        lock_report_old = MonthlyReport.objects.filter(
+            location=employee.home_base,
+            period_month=leave.start_date.month,
+            period_year=leave.start_date.year
+        ).first()
+        if lock_report_old and lock_report_old.status not in ('DRAFT', 'REQ_REVISI'):
+             return HttpResponse('<div class="alert alert-danger">Laporan bulan asal sudah dikunci. Tidak bisa mengubah data.</div>')
+             
+        # Check New Date (if changing months)
+        if leave.start_date.month != leave.start_date.month or leave.start_date.year != leave.start_date.year:
+            lock_report_new = MonthlyReport.objects.filter(
+                location=employee.home_base,
+                period_month=leave.start_date.month,
+                period_year=leave.start_date.year
+            ).first()
+            if lock_report_new and lock_report_new.status not in ('DRAFT', 'REQ_REVISI'):
+                 return HttpResponse('<div class="alert alert-danger">Laporan bulan tujuan sudah dikunci. Tidak bisa memindahkan data.</div>')
+
         if leave.end_date < leave.start_date:
             return HttpResponse('<div class="alert alert-danger">Tanggal selesai harus setelah tanggal mulai</div>')
             
@@ -2970,6 +3307,21 @@ def fp_save_cell(request):
         employee = Employee.objects.get(id=employee_id)
         target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         
+        # =====================================================================
+        # LOCKING CHECK - Prevent edits on locked reports
+        # =====================================================================
+        from attendance.models import MonthlyReport
+        lock_report = MonthlyReport.objects.filter(
+            location=employee.home_base,
+            period_month=target_date.month,
+            period_year=target_date.year
+        ).first()
+        if lock_report and lock_report.status not in ('DRAFT', 'REQ_REVISI'):
+            return HttpResponse(
+                '<div class="status-cell cell-empty" title="Laporan Terkunci">'
+                '<i class="fas fa-lock"></i></div>'
+            )
+        
         # 1. CLEAR EXISTING STATUS (Delete relevant logs/leaves for this day)
         # Delete Manual Logs
         AttendanceLog.objects.filter(
@@ -3061,3 +3413,1072 @@ def fp_save_cell(request):
         
     except Exception as e:
         return HttpResponse(f'<div class="status-cell cell-empty" title="Error: {str(e)}">!</div>')
+
+
+# =============================================================================
+# PUBLISH REPORT (Monthly Report Workflow)
+# =============================================================================
+
+@login_required
+def publish_report(request, report_id):
+    if request.method == "POST":
+        from attendance.models import MonthlyReport, ReportHistory
+        from django.shortcuts import get_object_or_404
+        from django.utils import timezone
+        
+        report = get_object_or_404(MonthlyReport, id=report_id)
+        
+        # Validasi sederhana (Opsional: Cek permission user disini)
+        
+        # Update Status
+        report.status = 'SUBMITTED'
+        report.submitted_by = request.user
+        report.submitted_at = timezone.now()
+        report.save()
+        
+        # Catat History
+        ReportHistory.objects.create(
+            report=report,
+            actor=request.user,
+            action="SUBMITTED",
+            new_status="SUBMITTED",
+            comment="Laporan dipublish oleh Kerani (Final)"
+        )
+        
+        # CRITICAL FIX: Return response kosong dengan header trigger refresh
+        return HttpResponse(status=200, headers={'HX-Refresh': 'true'})
+    
+    return HttpResponse(status=400)
+
+
+# =============================================================================
+# VERIFY REPORT (HRD Workflow)
+# =============================================================================
+
+@login_required
+def verify_report(request, report_id):
+    if request.method == "POST":
+        from attendance.models import MonthlyReport, ReportHistory
+        from django.shortcuts import get_object_or_404
+        from django.utils import timezone
+        
+        report = get_object_or_404(MonthlyReport, id=report_id)
+        
+        # Check Permissions: Only HRD or Superuser
+        profile = getattr(request.user, 'employee_profile', None)
+        is_hrd = profile and profile.role == 'HRD'
+        if not (request.user.is_superuser or is_hrd):
+             return HttpResponse("Unauthorized", status=403)
+
+        # Update Status
+        report.status = 'VERIFIED'
+        report.verified_by = request.user
+        report.verified_at = timezone.now()
+        report.save()
+        
+        # History
+        ReportHistory.objects.create(
+            report=report,
+            actor=request.user,
+            action="VERIFIED",
+            new_status="VERIFIED",
+            comment="Laporan diverifikasi oleh HRD"
+        )
+        
+        # Return success with refresh header (HTMX compatible)
+        return HttpResponse(status=200, headers={'HX-Refresh': 'true'})
+    
+    return HttpResponse(status=400)
+
+
+# =============================================================================
+# UNLOCK REQUEST WORKFLOW (Kerani <-> HRD)
+# =============================================================================
+
+@login_required
+def request_unlock(request, report_id):
+    """
+    Kerani initiates a request to unlock a SUBMITTED report.
+    Status changes: SUBMITTED -> REQ_UNLOCK
+    """
+    if request.method == "POST":
+        
+        report = get_object_or_404(MonthlyReport, id=report_id)
+
+        
+        # Validation: Only SUBMITTED can be requested to unlock
+        if report.status != 'SUBMITTED':
+             return HttpResponse("Invalid status for unlock request", status=400)
+
+        # Update Status
+        report.status = 'REQ_UNLOCK'
+        report.save()
+        
+        # History
+        ReportHistory.objects.create(
+            report=report,
+            actor=request.user,
+            action="REQUEST_UNLOCK",
+            new_status="REQ_UNLOCK",
+            comment="Permintaan buka kunci oleh Kerani"
+        )
+        
+        return HttpResponse(status=200, headers={'HX-Refresh': 'true'})
+    return HttpResponse(status=400)
+
+@login_required
+def approve_unlock(request, report_id):
+    """
+    HRD approves unlock request.
+    Status changes: REQ_UNLOCK -> REQ_REVISI (Editable)
+    """
+    if request.method == "POST":
+        from attendance.models import MonthlyReport, ReportHistory
+        from django.shortcuts import get_object_or_404
+        
+        # Permission Check
+        profile = getattr(request.user, 'employee_profile', None)
+        is_hrd = profile and profile.role == 'HRD'
+        if not (request.user.is_superuser or is_hrd):
+             return HttpResponse("Unauthorized", status=403)
+
+        report = get_object_or_404(MonthlyReport, id=report_id)
+        
+        if report.status != 'REQ_UNLOCK':
+             return HttpResponse("Invalid status for approval", status=400)
+
+        # Update Status -> REQ_REVISI (Allows editing)
+        report.status = 'REQ_REVISI'
+        report.save()
+        
+        # History
+        ReportHistory.objects.create(
+            report=report,
+            actor=request.user,
+            action="APPROVE_UNLOCK",
+            new_status="REQ_REVISI",
+            comment="Permintaan buka kunci disetujui HRD"
+        )
+        
+        return HttpResponse(status=200, headers={'HX-Refresh': 'true'})
+    return HttpResponse(status=400)
+
+@login_required
+def reject_unlock(request, report_id):
+    """
+    HRD rejects unlock request.
+    Status changes: REQ_UNLOCK -> SUBMITTED (Locked again)
+    """
+    if request.method == "POST":
+        from attendance.models import MonthlyReport, ReportHistory
+        from django.shortcuts import get_object_or_404
+        
+        # Permission Check
+        is_hrd = request.user.is_superuser or (
+            hasattr(request.user, 'employee_profile') and 
+            request.user.employee_profile.role == 'HRD'
+        )
+        if not is_hrd:
+             return HttpResponse("Unauthorized", status=403)
+
+        report = get_object_or_404(MonthlyReport, id=report_id)
+        
+        if report.status != 'REQ_UNLOCK':
+             return HttpResponse("Invalid status for rejection", status=400)
+
+        # Update Status -> SUBMITTED (Back to locked state)
+        report.status = 'SUBMITTED'
+        report.save()
+        
+        # History
+        ReportHistory.objects.create(
+            report=report,
+            actor=request.user,
+            action="REJECT_UNLOCK",
+            new_status="SUBMITTED",
+            comment="Permintaan buka kunci ditolak HRD"
+        )
+        
+        return HttpResponse(status=200, headers={'HX-Refresh': 'true'})
+    return HttpResponse(status=400)
+
+
+# =============================================================================
+# EXPORT EXCEL (REPORT)
+# =============================================================================
+
+@login_required
+def export_matrix_excel(request, report_id):
+    """
+    Export Laporan Bulanan ke Excel (Format Accounting).
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+    from openpyxl.utils import get_column_letter
+    from attendance.models import MonthlyReport, Employee, AttendanceLog, EmployeeLeave
+    from django.shortcuts import get_object_or_404
+    from django.http import HttpResponse
+    from django.utils import timezone
+    from calendar import monthrange
+    from datetime import date, timedelta, datetime
+    import holidays
+
+    # 1. Fetch Report & Meta
+    report = get_object_or_404(MonthlyReport, id=report_id)
+    location = report.location
+    year = report.period_year
+    month = report.period_month
+    
+    # 2. Setup Workbook
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Fingerprint"
+    
+    # Styles
+    header_font = Font(bold=True, color="000000")
+    header_fill = PatternFill(start_color="FFeb9c", end_color="FFeb9c", fill_type="solid") # Light Yellow
+    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    center_align = Alignment(horizontal='center', vertical='center')
+    
+    # 3. Build Header Row
+    # Col A-C Fixed
+    headers = ["NIK", "Nama Karyawan", "Jabatan"]
+    
+    # Col D... Days
+    _, days_in_month = monthrange(year, month)
+    date_cols = []
+    for d in range(1, days_in_month + 1):
+        date_cols.append(str(d))
+        headers.append(str(d))
+        
+    # Col Summary
+    summary_headers = ["H", "T", "A", "S", "I", "Terlambat (m)"]
+    headers.extend(summary_headers)
+    
+    ws.append(headers)
+    
+    # Apply Style to Header
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = center_align
+        
+    # Set Column Widths
+    ws.column_dimensions['A'].width = 15
+    ws.column_dimensions['B'].width = 30
+    ws.column_dimensions['C'].width = 20
+    
+    # Date Cols Width
+    for i, _ in enumerate(date_cols):
+        col_letter = get_column_letter(4 + i)
+        ws.column_dimensions[col_letter].width = 4
+        
+    # 4. Fetch Data (Optimized)
+    employees = Employee.objects.filter(home_base=location, is_active=True).order_by('full_name')
+    
+    logs = AttendanceLog.objects.filter(
+        employee__home_base=location,
+        timestamp__year=year,
+        timestamp__month=month
+    ).select_related('employee')
+    
+    # Map Logs: emp_id -> day -> list of logs
+    log_map = {}
+    for log in logs:
+        eid = log.employee_id
+        day = timezone.localtime(log.timestamp).day
+        if eid not in log_map: log_map[eid] = {}
+        if day not in log_map[eid]: log_map[eid][day] = []
+        log_map[eid][day].append(log)
+        
+    # Map Leaves
+    leaves = EmployeeLeave.objects.filter(
+        employee__home_base=location,
+        start_date__lte=date(year, month, days_in_month),
+        end_date__gte=date(year, month, 1)
+    )
+    leave_map = {} # emp_id -> day -> type
+    for l in leaves:
+        eid = l.employee_id
+        if eid not in leave_map: leave_map[eid] = {}
+        curr = max(l.start_date, date(year, month, 1))
+        end = min(l.end_date, date(year, month, days_in_month))
+        while curr <= end:
+            leave_map[eid][curr.day] = l.leave_type
+            curr += timedelta(days=1)
+            
+    # Holidays
+    id_holidays = holidays.ID(years=[year])
+    
+    # =============================================================================
+    # SHEET 1: FINGERPRINT (EXISTING LOGIC)
+    # =============================================================================
+    
+    # 5. Write Data Rows (Fingerprint)
+    for emp in employees.filter(attendance_method='FINGERPRINT'):
+        row = [emp.nik or '-', emp.full_name, emp.get_employee_type_display() or '-']
+        
+        stats = {'H': 0, 'T': 0, 'A': 0, 'S': 0, 'I': 0, 'LateM': 0}
+        
+        for d in range(1, days_in_month + 1):
+            day_date = date(year, month, d)
+            is_holiday = day_date in id_holidays
+            is_weekend = day_date.weekday() == 6
+            
+            cell_val = "-"
+            
+            emp_logs_day = log_map.get(emp.id, {}).get(d, [])
+            emp_leave_day = leave_map.get(emp.id, {}).get(d)
+            
+            if emp_logs_day:
+                # Logic Hadir/Telat
+                # Prioritize 'MASUK' or first log
+                first_log = next((l for l in emp_logs_day if l.log_category == 'MASUK'), emp_logs_day[0])
+                
+                status_map = {'CHECKIN': 'H', 'HADIR': 'H', 'SICK': 'S', 'SAKIT': 'S', 'PERMIT': 'I', 'IZIN': 'I', 'ALPHA': 'A'}
+                st = status_map.get(first_log.status, 'H')
+                
+                if st == 'H':
+                    stats['H'] += 1
+                    cell_val = "H"
+                    # Late Calculation (Simple) - 08:05 Threshold
+                    try:
+                        dt_log = timezone.localtime(first_log.timestamp)
+                        threshold_hr = 8
+                        threshold_min = 5 
+                        if dt_log.hour > threshold_hr or (dt_log.hour == threshold_hr and dt_log.minute > threshold_min):
+                            stats['T'] += 1
+                            # diff = ...
+                    except: pass
+                    
+                elif st == 'S': 
+                     stats['S'] += 1
+                     cell_val = "S"
+                elif st == 'I': 
+                     stats['I'] += 1
+                     cell_val = "I"
+                elif st == 'A': 
+                     stats['A'] += 1
+                     cell_val = "A"
+                     
+            elif emp_leave_day:
+                 code_map = {'IZIN': 'I', 'SAKIT': 'S', 'CUTI': 'C', 'CUTI_KHUSUS': 'C'}
+                 st = code_map.get(emp_leave_day, 'I')
+                 if st == 'S': 
+                     stats['S'] += 1
+                     cell_val = "S"
+                 elif st == 'I' or st == 'C': 
+                     stats['I'] += 1
+                     cell_val = "I" if st == 'I' else "C"
+            elif is_holiday:
+                cell_val = "L"
+            elif is_weekend:
+                cell_val = "M" 
+            elif day_date < timezone.now().date():
+                stats['A'] += 1
+                cell_val = "A"
+            else:
+                 pass # Default "-"
+            
+            row.append(cell_val)
+            
+        # Add Summaries
+        row.append(stats['H'])
+        row.append(stats['T'])
+        row.append(stats['A'])
+        row.append(stats['S'])
+        row.append(stats['I'])
+        row.append(stats['LateM'])
+        
+        ws.append(row)
+        
+        # Style Data Row
+        for cell in ws[ws.max_row]:
+            cell.border = thin_border
+            if cell.column > 3:
+                 cell.alignment = center_align
+
+    # =============================================================================
+    # SHEET 2: WHATSAPP LAPANGAN (NEW LOGIC)
+    # =============================================================================
+    
+    ws2 = wb.create_sheet(title="WhatsApp Lapangan")
+    
+    # 1. Header Logic
+    # Row 1: Fixed Headers + Summary Header + Date Headers
+    # Col 1-3: NIK, Nama, Jabatan
+    # Col 4-9: Σ Tidak Absen (Merged)
+    # Col 10+: Dates (Merged 5)
+    
+    # Fixed Headers
+    headers_wa = ['NIK', 'Nama Karyawan', 'Jabatan']
+    for col_num, header in enumerate(headers_wa, 1):
+        cell = ws2.cell(row=1, column=col_num, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center_align
+        cell.border = thin_border
+        ws2.merge_cells(start_row=1, start_column=col_num, end_row=2, end_column=col_num)
+
+    # Summary Header (Σ Tidak Absen)
+    summary_start_col = 4
+    ws2.cell(row=1, column=summary_start_col, value="Σ Tidak Absen").font = header_font
+    ws2.cell(row=1, column=summary_start_col).fill = header_fill # Check if fill works on merged cell top-left
+    ws2.cell(row=1, column=summary_start_col).alignment = center_align
+    ws2.cell(row=1, column=summary_start_col).border = thin_border
+    ws2.merge_cells(start_row=1, start_column=summary_start_col, end_row=1, end_column=summary_start_col + 5)
+    
+    summary_subs = ['P', '1', 'I', '2', 'O', 'Iz']
+    for i, sub in enumerate(summary_subs):
+        c = ws2.cell(row=2, column=summary_start_col + i, value=sub)
+        c.font = header_font
+        c.alignment = center_align
+        c.border = thin_border
+        c.fill = PatternFill(start_color="FFeb9c", end_color="FFeb9c", fill_type="solid") # Light Yellow
+        ws2.column_dimensions[get_column_letter(summary_start_col + i)].width = 4
+
+    # Date Headers
+    current_col = 10
+    
+    for day in range(1, days_in_month + 1):
+        # Row 1: Tanggal (Merged 5 cells)
+        date_cell = ws2.cell(row=1, column=current_col, value=f"{day}")
+        date_cell.font = header_font
+        date_cell.alignment = center_align
+        date_cell.fill = header_fill
+        date_cell.border = thin_border
+        
+        ws2.merge_cells(start_row=1, start_column=current_col, end_row=1, end_column=current_col + 4)
+        
+        # Row 2: Sub-Headers
+        sub_headers = ['M', 'C1', 'Ist', 'C2', 'P']
+        for i, sub in enumerate(sub_headers):
+            cell_idx = current_col + i
+            sub_cell = ws2.cell(row=2, column=cell_idx, value=sub)
+            sub_cell.alignment = center_align
+            sub_cell.border = thin_border
+            sub_cell.fill = header_fill 
+            ws2.column_dimensions[get_column_letter(cell_idx)].width = 5
+            
+        current_col += 5
+
+    # Data Rows WA
+    wa_employees = employees.filter(attendance_method__in=['WHATSAPP', 'MANUAL'])
+    
+    wa_row_num = 3
+    
+    for emp in wa_employees:
+        # Calculate Missing Stats & Row Data
+        missing_stats = {
+            'missing_pagi': 0, 
+            'missing_cp1': 0, 
+            'missing_istirahat': 0, 
+            'missing_cp2': 0, 
+            'missing_pulang': 0,
+            'izin_count': 0
+        }
+        
+        row_time_cells = [] # Stores (value, style) tuples or just values
+        
+        for d in range(1, days_in_month + 1):
+            day_date = date(year, month, d)
+            is_holiday = day_date in id_holidays
+            is_weekend = day_date.weekday() == 6
+            is_future = day_date > timezone.now().date()
+            
+            emp_logs_day = log_map.get(emp.id, {}).get(d, [])
+            emp_leave_day = leave_map.get(emp.id, {}).get(d)
+            
+            # Init Times
+            times = {'MASUK': '-', 'CHECKPOINT_1': '-', 'ISTIRAHAT': '-', 'CHECKPOINT_2': '-', 'PULANG': '-'}
+            
+            # Populate Times from Logs
+            for l in emp_logs_day:
+                cat = l.log_category
+                t_str = timezone.localtime(l.timestamp).strftime('%H:%M')
+                if cat in times:
+                    times[cat] = t_str
+            
+            # Calculate Summary (Logic similar to view)
+            if not is_future and not is_holiday and not is_weekend:
+                 if emp_leave_day:
+                     # Check leave logic (IZIN counts to izin_count, SAKIT also usually)
+                     # For 'missing' counts, if on leave, we don't count as missing?
+                     # Let's assume if leave exists, no missing penalty.
+                     # Mapping based on codes:
+                     if emp_leave_day in ['IZIN', 'SAKIT', 'CUTI', 'CUTI_KHUSUS']:
+                         missing_stats['izin_count'] += 1
+                 else:
+                     # Check each checkpoint
+                     if times['MASUK'] == '-': missing_stats['missing_pagi'] += 1
+                     if times['CHECKPOINT_1'] == '-': missing_stats['missing_cp1'] += 1
+                     if times['ISTIRAHAT'] == '-': missing_stats['missing_istirahat'] += 1
+                     if times['CHECKPOINT_2'] == '-': missing_stats['missing_cp2'] += 1
+                     if times['PULANG'] == '-': missing_stats['missing_pulang'] += 1
+            
+            # Append to row data
+            ordered_keys = ['MASUK', 'CHECKPOINT_1', 'ISTIRAHAT', 'CHECKPOINT_2', 'PULANG']
+            for k in ordered_keys:
+                row_time_cells.append(times[k])
+
+        # Write Row
+        # 1. Info
+        ws2.cell(row=wa_row_num, column=1, value=emp.nik or '-').border = thin_border
+        ws2.cell(row=wa_row_num, column=2, value=emp.full_name).border = thin_border
+        ws2.cell(row=wa_row_num, column=3, value=emp.get_employee_type_display() or '-').border = thin_border
+        
+        # 2. Stats
+        ws2.cell(row=wa_row_num, column=4, value=missing_stats['missing_pagi']).border = thin_border
+        ws2.cell(row=wa_row_num, column=5, value=missing_stats['missing_cp1']).border = thin_border
+        ws2.cell(row=wa_row_num, column=6, value=missing_stats['missing_istirahat']).border = thin_border
+        ws2.cell(row=wa_row_num, column=7, value=missing_stats['missing_cp2']).border = thin_border
+        ws2.cell(row=wa_row_num, column=8, value=missing_stats['missing_pulang']).border = thin_border
+        ws2.cell(row=wa_row_num, column=9, value=missing_stats['izin_count']).border = thin_border
+        
+        # Color stats cells if > 0
+        red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+        for c_idx in range(4, 9): # P to O
+             c = ws2.cell(row=wa_row_num, column=c_idx)
+             c.alignment = center_align
+             if isinstance(c.value, int) and c.value > 0:
+                 c.fill = red_fill
+        
+        # Iz cell blue
+        c_iz = ws2.cell(row=wa_row_num, column=9)
+        c_iz.alignment = center_align
+        if isinstance(c_iz.value, int) and c_iz.value > 0:
+             c_iz.fill = PatternFill(start_color="D1ECF1", end_color="D1ECF1", fill_type="solid") # Light Blue
+
+        # 3. Time Data
+        current_data_col = 10
+        for val in row_time_cells:
+            c = ws2.cell(row=wa_row_num, column=current_data_col, value=val)
+            c.alignment = center_align
+            c.border = thin_border
+            current_data_col += 1
+            
+        wa_row_num += 1
+
+    # 6. Response
+    filename = f"Laporan Absensi {location.name} Periode {month}-{year}.xlsx"
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    wb.save(response)
+    return response
+
+# =============================================================================
+# PDF EXPORT
+# =============================================================================
+
+import qrcode
+from io import BytesIO
+from reportlab.lib import colors
+from reportlab.lib.colors import HexColor
+from reportlab.lib.pagesizes import landscape, portrait, A4, LEGAL
+from reportlab.lib.units import inch, cm, mm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+
+def generate_qr(data):
+    """Generate in-memory QR code image"""
+    qr = qrcode.QRCode(box_size=2, border=0)
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer
+
+@login_required
+def export_report_pdf(request, report_id):
+    report = get_object_or_404(MonthlyReport, id=report_id)
+    location = report.location
+    month = report.period_month
+    year = report.period_year
+    
+    report_type = request.GET.get('type', 'main')
+    buffer = BytesIO()
+
+    # =========================================================================
+    # TYPE: MAIN REPORT (Matrix Fingerprint) - LEGAL LANDSCAPE
+    # =========================================================================
+    if report_type == 'main':
+        days_in_month = calendar.monthrange(year, month)[1]
+        
+        # Fetch Employees (Fingerprint only or Mixed?)
+        # Main report usually includes everyone
+        employees = Employee.objects.filter(
+            home_base=location,
+            is_active=True
+        ).order_by('full_name')
+
+        total_employees = employees.count()
+        
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=landscape(LEGAL), # Changed to Legal
+            rightMargin=0.5*cm,
+            leftMargin=0.5*cm, # Wider margins for Legal
+            topMargin=1*cm,
+            bottomMargin=1*cm
+        )
+        
+        elements = []
+        styles = getSampleStyleSheet()
+        style_center = ParagraphStyle(name='Center', parent=styles['Normal'], alignment=TA_CENTER, fontName='Helvetica-Bold', fontSize=14)
+        style_normal = styles['Normal']
+        
+        # --- PAGE 1: COVER SHEET ---
+        # Title
+        elements.append(Paragraph(f"BERITA ACARA REKAPITULASI ABSENSI", style_center))
+        elements.append(Paragraph(f"{location.name.upper()}", style_center))
+        elements.append(Spacer(1, 0.5*cm))
+        
+        # Periode Info
+        elements.append(Paragraph(f"Periode: {calendar.month_name[month]} {year}", styles['Normal']))
+        elements.append(Spacer(1, 0.5*cm))
+        
+        # Summary Table
+        start_date = date(year, month, 1)
+        end_date = date(year, month, days_in_month)
+        
+        ids = employees.values_list('id', flat=True)
+        logs = AttendanceLog.objects.filter(
+            employee_id__in=ids,
+            timestamp__date__range=[start_date, end_date]
+        )
+        present_count = logs.values('employee', 'timestamp__date').distinct().count()
+        fp_count = logs.filter(source_type='FINGERPRINT').values('employee', 'timestamp__date').distinct().count()
+        
+        # Prepare Leave Map for H.T.A.S.I logic
+        leaves = EmployeeLeave.objects.filter(
+            employee__in=employees,
+            start_date__lte=end_date,
+            end_date__gte=start_date
+        )
+        from collections import defaultdict
+        leave_map = defaultdict(lambda: defaultdict(str))
+        for l in leaves:
+            curr = max(l.start_date, start_date)
+            end = min(l.end_date, end_date)
+            while curr <= end:
+                leave_map[l.employee_id][curr] = l.leave_type
+                curr += timedelta(days=1)
+
+        summary_data = [
+            ['Total Karyawan', f"{total_employees}"],
+            ['Total Man-Days (Kehadiran)', f"{present_count}"],
+            ['Kehadiran via Fingerprint', f"{fp_count}"],
+            ['Status Laporan', f"{report.get_status_display().upper()}"],
+        ]
+        
+        t_summary = Table(summary_data, colWidths=[6*cm, 6*cm], hAlign='LEFT')
+        t_summary.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 1, colors.black),
+            ('BACKGROUND', (0,0), (0,-1), colors.lightgrey),
+            ('PADDING', (0,0), (-1,-1), 6),
+        ]))
+        elements.append(t_summary)
+        elements.append(Spacer(1, 2*cm))
+        
+        # Signatures
+        # Row 1: Titles
+        # Row 2: Roles
+        # Row 3: QR / Space
+        # Row 4: Names / Dates
+        
+        # Prepare QR Images
+        # Use simple empty string for missing QR, but maintain Paragraph to handle alignment
+        # Or better: if no QR, use Spacer?
+        # But we want the text below.
+        
+        qr_sub_img = Spacer(1, 2.5*cm)
+        qr_ver_img = Spacer(1, 2.5*cm)
+        sub_time = ""
+        ver_time = ""
+
+        if report.status != 'DRAFT' and report.submitted_by:
+            base_url = request.build_absolute_uri(reverse('portal:attendance_reports_dashboard'))
+            valid_url = f"{base_url}?location_id={report.location.id}&year={report.period_year}"
+            qr_img = generate_qr(valid_url)
+            qr_sub_img = Image(qr_img, width=2.5*cm, height=2.5*cm)
+            sub_time = timezone.localtime(report.submitted_at).strftime('%d/%m/%Y %H:%M')
+            
+        is_verified = report.status in ['VERIFIED', 'APPROVED', 'FINAL']
+        if is_verified and report.verified_by:
+             base_url = request.build_absolute_uri(reverse('portal:attendance_reports_dashboard'))
+             valid_url = f"{base_url}?location_id={report.location.id}&year={report.period_year}"
+             qr_img = generate_qr(valid_url)
+             qr_ver_img = Image(qr_img, width=2.5*cm, height=2.5*cm)
+             ver_time = timezone.localtime(report.verified_at).strftime('%d/%m/%Y %H:%M')
+
+        # Use Centered Style for Signature Text
+        style_sig_center = ParagraphStyle(name='SigCenter', parent=styles['Normal'], alignment=TA_CENTER, fontSize=10)
+        style_sig_role = ParagraphStyle(name='SigRole', parent=styles['Normal'], alignment=TA_CENTER, fontSize=9)
+        style_sig_date = ParagraphStyle(name='SigDate', parent=styles['Normal'], alignment=TA_CENTER, fontSize=8)
+
+        # Helper for QR Cell content (Image is flowable, centers in cell automatically if align='CENTER')
+        # But spacers might need help
+        
+        sig_data = [
+            [Paragraph("Dibuat Oleh,", style_sig_center), Paragraph("Diverifikasi Oleh,", style_sig_center), Paragraph("Disetujui Oleh,", style_sig_center)],
+            [Paragraph("(Kerani)", style_sig_role), Paragraph("(HRD / Admin)", style_sig_role), Paragraph("(Manager / Accounting)", style_sig_role)],
+            [qr_sub_img, qr_ver_img, Spacer(1, 2.5*cm)],
+            [
+                Paragraph(f"<b>{report.submitted_by.get_full_name().upper() if report.submitted_by else '(..........................)'}</b><br/><font size=8>{sub_time}</font>", style_sig_center),
+                Paragraph(f"<b>{report.verified_by.get_full_name().upper() if is_verified and report.verified_by else '(..........................)'}</b><br/><font size=8>{ver_time}</font>", style_sig_center),
+                Paragraph("(..........................)", style_sig_center)
+            ]
+        ]
+
+        t_sig = Table(sig_data, colWidths=[10*cm, 10*cm, 10*cm]) # Wider columns for Legal
+        t_sig.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('BOTTOMPADDING', (0,2), (-1,2), 5), # Padding below QR
+        ]))
+        elements.append(t_sig)
+        elements.append(PageBreak())
+        
+        # --- PAGE 2: MATRIX DATA ---
+        elements.append(Paragraph(f"LAMPIRAN: MATRIX ABSENSI", style_center))
+        elements.append(Spacer(1, 0.5*cm))
+        
+        header_row = ['No', 'Nama'] + [str(d) for d in range(1, days_in_month + 1)] + ['H', 'T', 'A', 'S', 'I']
+        data = [header_row]
+        
+        id_holidays = holidays.Indonesia(years=year)
+        
+        for idx, emp in enumerate(employees, 1):
+            row = [str(idx), emp.full_name]
+            emp_logs = logs.filter(employee=emp)
+            
+            stats = {'H': 0, 'T': 0, 'A': 0, 'S': 0, 'I': 0}
+
+            for d in range(1, days_in_month + 1):
+                day_date = date(year, month, d)
+                day_log = emp_logs.filter(timestamp__date=day_date).first()
+                val = '-'
+                
+                # Check Leave First (Priority)
+                leave_type = leave_map.get(emp.id, {}).get(day_date)
+                if leave_type:
+                    if leave_type == 'SAKIT': val = 'S'; stats['S'] += 1
+                    elif leave_type in ['IZIN', 'CUTI', 'CUTI_KHUSUS']: val = 'I'; stats['I'] += 1
+                    else: val = 'I'; stats['I'] += 1 # Fallback
+                
+                elif day_log:
+                    # Log Check
+                    if day_log.status == 'PRESENT': 
+                        val = 'H'; stats['H'] += 1
+                    elif day_log.status == 'LATE': 
+                        val = 'T'; stats['T'] += 1
+                    elif day_log.status == 'SAKIT': # If log has Sakit status
+                        val = 'S'; stats['S'] += 1
+                    elif day_log.status == 'IZIN': # If log has Izin status
+                        val = 'I'; stats['I'] += 1
+                    else: 
+                        val = 'H'; stats['H'] += 1
+                else:
+                    # No Log, No Leave
+                    if day_date.weekday() == 6: val = 'L' # Sunday
+                    elif day_date in id_holidays: val = 'L' # Holiday
+                    else: 
+                        val = 'A'; stats['A'] += 1
+
+                row.append(val)
+            
+            # Append Stats Columns
+            row.extend([str(stats['H']), str(stats['T']), str(stats['A']), str(stats['S']), str(stats['I'])])
+            
+            data.append(row)
+        
+        # Column Widths for Legal Landscape (~33cm usable)
+        # No: 1cm, Name: 5cm. Remainder 27cm.
+        # Days: 31 cols. Stats: 5 cols. Total columns: 2 + 31 + 5 = 38 cols.
+        # 27cm / 36 cols = 0.75cm.
+        # Let's adjust: Name 5cm, No 1cm.
+        # Days (31) * 0.7cm = 21.7cm
+        # Stats (5) * 0.8cm = 4cm
+        # Total: 1 + 5 + 21.7 + 4 = 31.7cm. Fits in 33cm.
+        col_widths = [1*cm, 5*cm] + [0.7*cm] * days_in_month + [0.8*cm] * 5
+        
+        t_matrix = Table(data, repeatRows=1, colWidths=col_widths)
+        t_matrix.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('FONTSIZE', (0,0), (-1,-1), 8), # Slightly larger font
+            ('ALIGN', (2,0), (-1,-1), 'CENTER'),
+            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('LEFTPADDING', (0,0), (-1,-1), 2),
+            ('RIGHTPADDING', (0,0), (-1,-1), 2),
+        ]))
+        elements.append(t_matrix)
+        
+        filename = f"Laporan_Utama_{location.name}_{month}-{year}.pdf"
+
+    # =========================================================================
+    # TYPE: WA REPORT (Summary Table) - A4 PORTRAIT
+    # =========================================================================
+    elif report_type == 'wa':
+        days_in_month = calendar.monthrange(year, month)[1]
+        start_date = date(year, month, 1)
+        end_date = date(year, month, days_in_month)
+
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=portrait(A4),
+            rightMargin=1*cm,
+            leftMargin=1*cm,
+            topMargin=1*cm,
+            bottomMargin=1*cm
+        )
+        
+        elements = []
+        styles = getSampleStyleSheet()
+        style_title = ParagraphStyle(name='Title', parent=styles['Normal'], alignment=TA_CENTER, fontName='Helvetica-Bold', fontSize=14)
+        style_sub = ParagraphStyle(name='Sub', parent=styles['Normal'], alignment=TA_CENTER, fontName='Helvetica-Bold', fontSize=10)
+        style_normal = styles['Normal']
+        
+        # 1. Header
+        elements.append(Paragraph(f"REKAPITULASI ABSENSI LAPANGAN (WHATSAPP)", style_title))
+        elements.append(Paragraph(f"Lokasi: {location.name} | Periode: {calendar.month_name[month]} {year}", style_sub))
+        elements.append(Spacer(1, 0.5*cm))
+        
+        # 2. Fetch Data (Optimized)
+        from django.db.models import Q
+        # Use robust filter for WA employees (same as dashboard)
+        wa_employees = Employee.objects.filter(
+            home_base=location,
+            is_active=True
+        ).order_by('full_name')
+
+        # Filter actually relevant employees
+        # Check logs directly for WA/Telegram indicators, regardless of employee's current setting.
+        has_wa_logs = set(AttendanceLog.objects.filter(
+            timestamp__year=year,
+            timestamp__month=month,
+            employee__home_base=location
+        ).filter(
+            Q(source_type='TELEGRAM') | Q(verification_method='WA') | Q(employee__attendance_method__in=['WHATSAPP', 'WA'])
+        ).values_list('employee_id', flat=True))
+
+        # Filter employees list to only those with WA logs OR method=WA
+        relevant_employees = [
+            e for e in wa_employees 
+            if e.id in has_wa_logs or e.attendance_method in ['WHATSAPP', 'WA']
+        ]
+        
+        # Fetch Logs Bulk
+        wa_logs = AttendanceLog.objects.filter(
+            timestamp__date__range=[start_date, end_date],
+            employee__in=relevant_employees
+        ).select_related('employee')
+        
+        # Map Logs: EmpID -> Date -> Cat -> Time
+        from collections import defaultdict
+        data_map = defaultdict(lambda: defaultdict(dict))
+        for log in wa_logs:
+            d = log.timestamp.date()
+            cat = log.log_category
+            time_str = timezone.localtime(log.timestamp).strftime('%H:%M')
+            data_map[log.employee_id][d][cat] = time_str
+            # Also capture status/notes if needed? 
+            # Dashboard logic uses log.status for H/S/I/A
+            if not data_map[log.employee_id][d].get('STATUS'):
+                data_map[log.employee_id][d]['STATUS'] = log.status
+
+        # Fetch Leaves Bulk
+        leaves = EmployeeLeave.objects.filter(
+            employee__in=relevant_employees,
+            start_date__lte=end_date,
+            end_date__gte=start_date
+        )
+        leave_map = defaultdict(lambda: defaultdict(str))
+        for l in leaves:
+            curr = max(l.start_date, start_date)
+            end = min(l.end_date, end_date)
+            while curr <= end:
+                leave_map[l.employee_id][curr] = l.leave_type
+                curr += timedelta(days=1)
+        
+        # Holidays
+        id_holidays = holidays.ID(years=[year, year-1])
+        
+        # 3. Build Summary Data
+        summary_rows = []
+        # Header: No, Nama, M, C1, Ist, C2, P, H, T, A, S, I
+        table_header = ['No', 'Nama Karyawan', 'M', 'C1', 'Ist', 'C2', 'P', 'H', 'T', 'A', 'S', 'I']
+        summary_rows.append(table_header)
+        
+        WA_CATS = ['MASUK', 'CHECKPOINT_1', 'ISTIRAHAT', 'CHECKPOINT_2', 'PULANG']
+        
+        for idx, emp in enumerate(relevant_employees, 1):
+            stats = {
+                'M': 0, 'C1': 0, 'Ist': 0, 'C2': 0, 'P': 0,
+                'H': 0, 'T': 0, 'A': 0, 'S': 0, 'I': 0
+            }
+            
+            # Iterate dates
+            curr = start_date
+            while curr <= end_date:
+                is_holiday = curr in id_holidays or curr.weekday() == 6
+                day_data = data_map.get(emp.id, {}).get(curr, {})
+                leave_type = leave_map.get(emp.id, {}).get(curr)
+                
+                # --- STATUS COUNTS (H, T, A, S, I) ---
+                status_code = None
+                
+                # Priority 1: Leaves
+                if leave_type:
+                    if leave_type in ['SAKIT']: 
+                        stats['S'] += 1; status_code = 'S'
+                    elif leave_type in ['IZIN', 'CUTI', 'CUTI_KHUSUS']: 
+                        stats['I'] += 1; status_code = 'I'
+                
+                # Priority 2: Logs
+                elif day_data.get('MASUK'):
+                    stats['H'] += 1; status_code = 'H'
+                    # Late Check
+                    if day_data['MASUK'] > "08:00":
+                        stats['T'] += 1
+                
+                # Priority 3: Alpha (If past date, not holiday)
+                elif curr < timezone.now().date() and not is_holiday:
+                    stats['A'] += 1; status_code = 'A'
+                
+                # --- MISSED CHECKPOINTS ---
+                # Only count if NOT Holiday/Weekend AND NOT Izin/Sakit
+                if not is_holiday and status_code not in ['S', 'I', 'A']: # If Alpha, maybe count as missed? Dashboard counts missed for Alpha too usually.
+                    # Let's follow dashboard logic: count if missing and expected
+                    # Dashboard: if not day_data.get('MASUK'): wa_summary_data['missing_pagi'] += 1
+                    # But dashboard logic runs on ALL days except future/holidays
+                    
+                    if not day_data.get('MASUK'): stats['M'] += 1
+                    if not day_data.get('CHECKPOINT_1'): stats['C1'] += 1
+                    if not day_data.get('ISTIRAHAT'): stats['Ist'] += 1
+                    if not day_data.get('CHECKPOINT_2'): stats['C2'] += 1
+                    if not day_data.get('PULANG'): stats['P'] += 1
+
+                curr += timedelta(days=1)
+            
+            row = [
+                str(idx),
+                emp.full_name[:25], # Truncate name
+                str(stats['M']), str(stats['C1']), str(stats['Ist']), str(stats['C2']), str(stats['P']),
+                str(stats['H']), str(stats['T']), str(stats['A']), str(stats['S']), str(stats['I'])
+            ]
+            summary_rows.append(row)
+            
+        # 4. Create Table
+        # Col Widths: Total A4 width ~ 19cm available (21 - margin)
+        # No: 1cm, Name: 6cm, Others: 1cm each (10 cols = 10cm) -> Total 17cm. Fits.
+        cw_summary = [1*cm, 6*cm] + [1*cm]*10
+        t_summary = Table(summary_rows, colWidths=cw_summary, repeatRows=1)
+        
+        t_summary.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'), # All center except name?
+            ('ALIGN', (1,0), (1,-1), 'LEFT'),   # Name Left
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'), # Header Bold
+        ]))
+        
+        elements.append(t_summary)
+        elements.append(Spacer(1, 0.5*cm))
+
+        elements.append(Spacer(1, 0.5*cm))
+
+        # Legend Box (Requested Style)
+        # Header + 2 Rows of 5 Columns
+        legend_data = [
+            ['KETERANGAN KODE:', '', '', '', ''], # Header merged
+            ['M : Masuk (Pagi)', 'C1 : Checkpoint 1', 'Ist : Istirahat', 'H : Hadir', 'S : Sakit'],
+            ['P : Pulang (Sore)', 'C2 : Checkpoint 2', 'T : Terlambat', 'A : Alpha', 'I : Izin']
+        ]
+        
+        # Calculate proportional width (Total A4 width ~19cm - margins)
+        # A4 = 21cm, Margins L/R = 1cm each -> 19cm usable
+        # 19cm / 5 cols = 3.8 cm per col
+        col_w = (19*cm) / 5
+        t_legend = Table(legend_data, colWidths=[col_w]*5)
+        
+        legend_style = TableStyle([
+            # General Style
+            ('FONTNAME', (0,0), (-1,-1), 'Helvetica-Oblique'),
+            ('FONTSIZE', (0,0), (-1,-1), 8),
+            ('TEXTCOLOR', (0,0), (-1,-1), colors.darkgrey),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            
+            # Header Style
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('SPAN', (0,0), (-1,0)), # Merge first row
+            ('ALIGN', (0,0), (-1,0), 'LEFT'),
+            
+            # Box & Background
+            ('BACKGROUND', (0,0), (-1,-1), HexColor('#f9f9f9')),
+            ('BOX', (0,0), (-1,-1), 0.5, colors.grey), # Outer border
+            ('GRID', (0,0), (-1,-1), 0, colors.white), # No inner grid (or white/invisible)
+            
+            # Padding
+            ('TOPPADDING', (0,0), (-1,-1), 3),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+        ])
+        t_legend.setStyle(legend_style)
+        elements.append(t_legend)
+        
+        elements.append(Spacer(1, 1*cm))
+        
+        elements.append(Spacer(1, 1*cm))
+        
+        # 5. Signatures (Copy from Main Report logic)
+        # Verify timestamps
+        sub_time = report.submitted_at.strftime("%d-%m-%Y %H:%M") if report.submitted_at else ""
+        ver_time = report.verified_at.strftime("%d-%m-%Y %H:%M") if report.verified_at else ""
+        
+        # QRs
+        qr_sub_img = Image(generate_qr(f"VALID:SUBMITTED:{report.id}"), width=25*mm, height=25*mm) if report.submitted_by else Paragraph("", style_normal)
+        qr_ver_img = Image(generate_qr(f"VALID:VERIFIED:{report.id}"), width=25*mm, height=25*mm) if report.verified_by else Paragraph("", style_normal)
+        
+        sig_data = [
+            ["Dibuat Oleh,", "Diverifikasi Oleh,", "Disetujui Oleh,"],
+            [qr_sub_img, qr_ver_img, ""],
+            [
+                report.submitted_by.username if report.submitted_by else "(....................)",
+                report.verified_by.username if report.verified_by else "(....................)",
+                "(....................)"
+            ],
+            [
+                f"Tgl: {sub_time}" if sub_time else "",
+                f"Tgl: {ver_time}" if ver_time else "",
+                ""
+            ],
+            ["Kerani", "HRD / Personalia", "Accounting/Manager"]
+        ]
+        
+        t_sig = Table(sig_data, colWidths=[6*cm, 6*cm, 6*cm])
+        t_sig.setStyle(TableStyle([
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
+        ]))
+        
+        elements.append(t_sig)
+        
+        filename = f"Laporan_WA_{location.name}_{month}-{year}.pdf"
+
+    else:
+        return HttpResponse("Invalid Report Type")
+
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    response = HttpResponse(buffer, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response

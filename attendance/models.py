@@ -415,6 +415,7 @@ class MonthlyReport(models.Model):
         ('SUBMITTED', 'Dikunci Kerani (Menunggu HRD)'),
         ('VERIFIED', 'Disetujui HRD'),
         ('REQ_REVISI', 'Permintaan Revisi'),
+        ('REQ_UNLOCK', 'Permintaan Buka Kunci (Kerani)'),
         ('REJECTED', 'Ditolak (Dikembalikan ke Draft)'),
     ]
     
@@ -479,6 +480,14 @@ class MonthlyReport(models.Model):
         blank=True, null=True,
         help_text="Catatan revisi/penolakan/keterangan"
     )
+
+    last_modified_by = models.ForeignKey(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="reports_modified",
+        help_text="User yang terakhir mengubah data (real-time from signals)"
+    )
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -519,6 +528,11 @@ class MonthlyReport(models.Model):
         """Check if report is locked (SUBMITTED or VERIFIED)."""
         return self.status in ('SUBMITTED', 'VERIFIED')
 
+    @property
+    def total_unlock_requests(self):
+        """Count how many times unlock was requested."""
+        return self.history.filter(action='REQUEST_UNLOCK').count()
+
 
 class ReportHistory(models.Model):
     """
@@ -531,6 +545,9 @@ class ReportHistory(models.Model):
         ('VERIFY', 'Diverifikasi oleh HRD'),
         ('REJECT', 'Ditolak oleh HRD'),
         ('REQUEST_REVISION', 'Permintaan Revisi'),
+        ('REQUEST_UNLOCK', 'Permintaan Buka Kunci'),
+        ('APPROVE_UNLOCK', 'Menyetujui Buka Kunci'),
+        ('REJECT_UNLOCK', 'Menolak Buka Kunci'),
         ('REOPEN', 'Dibuka Kembali ke Draft'),
         ('UPDATE', 'Data Diperbarui'),
     ]

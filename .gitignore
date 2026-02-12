@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+
+# Environment Variables
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project Specific / Debug Files
+debug_*.py
+repair_log.txt
+debug_trace.txt
+debug_location.txt
+check_holiday.py
+repair_niks.py
+verify_report_workflow.py
+implementation_plan_sync_employees.md
+response.html

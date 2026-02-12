@@ -61,4 +61,16 @@ urlpatterns = [
     # FP Cell Edit (HTMX)
     path('fp/edit-cell/<uuid:employee_id>/<str:date_str>/', views.fp_edit_cell, name='fp_edit_cell'),
     path('fp/save-cell/', views.fp_save_cell, name='fp_save_cell'),
+    
+    # Report Actions
+    path('reports/publish/<uuid:report_id>/', views.publish_report, name='publish_report'),
+    path('reports/verify/<uuid:report_id>/', views.verify_report, name='verify_report'),
+    path('reports/unlock-request/<uuid:report_id>/', views.request_unlock, name='request_unlock'),
+    path('reports/unlock-approve/<uuid:report_id>/', views.approve_unlock, name='approve_unlock'),
+    path('reports/unlock-reject/<uuid:report_id>/', views.reject_unlock, name='reject_unlock'),
+    path('reports/export/<uuid:report_id>/', views.export_matrix_excel, name='export_matrix_excel'),
+    path('reports/export-pdf/<uuid:report_id>/', views.export_report_pdf, name='export_report_pdf'),
+    
+    # Dashboard Laporan (Digital Archive)
+    path('reports/attendance/', views.attendance_reports_dashboard, name='attendance_reports_dashboard'),
 ]

@@ -59,13 +59,29 @@
             </li>
 
             {# Role Based Menu: Reports only for Staff/Superusers #}
-            {% if user.is_staff or user.is_superuser %}
+            {% if user.is_staff or user.is_superuser or user.employee_profile.role in 'ADMIN,HRD,ACCOUNTING,KERANI' %}
             <li class="nav-item">
-                <a href="{% url 'portal:reports' %}"
-                    class="nav-link text-white {% if request.resolver_match.url_name == 'reports' %}active bg-primary{% endif %} d-flex align-items-center">
-                    <i class="fas fa-chart-bar fa-fw me-3"></i>
-                    Laporan
+                <a href="#submenu-reports" data-bs-toggle="collapse" class="nav-link text-white d-flex align-items-center align-items-center justify-content-between {% if 'reports' in request.resolver_match.url_name or 'attendance_reports' in request.resolver_match.url_name %}active bg-primary{% endif %}">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-chart-bar fa-fw me-3"></i>
+                        <span>Laporan</span>
+                    </div>
+                    <i class="fas fa-chevron-down small transition-icon"></i>
                 </a>
+                <div class="collapse {% if 'reports' in request.resolver_match.url_name or 'attendance_reports' in request.resolver_match.url_name %}show{% endif %}" id="submenu-reports">
+                    <ul class="nav flex-column ps-4 mt-1">
+                        <li class="nav-item">
+                            <a href="{% url 'portal:attendance_reports_dashboard' %}" class="nav-link text-white-50 py-2 {% if request.resolver_match.url_name == 'attendance_reports_dashboard' %}text-white fw-bold{% endif %}">
+                                <i class="fas fa-calendar-check me-2"></i>Laporan Absensi
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="{% url 'portal:reports' %}" class="nav-link text-white-50 py-2 {% if request.resolver_match.url_name == 'reports' %}text-white fw-bold{% endif %}">
+                                <i class="fas fa-file-alt me-2"></i>Laporan Lainnya
+                            </a>
+                        </li>
+                    </ul>
+                </div>
             </li>
             {% endif %}
 
