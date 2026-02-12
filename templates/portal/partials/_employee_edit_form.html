@@ -23,12 +23,13 @@
                 <small class="text-muted">NIK tidak dapat diubah</small>
             </div>
             
-            <!-- Nama Lengkap -->
+            <!-- Nama Lengkap (Always Editable) -->
             <div class="mb-3">
                 <label for="full_name" class="form-label fw-medium">Nama Lengkap <span class="text-danger">*</span></label>
                 <input type="text" class="form-control" id="full_name" name="full_name" value="{{ emp.full_name }}" required>
             </div>
             
+            {% if is_full_edit %}
             <!-- Tipe Karyawan -->
             <div class="mb-3">
                 <label for="employee_type" class="form-label fw-medium">Tipe Karyawan</label>
@@ -56,10 +57,30 @@
                 <input type="date" class="form-control" id="joined_date" name="joined_date" 
                        value="{{ emp.joined_date|date:'Y-m-d' }}">
             </div>
+            {% else %}
+            <!-- Readonly View for Basic Users -->
+             <div class="mb-3">
+                <label class="form-label fw-medium">Departemen</label>
+                <input type="text" class="form-control bg-light" value="{{ emp.department.name|default:'-' }}" readonly disabled>
+            </div>
+            {% endif %}
+            
+            <!-- Status Aktif (Always Editable) -->
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="is_active" name="is_active" 
+                           {% if emp.is_active %}checked{% endif %} style="width: 3em; height: 1.5em;">
+                    <label class="form-check-label fw-medium ms-2" for="is_active">
+                        Karyawan Aktif
+                    </label>
+                </div>
+                <small class="text-muted">Nonaktifkan untuk karyawan yang sudah tidak bekerja</small>
+            </div>
         </div>
         
         <!-- Right Column: Contact & Device -->
         <div class="col-md-6">
+            {% if is_full_edit %}
             <h6 class="fw-bold text-primary mb-3">
                 <i class="fas fa-phone-alt me-2"></i>Kontak & Device
             </h6>
@@ -85,6 +106,17 @@
                        value="{{ emp.device_user_id|default:'' }}" placeholder="ID di mesin absensi">
             </div>
             
+            <!-- Metode Absensi -->
+            <div class="mb-3">
+                <label for="attendance_method" class="form-label fw-medium">Metode Absensi Utama</label>
+                <select class="form-select" id="attendance_method" name="attendance_method">
+                    {% for code, label in attendance_methods %}
+                    <option value="{{ code }}" {% if emp.attendance_method == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <small class="text-muted">Menentukan sumber data utama untuk laporan.</small>
+            </div>
+            
             <hr>
             
             <h6 class="fw-bold text-primary mb-3">
@@ -103,18 +135,12 @@
                     {% endfor %}
                 </select>
             </div>
-            
-            <!-- Status Aktif -->
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="is_active" name="is_active" 
-                           {% if emp.is_active %}checked{% endif %} style="width: 3em; height: 1.5em;">
-                    <label class="form-check-label fw-medium ms-2" for="is_active">
-                        Karyawan Aktif
-                    </label>
-                </div>
-                <small class="text-muted">Nonaktifkan untuk karyawan yang sudah tidak bekerja</small>
-            </div>
+            {% else %}
+             <div class="alert alert-info small">
+                 <i class="fas fa-info-circle me-1"></i>
+                 Hubungi HRD/Admin untuk mengubah data sensitif seperti Shift, Device ID, dan Departemen.
+             </div>
+            {% endif %}
         </div>
     </div>
     

@@ -1225,27 +1225,28 @@ def employee_edit_view(request, employee_id):
     """
     from attendance.models import Employee, Department, WorkLocation, ShiftPattern, EmployeeShiftAssignment
     
-    # Permission Check: HRD/Admin/Superuser only
-    if not request.user.is_superuser:
-        if hasattr(request.user, 'employee_profile'):
-            if request.user.employee_profile.role not in ['ADMIN', 'HRD']:
-                return HttpResponse('<div class="alert alert-danger">Akses ditolak. Hanya HRD/Admin yang bisa mengedit data karyawan.</div>', status=403)
+    # Permission Check: Allow KERANI, HRD, ADMIN, SUPERUSER
+    is_full_edit = False
+    
+    if request.user.is_superuser:
+        is_full_edit = True
+    elif hasattr(request.user, 'employee_profile'):
+        role = request.user.employee_profile.role
+        if role in ['ADMIN', 'HRD']:
+            is_full_edit = True
+        elif role == 'KERANI':
+            is_full_edit = False # Basic edit only
         else:
-            return HttpResponse('<div class="alert alert-danger">Akses ditolak.</div>', status=403)
+            return HttpResponse('<div class="alert alert-danger">Akses ditolak. Role tidak diizinkan.</div>', status=403)
+    else:
+        return HttpResponse('<div class="alert alert-danger">Akses ditolak.</div>', status=403)
     
     employee = get_object_or_404(Employee, id=employee_id)
     
     if request.method == 'POST':
-        # Get form data
+        # Get form data common to all
         full_name = request.POST.get('full_name', '').strip()
-        employee_type = request.POST.get('employee_type', '')
-        department_id = request.POST.get('department', '')
-        phone_number = request.POST.get('phone_number', '').strip()
-        telegram_user_id = request.POST.get('telegram_user_id', '').strip()
-        device_user_id = request.POST.get('device_user_id', '').strip()
-        joined_date_str = request.POST.get('joined_date', '')
         is_active = request.POST.get('is_active') == 'on'
-        shift_pattern_id = request.POST.get('shift_pattern', '')
         
         # Validation
         if not full_name:
@@ -1253,45 +1254,58 @@ def employee_edit_view(request, employee_id):
         
         try:
             with transaction.atomic():
-                # Update employee fields
+                # Update Common Fields
                 employee.full_name = full_name
-                employee.employee_type = employee_type
-                employee.phone_number = phone_number if phone_number else None
-                employee.telegram_user_id = telegram_user_id if telegram_user_id else None
                 employee.is_active = is_active
                 
-                # Device User ID
-                if device_user_id:
-                    employee.device_user_id = int(device_user_id)
-                else:
-                    employee.device_user_id = None
-                
-                # Department
-                if department_id:
-                    employee.department_id = department_id
-                else:
-                    employee.department = None
-                
-                # Joined Date
-                if joined_date_str:
-                    from datetime import datetime
-                    employee.joined_date = datetime.strptime(joined_date_str, '%Y-%m-%d').date()
-                
+                # Update Advanced Fields (Full Edit Only)
+                if is_full_edit:
+                    employee_type = request.POST.get('employee_type', '')
+                    department_id = request.POST.get('department', '')
+                    phone_number = request.POST.get('phone_number', '').strip()
+                    telegram_user_id = request.POST.get('telegram_user_id', '').strip()
+                    device_user_id = request.POST.get('device_user_id', '').strip()
+                    joined_date_str = request.POST.get('joined_date', '')
+                    shift_pattern_id = request.POST.get('shift_pattern', '')
+                    attendance_method = request.POST.get('attendance_method', 'FINGERPRINT')
+
+                    employee.employee_type = employee_type
+                    employee.phone_number = phone_number if phone_number else None
+                    employee.telegram_user_id = telegram_user_id if telegram_user_id else None
+                    employee.attendance_method = attendance_method
+                    
+                    # Device User ID
+                    if device_user_id:
+                        employee.device_user_id = int(device_user_id)
+                    else:
+                        employee.device_user_id = None
+                    
+                    # Department
+                    if department_id:
+                        employee.department_id = department_id
+                    else:
+                        employee.department = None
+                    
+                    # Joined Date
+                    if joined_date_str:
+                        from datetime import datetime
+                        employee.joined_date = datetime.strptime(joined_date_str, '%Y-%m-%d').date()
+                    
+                    # Handle Shift Assignment
+                    if shift_pattern_id:
+                        shift_pattern = get_object_or_404(ShiftPattern, id=shift_pattern_id)
+                        # Deactivate previous assignments
+                        EmployeeShiftAssignment.objects.filter(employee=employee, is_active=True).update(is_active=False)
+                        # Create new assignment with effective_from date
+                        from django.utils import timezone
+                        EmployeeShiftAssignment.objects.create(
+                            employee=employee,
+                            shift_pattern=shift_pattern,
+                            is_active=True,
+                            effective_from=timezone.now().date()
+                        )
+
                 employee.save()
-                
-                # Handle Shift Assignment
-                if shift_pattern_id:
-                    shift_pattern = get_object_or_404(ShiftPattern, id=shift_pattern_id)
-                    # Deactivate previous assignments
-                    EmployeeShiftAssignment.objects.filter(employee=employee, is_active=True).update(is_active=False)
-                    # Create new assignment with effective_from date
-                    from django.utils import timezone
-                    EmployeeShiftAssignment.objects.create(
-                        employee=employee,
-                        shift_pattern=shift_pattern,
-                        is_active=True,
-                        effective_from=timezone.now().date()
-                    )
             
             # Success response - reload current employee detail
             return HttpResponse(f'''
@@ -1331,6 +1345,8 @@ def employee_edit_view(request, employee_id):
         'shift_patterns': shift_patterns,
         'current_shift': current_shift,
         'employee_types': Employee.TYPE_CHOICES,
+        'attendance_methods': Employee.METHOD_CHOICES,
+        'is_full_edit': is_full_edit,
     }
     
     return render(request, 'portal/partials/_employee_edit_form.html', context)
