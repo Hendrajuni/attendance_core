@@ -1,4 +1,4 @@
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from datetime import datetime, time, date, timedelta
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.cache import never_cache
@@ -21,11 +21,237 @@ DEFAULT_SCHEDULE_OUT = SCHEDULE_OUT
 @login_required
 def dashboard(request):
     """
-    Main Dashboard View
+    Main Dashboard View with Role-Based Context
     """
+    from attendance.models import WorkLocation, MonthlyReport, Employee, ReportHistory, EmployeeProfile
+    from django.db.models import Count, Q, F
+    
     context = {
         'page_title': 'Dashboard',
+        'current_date': timezone.now().date(),
+        'current_month_name': timezone.now().strftime('%B %Y'),
     }
+
+    # Detect Role
+    user_role = 'USER'
+    user_location = None
+    
+    if request.user.is_superuser:
+        user_role = 'SUPERUSER'
+    elif hasattr(request.user, 'employee_profile'):
+        profile = request.user.employee_profile
+        user_role = profile.role
+        user_location = profile.assigned_location
+        # Fallback to home base if no assigned location
+        # Note: EmployeeProfile currently does not link to Employee model
+        if not user_location:
+             pass # user_location stays None
+
+        # Accounting (Payroll) - New Logic
+        if user_role == 'ACCOUNTING':
+            # 1. Verified & Pending Counts
+            verified_count = MonthlyReport.objects.filter(status='VERIFIED').count()
+            pending_count = MonthlyReport.objects.exclude(status='VERIFIED').count()
+            
+            # 2. Payroll Queue (All Reports, Verified First)
+            # Use Case/When to order Verified first
+            from django.db.models import Case, When, Value, IntegerField
+            payroll_queue = MonthlyReport.objects.annotate(
+                status_order=Case(
+                    When(status='VERIFIED', then=Value(1)),
+                    default=Value(2),
+                    output_field=IntegerField(),
+                )
+            ).exclude(location__parent__isnull=True).order_by('status_order', '-period_year', '-period_month')
+            
+            context['verified_count'] = verified_count
+            context['pending_count'] = pending_count
+            context['payroll_queue'] = payroll_queue
+
+        # Kerani
+        elif user_role == 'KERANI':
+            if user_location:
+                # Monthly Report Status for Kerani's location
+                try:
+                    current_report = MonthlyReport.objects.get(
+                        location=user_location,
+                        period_year=context['current_date'].year,
+                        period_month=context['current_date'].month
+                    )
+                    context['current_report_status'] = current_report.get_status_display()
+                    context['current_report_id'] = current_report.id
+                    context['current_report_obj'] = current_report # Pass object for condition checks
+                except MonthlyReport.DoesNotExist:
+                    context['current_report_status'] = "Belum Dibuat"
+                    context['current_report_id'] = None
+                    context['current_report_obj'] = None
+
+                # My Activity (Recent Logs for Kerani's location)
+                my_activity = ReportHistory.objects.filter(
+                    report__location=user_location
+                ).select_related('report', 'actor').order_by('-timestamp')[:5]
+                context['my_activity'] = my_activity
+                
+                # Quick Stats for Kerani's location
+                my_stats = WorkLocation.objects.filter(id=user_location.id).annotate(
+                    total_employees=Count('home_employees'),
+                    active_employees=Count('home_employees', filter=Q(home_employees__is_active=True))
+                ).first()
+                context['my_stats'] = my_stats
+            else:
+                context['current_report_status'] = "Lokasi Belum Ditentukan"
+                context['my_activity'] = None
+                context['my_stats'] = None
+    
+    # Fallback for Superusers if not logged in via Employee Profile (or explicitly Superuser check)
+    elif request.user.is_superuser:
+        from django.contrib.auth.models import User
+        from attendance.models import FingerprintDevice
+        
+        # 1. System Stats
+        total_users = User.objects.count()
+        total_devices = FingerprintDevice.objects.count()
+        total_reports = MonthlyReport.objects.count()
+        
+        # 2. Global Activity Log
+        recent_activity = ReportHistory.objects.select_related(
+            'report', 'report__location', 'actor'
+        ).order_by('-timestamp')[:10]
+        
+        # 3. Device Status
+        device_status = FingerprintDevice.objects.select_related('location').order_by('location__code', 'name')
+        
+        context['total_users'] = total_users
+        context['total_devices'] = total_devices
+        context['total_reports'] = total_reports
+        context['recent_activity'] = recent_activity
+        context['device_status'] = device_status
+
+    context['user_role'] = user_role
+    context['user_location'] = user_location
+
+    # =========================================================
+    # Context for HRD / SUPERUSER / ADMIN
+    # =========================================================
+    if user_role in ['HRD', 'SUPERUSER', 'ADMIN', 'ACCOUNTING'] or request.user.is_superuser:
+        
+        # 1. Approval Queue (Submitted Reports)
+        approval_queue = MonthlyReport.objects.filter(
+            status='SUBMITTED'
+        ).select_related('location').order_by('submitted_at')
+        
+        context['approval_queue'] = approval_queue
+        
+        # 2. Unlock Request Queue
+        unlock_queue = MonthlyReport.objects.filter(
+            status='REQ_UNLOCK'
+        ).select_related('location').order_by('-updated_at')
+         
+        context['unlock_queue'] = unlock_queue
+
+        # 3. Employee Stats per Location + Trend (7 Hari)
+        # Filter only leaf nodes or locations with employees
+        location_stats = WorkLocation.objects.filter(
+             rght=F('lft') + 1  # Leaf nodes
+        ).annotate(
+            total_employees=Count('home_employees'),
+            active_employees=Count('home_employees', filter=Q(home_employees__is_active=True)),
+            inactive_employees=Count('home_employees', filter=Q(home_employees__is_active=False)),
+            fingerprint_employees=Count('home_employees', filter=Q(home_employees__attendance_method='FINGERPRINT', home_employees__is_active=True)),
+            wa_employees=Count('home_employees', filter=Q(home_employees__attendance_method='WHATSAPP', home_employees__is_active=True))
+        ).order_by('name')
+
+        # Calculate 7-Day Trend for each location
+        today = timezone.localdate()
+        start_date = today - timedelta(days=6)
+        date_list = [(start_date + timedelta(days=x)) for x in range(7)]
+        
+        # Get logs for these locations in date range
+        # Group by Location and Date
+        trend_logs = AttendanceLog.objects.filter(
+            timestamp__date__gte=start_date,
+            employee__home_base__in=location_stats
+        ).values('employee__home_base', 'timestamp__date').annotate(
+            present_rs=Count('employee', distinct=True)
+        )
+        
+        # Transform QuerySet into Dict for easy lookup: {loc_id: {date: count}}
+        trend_map = {}
+        for log in trend_logs:
+            loc_id = log['employee__home_base']
+            log_date = log['timestamp__date']
+            count = log['present_rs']
+            
+            if loc_id not in trend_map:
+                trend_map[loc_id] = {}
+            trend_map[loc_id][log_date] = count
+            
+        # Attach trend_data to location objects
+        for loc in location_stats:
+            loc_trend = []
+            loc_max = 1 # Avoid division by zero
+            
+            # Use active_employees as baseline/max, or max of the week? 
+            # Let's use active_employees as the "100%" mark, but clamp at 100%.
+            # Or use dynamic max based on the data.
+            baseline = loc.active_employees if loc.active_employees > 0 else 1
+
+            for day in date_list:
+                val = trend_map.get(loc.id, {}).get(day, 0)
+                # Calculate percentage relative to active employees
+                pct = min(100, int((val / baseline) * 100))
+                loc_trend.append({
+                    'date': day,
+                    'count': val,
+                    'pct': pct,
+                    'day_name': day.strftime('%a') # Mon, Tue...
+                })
+            
+            loc.trend_data = loc_trend
+        
+        context['location_stats'] = location_stats
+        
+        # 4. Global Activity Log
+        recent_activity = ReportHistory.objects.select_related(
+            'report', 'report__location', 'actor'
+        ).order_by('-timestamp')[:8]
+        
+        context['recent_activity'] = recent_activity
+
+    # =========================================================
+    # Context for KERANI (Location Admin)
+    # =========================================================
+    # Process for Kerani OR if user has a location assigned (even if HRD/Admin wants to see local data)
+    if user_location:
+        
+        # 1. Current Month Report Status
+        current_month = timezone.now().month
+        current_year = timezone.now().year
+        
+        current_report = MonthlyReport.objects.filter(
+            location=user_location,
+            period_month=current_month,
+            period_year=current_year
+        ).first()
+        
+        context['current_report'] = current_report
+        
+        # 2. My Location Activity Log
+        my_activity = ReportHistory.objects.filter(
+            report__location=user_location
+        ).select_related('actor').order_by('-timestamp')[:8]
+        
+        context['my_activity'] = my_activity
+        
+        # 3. Quick Stats
+        # Employee count in my location
+        my_stats = {
+            'total': Employee.objects.filter(home_base=user_location).count(),
+            'active': Employee.objects.filter(home_base=user_location, is_active=True).count(),
+            'inactive': Employee.objects.filter(home_base=user_location, is_active=False).count(),
+        }
+        context['my_stats'] = my_stats
+
     return render(request, 'portal/dashboard.html', context)
 
 @login_required
@@ -264,7 +490,12 @@ def location_detail_view(request, location_id):
         'page_size_options': PAGE_SIZE_OPTIONS,
     }
     
-    return render(request, 'portal/partials/_location_detail.html', context)
+    # If HTMX request, render partial (for tree explorer panel)
+    if request.headers.get('HX-Request'):
+        return render(request, 'portal/partials/_location_detail.html', context)
+    
+    # If standard request, render full page wrapper
+    return render(request, 'portal/location_detail.html', context)
 
 from django.shortcuts import render, get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -4047,7 +4278,30 @@ def export_report_pdf(request, report_id):
         style_center = ParagraphStyle(name='Center', parent=styles['Normal'], alignment=TA_CENTER, fontName='Helvetica-Bold', fontSize=14)
         style_normal = styles['Normal']
         
-        # --- PAGE 1: COVER SHEET ---
+        # Signatures Preparation
+        sub_time = report.submitted_at.strftime("%d-%m-%Y %H:%M") if report.submitted_at else ""
+        ver_time = report.verified_at.strftime("%d-%m-%Y %H:%M") if report.verified_at else ""
+        app_time = report.approved_at.strftime("%d-%m-%Y %H:%M") if report.approved_at else ""
+        
+        qr_sub_img = Image(generate_qr(f"VALID:SUBMITTED:{report.id}"), width=25*mm, height=25*mm) if report.submitted_by else Paragraph("", style_normal)
+        qr_ver_img = Image(generate_qr(f"VALID:VERIFIED:{report.id}"), width=25*mm, height=25*mm) if report.verified_by else Paragraph("", style_normal)
+        qr_app_img = Image(generate_qr(f"VALID:APPROVED:{report.id}"), width=25*mm, height=25*mm) if report.approved_by else Paragraph("", style_normal)
+        
+        sig_data = [
+            ["Dibuat Oleh,", "Diverifikasi Oleh,", "Disetujui Oleh,"],
+            [qr_sub_img, qr_ver_img, qr_app_img],
+            [
+                report.submitted_by.username if report.submitted_by else "(....................)",
+                report.verified_by.username if report.verified_by else "(....................)",
+                report.approved_by.username if report.approved_by else "(....................)"
+            ],
+            [
+                f"Tgl: {sub_time}" if sub_time else "",
+                f"Tgl: {ver_time}" if ver_time else "",
+                f"Tgl: {app_time}" if app_time else ""
+            ],
+            ["Kerani", "HRD / Personalia", "Accounting/Manager"]
+        ]
         # Title
         elements.append(Paragraph(f"BERITA ACARA REKAPITULASI ABSENSI", style_center))
         elements.append(Paragraph(f"{location.name.upper()}", style_center))
@@ -4102,64 +4356,15 @@ def export_report_pdf(request, report_id):
         
         # Signatures
         # Row 1: Titles
-        # Row 2: Roles
-        # Row 3: QR / Space
-        # Row 4: Names / Dates
-        
-        # Prepare QR Images
-        # Use simple empty string for missing QR, but maintain Paragraph to handle alignment
-        # Or better: if no QR, use Spacer?
-        # But we want the text below.
-        
-        qr_sub_img = Spacer(1, 2.5*cm)
-        qr_ver_img = Spacer(1, 2.5*cm)
-        sub_time = ""
-        ver_time = ""
-
-        if report.status != 'DRAFT' and report.submitted_by:
-            base_url = request.build_absolute_uri(reverse('portal:attendance_reports_dashboard'))
-            valid_url = f"{base_url}?location_id={report.location.id}&year={report.period_year}"
-            qr_img = generate_qr(valid_url)
-            qr_sub_img = Image(qr_img, width=2.5*cm, height=2.5*cm)
-            sub_time = timezone.localtime(report.submitted_at).strftime('%d/%m/%Y %H:%M')
-            
-        is_verified = report.status in ['VERIFIED', 'APPROVED', 'FINAL']
-        if is_verified and report.verified_by:
-             base_url = request.build_absolute_uri(reverse('portal:attendance_reports_dashboard'))
-             valid_url = f"{base_url}?location_id={report.location.id}&year={report.period_year}"
-             qr_img = generate_qr(valid_url)
-             qr_ver_img = Image(qr_img, width=2.5*cm, height=2.5*cm)
-             ver_time = timezone.localtime(report.verified_at).strftime('%d/%m/%Y %H:%M')
-
-        # Use Centered Style for Signature Text
-        style_sig_center = ParagraphStyle(name='SigCenter', parent=styles['Normal'], alignment=TA_CENTER, fontSize=10)
-        style_sig_role = ParagraphStyle(name='SigRole', parent=styles['Normal'], alignment=TA_CENTER, fontSize=9)
-        style_sig_date = ParagraphStyle(name='SigDate', parent=styles['Normal'], alignment=TA_CENTER, fontSize=8)
-
-        # Helper for QR Cell content (Image is flowable, centers in cell automatically if align='CENTER')
-        # But spacers might need help
-        
-        sig_data = [
-            [Paragraph("Dibuat Oleh,", style_sig_center), Paragraph("Diverifikasi Oleh,", style_sig_center), Paragraph("Disetujui Oleh,", style_sig_center)],
-            [Paragraph("(Kerani)", style_sig_role), Paragraph("(HRD / Admin)", style_sig_role), Paragraph("(Manager / Accounting)", style_sig_role)],
-            [qr_sub_img, qr_ver_img, Spacer(1, 2.5*cm)],
-            [
-                Paragraph(f"<b>{report.submitted_by.get_full_name().upper() if report.submitted_by else '(..........................)'}</b><br/><font size=8>{sub_time}</font>", style_sig_center),
-                Paragraph(f"<b>{report.verified_by.get_full_name().upper() if is_verified and report.verified_by else '(..........................)'}</b><br/><font size=8>{ver_time}</font>", style_sig_center),
-                Paragraph("(..........................)", style_sig_center)
-            ]
-        ]
-
-        t_sig = Table(sig_data, colWidths=[10*cm, 10*cm, 10*cm]) # Wider columns for Legal
-        t_sig.setStyle(TableStyle([
-            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        t_sig_cover = Table(sig_data, colWidths=[6*cm, 6*cm, 6*cm])
+        t_sig_cover.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('BOTTOMPADDING', (0,2), (-1,2), 5), # Padding below QR
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
         ]))
-        elements.append(t_sig)
+        elements.append(t_sig_cover)
         elements.append(PageBreak())
-        
-        # --- PAGE 2: MATRIX DATA ---
+
         elements.append(Paragraph(f"LAMPIRAN: MATRIX ABSENSI", style_center))
         elements.append(Spacer(1, 0.5*cm))
         
@@ -4456,28 +4661,27 @@ def export_report_pdf(request, report_id):
         # Verify timestamps
         sub_time = report.submitted_at.strftime("%d-%m-%Y %H:%M") if report.submitted_at else ""
         ver_time = report.verified_at.strftime("%d-%m-%Y %H:%M") if report.verified_at else ""
+        app_time = report.approved_at.strftime("%d-%m-%Y %H:%M") if report.approved_at else ""
         
-        # QRs
         qr_sub_img = Image(generate_qr(f"VALID:SUBMITTED:{report.id}"), width=25*mm, height=25*mm) if report.submitted_by else Paragraph("", style_normal)
         qr_ver_img = Image(generate_qr(f"VALID:VERIFIED:{report.id}"), width=25*mm, height=25*mm) if report.verified_by else Paragraph("", style_normal)
+        qr_app_img = Image(generate_qr(f"VALID:APPROVED:{report.id}"), width=25*mm, height=25*mm) if report.approved_by else Paragraph("", style_normal)
         
         sig_data = [
             ["Dibuat Oleh,", "Diverifikasi Oleh,", "Disetujui Oleh,"],
-            [qr_sub_img, qr_ver_img, ""],
+            [qr_sub_img, qr_ver_img, qr_app_img],
             [
                 report.submitted_by.username if report.submitted_by else "(....................)",
                 report.verified_by.username if report.verified_by else "(....................)",
-                "(....................)"
+                report.approved_by.username if report.approved_by else "(....................)"
             ],
             [
                 f"Tgl: {sub_time}" if sub_time else "",
                 f"Tgl: {ver_time}" if ver_time else "",
-                ""
+                f"Tgl: {app_time}" if app_time else ""
             ],
             ["Kerani", "HRD / Personalia", "Accounting/Manager"]
         ]
-        
-        t_sig = Table(sig_data, colWidths=[6*cm, 6*cm, 6*cm])
         t_sig.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
@@ -4498,3 +4702,50 @@ def export_report_pdf(request, report_id):
     response = HttpResponse(buffer, content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
+
+# =============================================================================
+# ACCOUNTING ACTIONS
+# =============================================================================
+
+@login_required
+def approve_payment(request, report_id):
+    """
+    Accounting approve payment -> Finalize Report.
+    """
+    # 1. Permission Check
+    if not (request.user.is_superuser or (hasattr(request.user, 'employee_profile') and request.user.employee_profile.role == 'ACCOUNTING')):
+        from django.contrib import messages
+        messages.error(request, "Akses ditolak. Hanya Accounting yang dapat menyetujui pembayaran.")
+        return redirect('portal:dashboard')
+
+    # 2. Get Report
+    from attendance.models import MonthlyReport, ReportHistory
+    from django.utils import timezone
+    report = get_object_or_404(MonthlyReport, id=report_id)
+
+    # 3. Validate Status
+    if report.status != 'VERIFIED':
+        from django.contrib import messages
+        messages.error(request, f"Hanya laporan berstatus VERIFIED yang dapat disetujui. Status saat ini: {report.get_status_display()}")
+        return redirect('portal:dashboard')
+
+    # 4. Update Status & Stamps
+    old_status = report.status
+    report.status = 'APPROVED'
+    report.approved_by = request.user
+    report.approved_at = timezone.now()
+    report.save()
+
+    # 5. Log History
+    ReportHistory.objects.create(
+        report=report,
+        actor=request.user,
+        action='APPROVE_PAYMENT',
+        previous_status=old_status,
+        new_status='APPROVED',
+        comment="Pembayaran disetujui oleh Accounting (Final)."
+    )
+
+    from django.contrib import messages
+    messages.success(request, f"Pembayaran untuk {report} telah disetujui. Laporan kini berstatus FINAL/LUNAS.")
+    return redirect('portal:dashboard')

@@ -413,7 +413,8 @@ class MonthlyReport(models.Model):
     STATUS_CHOICES = [
         ('DRAFT', 'Draft (Masih bisa diedit)'),
         ('SUBMITTED', 'Dikunci Kerani (Menunggu HRD)'),
-        ('VERIFIED', 'Disetujui HRD'),
+        ('VERIFIED', 'Disetujui HRD (Siap Bayar)'),
+        ('APPROVED', 'Disetujui / Lunas (Final)'),
         ('REQ_REVISI', 'Permintaan Revisi'),
         ('REQ_UNLOCK', 'Permintaan Buka Kunci (Kerani)'),
         ('REJECTED', 'Ditolak (Dikembalikan ke Draft)'),
@@ -473,6 +474,18 @@ class MonthlyReport(models.Model):
     verified_at = models.DateTimeField(
         null=True, blank=True,
         help_text="Waktu laporan diverifikasi oleh HRD"
+    )
+
+    approved_by = models.ForeignKey(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="reports_approved",
+        help_text="Accounting/Manager yang menyetujui pembayaran"
+    )
+    approved_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Waktu pembayaran disetujui"
     )
     
     # Notes & Metadata
@@ -542,12 +555,14 @@ class ReportHistory(models.Model):
     ACTION_CHOICES = [
         ('CREATE', 'Laporan Dibuat'),
         ('SUBMIT', 'Dikunci/Submit oleh Kerani'),
-        ('VERIFY', 'Diverifikasi oleh HRD'),
-        ('REJECT', 'Ditolak oleh HRD'),
+        ('VERIFIED', 'Diverifikasi HRD (Siap Bayar)'),
+        ('APPROVED', 'Disetujui / Lunas (Final)'),
+        ('REJECTED', 'Ditolak (Perlu Revisi)'),
         ('REQUEST_REVISION', 'Permintaan Revisi'),
         ('REQUEST_UNLOCK', 'Permintaan Buka Kunci'),
         ('APPROVE_UNLOCK', 'Menyetujui Buka Kunci'),
         ('REJECT_UNLOCK', 'Menolak Buka Kunci'),
+        ('APPROVE_PAYMENT', 'Menyetujui Pembayaran (Final)'),
         ('REOPEN', 'Dibuka Kembali ke Draft'),
         ('UPDATE', 'Data Diperbarui'),
     ]
@@ -597,6 +612,22 @@ class ReportHistory(models.Model):
     
     def __str__(self):
         return f"{self.report} - {self.get_action_display()} ({self.timestamp.strftime('%d/%m/%Y %H:%M')})"
+
+    @property
+    def get_action_color_class(self):
+        colors = {
+            'CREATE': 'text-primary',
+            'SUBMIT': 'text-warning',
+            'VERIFY': 'text-success',
+            'REJECT': 'text-danger',
+            'REQUEST_REVISION': 'text-danger',
+            'REQUEST_UNLOCK': 'text-info',
+            'APPROVE_UNLOCK': 'text-info',
+            'REJECT_UNLOCK': 'text-secondary',
+            'REOPEN': 'text-warning',
+            'UPDATE': 'text-primary',
+        }
+        return colors.get(self.action, 'text-secondary')
 
 
 class EmployeeLeave(models.Model):

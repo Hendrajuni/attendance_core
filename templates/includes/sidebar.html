@@ -17,6 +17,7 @@
                 </a>
             </li>
 
+            {% if user_role != 'ACCOUNTING' %}
             <li class="nav-item">
                 <a href="{% url 'portal:tree_explorer' %}"
                     class="nav-link text-white {% if request.resolver_match.url_name == 'tree_explorer' %}active bg-primary{% endif %} d-flex align-items-center">
@@ -57,6 +58,7 @@
                     </ul>
                 </div>
             </li>
+            {% endif %}
 
             {# Role Based Menu: Reports only for Staff/Superusers #}
             {% if user.is_staff or user.is_superuser or user.employee_profile.role in 'ADMIN,HRD,ACCOUNTING,KERANI' %}

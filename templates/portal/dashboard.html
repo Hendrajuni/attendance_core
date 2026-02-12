@@ -3,17 +3,631 @@
 {% block page_title %}{{ page_title }}{% endblock %}
 
 {% block content %}
-<div class="row">
+<div class="row g-4">
+    <!-- Welcome Header -->
     <div class="col-12">
-        <div class="card border-0 shadow-sm">
-            <div class="card-body p-5 text-center">
-                <div class="mb-4">
-                    <i class="fas fa-tools fa-3x text-muted opacity-50"></i>
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h4 class="mb-1 fw-bold text-primary">Selamat Datang, {{ user.first_name|default:user.username }}!</h4>
+                <p class="text-muted mb-0">
+                    <i class="fas fa-calendar-alt me-2"></i>{{ current_date|date:"l, d F Y" }}
+                </p>
+            </div>
+            {% if user_location %}
+            <div class="text-end">
+                <span class="badge bg-light text-dark border px-3 py-2">
+                    <i class="fas fa-map-marker-alt me-2 text-danger"></i>{{ user_location.name }}
+                </span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- VIEW UNTUK KERANI (UNIT ADMIN)                           -->
+    <!-- ======================================================== -->
+    {% if user_role == 'KERANI' %}
+    
+    <!-- Hero Status Card -->
+    <div class="col-md-8">
+        <div class="card border-0 shadow-sm h-100 bg-primary bg-gradient text-white position-relative overflow-hidden">
+            <!-- Background Decoration -->
+            <div class="position-absolute end-0 top-0 opacity-10" style="margin-top: -20px; margin-right: -20px;">
+                <i class="fas fa-file-invoice fa-10x"></i>
+            </div>
+            
+            <div class="card-body p-4 position-relative">
+                <h5 class="card-title fw-bold mb-4 opacity-75">Status Laporan Bulan Ini ({{ current_month_name }})</h5>
+                
+                <div class="d-flex align-items-center mb-4">
+                    {% if current_report %}
+                        {% if current_report.status == 'DRAFT' %}
+                            <div class="bg-white text-secondary rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 64px; height: 64px;">
+                                <i class="fas fa-pencil-alt fs-2"></i>
+                            </div>
+                            <div>
+                                <h2 class="mb-0 fw-bold">Draft</h2>
+                                <p class="mb-0 opacity-75">Masih dalam proses pengeditan</p>
+                            </div>
+                        {% elif current_report.status == 'SUBMITTED' %}
+                            <div class="bg-warning text-dark rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 64px; height: 64px;">
+                                <i class="fas fa-lock fs-2"></i>
+                            </div>
+                            <div>
+                                <h2 class="mb-0 fw-bold">Menunggu Verifikasi</h2>
+                                <p class="mb-0 opacity-75">Laporan telah dikunci dan dikirim ke HRD</p>
+                            </div>
+                        {% elif current_report.status == 'VERIFIED' %}
+                            <div class="bg-success text-white border border-white rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 64px; height: 64px;">
+                                <i class="fas fa-check-double fs-2"></i>
+                            </div>
+                            <div>
+                                <h2 class="mb-0 fw-bold">Terverifikasi</h2>
+                                <p class="mb-0 opacity-75">Laporan telah disetujui oleh HRD</p>
+                            </div>
+                        {% elif current_report.status == 'REQ_REVISI' %}
+                            <div class="bg-danger text-white border border-white rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 64px; height: 64px;">
+                                <i class="fas fa-exclamation-circle fs-2"></i>
+                            </div>
+                            <div>
+                                <h2 class="mb-0 fw-bold">Perlu Revisi</h2>
+                                <p class="mb-0 opacity-75">HRD meminta perbaikan data</p>
+                            </div>
+                         {% elif current_report.status == 'REQ_UNLOCK' %}
+                            <div class="bg-info text-white border border-white rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 64px; height: 64px;">
+                                <i class="fas fa-key fs-2"></i>
+                            </div>
+                            <div>
+                                <h2 class="mb-0 fw-bold">Menunggu Buka Kunci</h2>
+                                <p class="mb-0 opacity-75">Permintaan edit sedang ditinjau HRD</p>
+                            </div>
+                        {% endif %}
+                    {% else %}
+                        <div class="bg-white text-secondary rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 64px; height: 64px;">
+                            <i class="fas fa-folder-open fs-2"></i>
+                        </div>
+                        <div>
+                            <h2 class="mb-0 fw-bold">Belum Dibuat</h2>
+                            <p class="mb-0 opacity-75">Segera mulai rekapitulasi absensi</p>
+                        </div>
+                    {% endif %}
                 </div>
-                <h4 class="text-muted">Halaman {{ page_title }} sedang dalam pengembangan</h4>
-                <p class="text-muted small">Silakan kembali lagi nanti.</p>
+                
+                <div class="d-flex gap-2">
+                    <a href="{% url 'portal:recap_matrix' %}" class="btn btn-light text-primary fw-bold shadow-sm">
+                        <i class="fas fa-table me-2"></i>
+                        {% if current_report %}Kelola Laporan{% else %}Mulai Rekap{% endif %}
+                    </a>
+                </div>
             </div>
         </div>
     </div>
+
+    <!-- Quick Stats -->
+    <div class="col-md-4">
+        <div class="row g-3 h-100">
+            <div class="col-12">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body">
+                        <h6 class="card-title text-muted fw-bold mb-3">STATISTIK KARYAWAN</h6>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <span class="text-muted">Total Karyawan</span>
+                            <span class="fw-bold fs-5">{{ my_stats.total }}</span>
+                        </div>
+                        <div class="progress mb-4" style="height: 8px;">
+                            {% widthratio my_stats.active my_stats.total 100 as active_pct %}
+                            <div class="progress-bar bg-success" style="width: {{ active_pct }}%"></div>
+                        </div>
+                        <div class="row text-center">
+                            <div class="col-6 border-end">
+                                <h5 class="fw-bold text-success mb-0">{{ my_stats.active }}</h5>
+                                <small class="text-muted">Aktif</small>
+                            </div>
+                            <div class="col-6">
+                                <h5 class="fw-bold text-secondary mb-0">{{ my_stats.inactive }}</h5>
+                                <small class="text-muted">Non-Aktif</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Coming Soon / Additional Info -->
+            <div class="col-12">
+                <div class="card border-0 shadow-sm h-100 bg-light">
+                     <div class="card-body d-flex align-items-center justify-content-center text-center">
+                         <div>
+                            <i class="fas fa-hourglass-half text-muted mb-2"></i>
+                            <p class="small text-muted mb-0">Fitur tarik data mesin otomatis akan segera hadir.</p>
+                         </div>
+                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Timeline Activity -->
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white py-3">
+                <h6 class="mb-0 fw-bold"><i class="fas fa-history me-2 text-primary"></i>Aktivitas Terakhir</h6>
+            </div>
+            <div class="card-body p-0">
+                <div class="list-group list-group-flush">
+                    {% for history in my_activity %}
+                    <div class="list-group-item px-4 py-3">
+                        <div class="d-flex w-100 justify-content-between mb-1">
+                            <span class="fw-medium {{ history.get_action_color_class }}">
+                                <i class="fas fa-circle fa-xs me-2"></i>{{ history.get_action_display }}
+                            </span>
+                            <small class="text-muted">{{ history.timestamp|timesince }} yang lalu</small>
+                        </div>
+                        <p class="mb-1 small text-dark">{{ history.details }}</p>
+                        <small class="text-muted">Oleh: {{ history.actor.first_name|default:history.actor.username }}</small>
+                    </div>
+                    {% empty %}
+                    <div class="text-center py-4 text-muted">
+                        <small>Belum ada aktivitas tercatat.</small>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ======================================================== -->
+    <!-- VIEW UNTUK HRD / ADMIN / SUPERUSER                       -->
+    <!-- ======================================================== -->
+    {% elif user_role == 'ACCOUNTING' %}
+    <!-- ======================================================== -->
+    <!-- VIEW UNTUK ACCOUNTING                                    -->
+    <!-- ======================================================== -->
+    <div class="col-12">
+        <div class="alert alert-info border-0 shadow-sm">
+            <i class="fas fa-info-circle me-2"></i>
+            Hanya laporan berstatus <strong>VERIFIED</strong> yang dapat didownload untuk penggajian.
+        </div>
+    </div>
+
+    <!-- Status Cards -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100 bg-success bg-gradient text-white">
+            <div class="card-body">
+                <h6 class="text-white-50">SIAP BAYAR</h6>
+                <h2 class="mb-0 fw-bold">{{ verified_count }}</h2>
+                <small>Laporan Terverifikasi</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100 bg-warning bg-gradient text-dark">
+            <div class="card-body">
+                <h6 class="text-dark-50">MENUNGGU VERIFIKASI</h6>
+                <h2 class="mb-0 fw-bold">{{ pending_count }}</h2>
+                <small>Laporan Pending</small>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Payroll Table -->
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white py-3">
+                <h6 class="mb-0 fw-bold"><i class="fas fa-money-bill-wave me-2 text-primary"></i>Antrian Penggajian</h6>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="bg-light">
+                        <tr>
+                            <th class="ps-4">Lokasi</th>
+                            <th>Periode</th>
+                            <th>Status</th>
+                            <th>Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for report in payroll_queue %}
+                        <tr>
+                            <td class="ps-4 fw-medium">{{ report.location.name }}</td>
+                            <td>{{ report.period_display }}</td>
+                            <td>
+                                <span class="badge {% if report.status == 'VERIFIED' %}bg-success{% else %}bg-warning text-dark{% endif %} rounded-pill">
+                                    {{ report.get_status_display }}
+                                </span>
+                            </td>
+                            <td>
+                                {% if report.status == 'VERIFIED' %}
+                                    <div class="d-flex gap-1">
+                                        <a href="#" 
+                                           class="btn btn-sm btn-primary rounded-pill px-3"
+                                           onclick="confirmApprove(event, '{% url 'portal:approve_payment' report.id %}')">
+                                            <i class="fas fa-check-circle me-1"></i> Setujui Pembayaran
+                                        </a>
+                                        <a href="{% url 'portal:export_matrix_excel' report.id %}" class="btn btn-sm btn-outline-success rounded-pill px-2" title="Download Excel">
+                                            <i class="fas fa-file-excel"></i>
+                                        </a>
+                                    </div>
+                                {% elif report.status == 'APPROVED' %}
+                                    <div class="d-flex gap-1 align-items-center">
+                                        <span class="badge bg-success rounded-pill">
+                                            <i class="fas fa-check-double me-1"></i> LUNAS
+                                        </span>
+                                        <a href="{% url 'portal:export_report_pdf' report.id %}?type=main" target="_blank" class="btn btn-sm btn-outline-dark rounded-pill px-3">
+                                            <i class="fas fa-file-archive me-1"></i> Arsip (QR)
+                                        </a>
+                                    </div>
+                                {% else %}
+                                    <span class="text-muted small">Menunggu Verifikasi HRD</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="text-center py-4 text-muted">Belum ada laporan bulan ini.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% elif user.is_superuser or user_role == 'ADMIN' %}
+
+    <!-- ======================================================== -->
+    <!-- VIEW UNTUK SUPERUSER                                     -->
+    <!-- ======================================================== -->
+    <!-- Row 1: System Stats -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="bg-primary bg-opacity-10 text-primary rounded-circle p-3 me-3">
+                    <i class="fas fa-users fa-lg"></i>
+                </div>
+                <div>
+                    <h6 class="text-muted mb-0">Total Users</h6>
+                    <h3 class="mb-0 fw-bold">{{ total_users }}</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="bg-info bg-opacity-10 text-info rounded-circle p-3 me-3">
+                    <i class="fas fa-fingerprint fa-lg"></i>
+                </div>
+                <div>
+                    <h6 class="text-muted mb-0">Total Devices</h6>
+                    <h3 class="mb-0 fw-bold">{{ total_devices }}</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="bg-success bg-opacity-10 text-success rounded-circle p-3 me-3">
+                    <i class="fas fa-file-alt fa-lg"></i>
+                </div>
+                <div>
+                    <h6 class="text-muted mb-0">Total Reports</h6>
+                    <h3 class="mb-0 fw-bold">{{ total_reports }}</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100">
+             <!-- Placeholder for Error Logs or other metric -->
+            <div class="card-body d-flex align-items-center">
+                <div class="bg-danger bg-opacity-10 text-danger rounded-circle p-3 me-3">
+                    <i class="fas fa-exclamation-triangle fa-lg"></i>
+                </div>
+                <div>
+                    <h6 class="text-muted mb-0">Errors</h6>
+                    <h3 class="mb-0 fw-bold">-</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 2: Split View -->
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white py-3">
+                 <h6 class="mb-0 fw-bold"><i class="fas fa-history me-2 text-primary"></i>Global Activity Log</h6>
+            </div>
+            <div class="list-group list-group-flush">
+                {% for history in recent_activity %}
+                <div class="list-group-item px-3 py-2">
+                    <div class="d-flex w-100 justify-content-between">
+                        <span class="fw-medium {{ history.get_action_color_class }} small">
+                            {{ history.get_action_display }}
+                        </span>
+                        <small class="text-muted" style="font-size: 0.75rem;">{{ history.timestamp|timesince }} ago</small>
+                    </div>
+                    <div class="small text-truncate" style="max-width: 100%;">
+                        {{ history.report }}
+                    </div>
+                    <small class="text-muted" style="font-size: 0.75rem;">by {{ history.actor.first_name|default:history.actor.username }}</small>
+                </div>
+                {% empty %}
+                <div class="text-center py-3 text-muted small">No activity recorded.</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+         <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white py-3">
+                 <h6 class="mb-0 fw-bold"><i class="fas fa-server me-2 text-info"></i>Device Health</h6>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0 font-monospace" style="font-size: 0.85rem;">
+                    <thead>
+                        <tr>
+                            <th>Device</th>
+                            <th>Loc</th>
+                            <th>Status</th>
+                            <th>Last Sync</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for device in device_status %}
+                        <tr>
+                            <td>{{ device.name }}</td>
+                            <td>{{ device.location.code }}</td>
+                            <td>
+                                {% if device.is_active %}
+                                <span class="text-success">●</span>
+                                {% else %}
+                                <span class="text-danger">●</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if device.last_activity %}
+                                {{ device.last_activity|timesince }} ago
+                                {% else %}
+                                -
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="text-center">No devices found.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% else %}
+
+    <!-- 1. Approval & Request Center (Row 1) -->
+    <div class="col-md-7">
+        <!-- Unlock Requests (Priority) -->
+        {% if unlock_queue %}
+        <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
+            <div class="card-header bg-warning bg-opacity-10 py-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 fw-bold text-dark"><i class="fas fa-key me-2 text-warning"></i>Permintaan Buka Kunci (Unlock)</h6>
+                    <span class="badge bg-warning text-dark rounded-pill">{{ unlock_queue.count }} Pending</span>
+                </div>
+            </div>
+            <div class="list-group list-group-flush">
+                {% for report in unlock_queue %}
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="fw-bold">{{ report.location.name }}</span>
+                        <small class="text-muted d-block">{{ report.get_period_month_display }} {{ report.period_year }}</small>
+                    </div>
+                    <a href="{% url 'portal:recap_matrix' %}?location_id={{ report.location.id }}&year={{ report.period_year }}&month={{ report.period_month }}" 
+                       class="btn btn-sm btn-outline-warning">
+                        Review
+                    </a>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Approval Queue -->
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white py-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 fw-bold text-primary"><i class="fas fa-clipboard-check me-2"></i>Antrian Verifikasi Laporan</h6>
+                    {% if approval_queue %}
+                        <span class="badge bg-danger rounded-pill">{{ approval_queue.count }} Perlu Tindakan</span>
+                    {% else %}
+                        <span class="badge bg-success rounded-pill">All Clear</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="bg-light">
+                            <tr>
+                                <th class="ps-4">Lokasi</th>
+                                <th>Periode</th>
+                                <th>Diajukan</th>
+                                <th class="text-end pe-4">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for report in approval_queue %}
+                            <tr>
+                                <td class="ps-4 fw-medium">{{ report.location.name }}</td>
+                                <td>{{ report.get_period_month_display }} {{ report.period_year }}</td>
+                                <td>
+                                    <small class="text-muted d-block">{{ report.submitted_at|date:"d M H:i" }}</small>
+                                    <small class="text-muted">by {{ report.submitted_by.first_name }}</small>
+                                </td>
+                                <td class="text-end pe-4">
+                                    <a href="{% url 'portal:recap_matrix' %}?location_id={{ report.location.id }}&year={{ report.period_year }}&month={{ report.period_month }}" 
+                                       class="btn btn-sm btn-primary rounded-pill px-3">
+                                        Periksa
+                                    </a>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center py-5 text-muted">
+                                    <i class="fas fa-check-circle fa-3x mb-3 text-success opacity-25"></i>
+                                    <p class="mb-0">Tidak ada laporan yang menunggu verifikasi.</p>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Recent Activity Log (Row 1 Col 2) -->
+    <div class="col-md-5">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white py-3">
+                <h6 class="mb-0 fw-bold"><i class="fas fa-history me-2 text-primary"></i>Aktivitas Terbaru</h6>
+            </div>
+            <div class="card-body p-0">
+                <div class="list-group list-group-flush">
+                    {% for history in recent_activity %}
+                    <div class="list-group-item px-4 py-3">
+                        <div class="d-flex w-100 justify-content-between align-items-center mb-1">
+                            <span class="badge bg-light text-dark border">{{ history.report.location.code }}</span>
+                            <small class="text-muted" style="font-size: 0.75rem;">{{ history.timestamp|timesince }}</small>
+                        </div>
+                        <div class="mb-1">
+                            <span class="fw-medium text-dark">{{ history.get_action_display }}</span>
+                        </div>
+                        <small class="text-muted">
+                            {{ history.actor.first_name|default:history.actor.username }} - 
+                            <span class="text-secondary">{{ history.report.get_period_month_display }}</span>
+                        </small>
+                    </div>
+                     {% empty %}
+                    <div class="text-center py-4 text-muted">Belum ada aktivitas.</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. SDM / Employee Overview (Row 2) -->
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white py-3">
+                <h6 class="mb-0 fw-bold"><i class="fas fa-users me-2 text-primary"></i>Ringkasan Data Karyawan per Wilayah</h6>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="bg-light">
+                            <tr>
+                                <th class="ps-4">Wilayah</th>
+                                <th style="width: 15%;">Trend (7 Hari)</th>
+                                <th>Total Karyawan</th>
+                                <th class="text-center">Fingerprint</th>
+                                <th class="text-center">WA / Telegram</th>
+                                <th style="width: 25%;">Status Aktif</th>
+                                <th class="text-end pe-4">Detail</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for loc in location_stats %}
+                            <tr>
+                                <td class="ps-4">
+                                    <div class="fw-medium">{{ loc.name }}</div>
+                                    <small class="text-muted">{{ loc.code }}</small>
+                                </td>
+                                <td>
+                                    <div class="d-flex align-items-end" style="height: 32px; gap: 2px;">
+                                        {% for day in loc.trend_data %}
+                                        <div class="bg-primary bg-opacity-75 rounded-top" 
+                                             style="flex: 1; height: {{ day.pct }}%; min-height: 4px;"
+                                             data-bs-toggle="tooltip" 
+                                             data-bs-placement="top"
+                                             title="{{ day.day_name }}, {{ day.date|date:'d M' }}: {{ day.count }} Hadir">
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                    <small class="text-muted" style="font-size: 0.65rem;">7 Hari Terakhir</small>
+                                </td>
+                                <td>
+                                    <span class="fw-bold">{{ loc.total_employees }}</span>
+                                </td>
+                                
+                                <!-- New Columns -->
+                                <td class="text-center">
+                                    {% if loc.fingerprint_employees > 0 %}
+                                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle rounded-pill">
+                                        <i class="fas fa-fingerprint me-1"></i> {{ loc.fingerprint_employees }}
+                                    </span>
+                                    {% else %}
+                                    <span class="text-muted opacity-50">-</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center">
+                                    {% if loc.wa_employees > 0 %}
+                                    <span class="badge bg-success bg-opacity-10 text-success border border-success-subtle rounded-pill">
+                                        <i class="fab fa-whatsapp me-1"></i> {{ loc.wa_employees }}
+                                    </span>
+                                    {% else %}
+                                    <span class="text-muted opacity-50">-</span>
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="progress flex-grow-1 me-3" style="height: 6px;">
+                                            {% widthratio loc.active_employees loc.total_employees 100 as act_pct %}
+                                            <div class="progress-bar bg-success" style="width: {{ act_pct|default:'0' }}%"></div>
+                                        </div>
+                                        <div class="text-nowrap small">
+                                            <span class="text-success fw-bold">{{ loc.active_employees }}</span> / 
+                                            <span class="text-muted">{{ loc.inactive_employees }} Off</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="text-end pe-4">
+                                    <a href="{% url 'portal:location_detail' loc.id %}" class="btn btn-sm btn-outline-secondary rounded-pill">
+                                        Lihat
+                                    </a>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="7" class="text-center py-4">Belum ada data lokasi.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% endif %} <!-- End Role Logic -->
+
 </div>
+<script>
+    function confirmApprove(event, url) {
+        event.preventDefault();
+        Swal.fire({
+            title: 'Setujui Pembayaran?',
+            text: "Laporan akan dikunci permanen sebagai FINAL (LUNAS). Pastikan semua data sudah benar.",
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#0d6efd',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: '<i class="fas fa-check-circle me-1"></i> Ya, Setujui & Bayar',
+            cancelButtonText: 'Batal',
+            reverseButtons: true,
+            allowOutsideClick: false
+        }).then((result) => {
+            if (result.isConfirmed) {
+                window.location.href = url;
+            }
+        });
+    }
+</script>
 {% endblock %}

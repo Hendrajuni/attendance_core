@@ -70,6 +70,7 @@ urlpatterns = [
     path('reports/unlock-reject/<uuid:report_id>/', views.reject_unlock, name='reject_unlock'),
     path('reports/export/<uuid:report_id>/', views.export_matrix_excel, name='export_matrix_excel'),
     path('reports/export-pdf/<uuid:report_id>/', views.export_report_pdf, name='export_report_pdf'),
+    path('reports/approve/<uuid:report_id>/', views.approve_payment, name='approve_payment'),
     
     # Dashboard Laporan (Digital Archive)
     path('reports/attendance/', views.attendance_reports_dashboard, name='attendance_reports_dashboard'),

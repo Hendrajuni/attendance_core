@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block page_title %}Detail Lokasi: {{ location.name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-0">
+    <div class="card border-0 shadow-sm">
+        <div class="card-body p-0">
+            {% include "portal/partials/_location_detail.html" %}
+        </div>
+    </div>
+</div>
+
+{% include 'portal/partials/_shared_modals.html' %}
+{% endblock %}
