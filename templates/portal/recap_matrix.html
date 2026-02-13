@@ -217,6 +217,18 @@
                         </select>
                     </div>
                     {% endif %}
+                    
+                    <!-- Department Filter -->
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted text-uppercase">Departemen</label>
+                        <select name="department_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                            <option value="">Semua Departemen</option>
+                            {% for dept in all_departments %}
+                                <option value="{{ dept.id }}" {% if dept.id|stringformat:"s" == selected_department_id %}selected{% endif %}>{{ dept.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
                     <div class="col-md-2">
                         <label class="form-label small fw-bold text-muted text-uppercase">Bulan</label>
                         <select name="month" class="form-select form-select-sm">
@@ -241,6 +253,8 @@
                             <i class="fas fa-filter me-1"></i> Terapkan
                         </button>
                     </div>
+                    
+
                 </form>
             </div>
         </div>
@@ -257,7 +271,7 @@
     </li>
     <li class="nav-item">
         <a class="nav-link {% if active_tab == 'whatsapp' %}active{% endif %}" id="wa-tab" href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&per_page={{ per_page }}&active_tab=whatsapp">
-            <i class="fab fa-whatsapp me-2 text-success"></i> WhatsApp / Lapangan
+            <i class="fab fa-whatsapp me-2 text-success"></i> WhatsApp / Telegram
             <span class="badge bg-success ms-2">{{ wa_count }}</span>
         </a>
     </li>
@@ -298,6 +312,17 @@
                     <a href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&active_tab=fingerprint" class="btn btn-secondary btn-sm shadow-sm text-white fw-bold w-100">
                         <i class="fas fa-arrow-left me-1"></i> Matrix
                     </a>
+                </div>
+                <div class="col-md-2">
+                    <button type="button" 
+                            class="btn btn-danger btn-sm w-100 fw-bold shadow-sm"
+                            hx-get="{% url 'portal:print_employee_modal' personal_employee.id %}"
+                            hx-target="#print-employee-modal-content"
+                            hx-trigger="click"
+                            data-bs-toggle="modal"
+                            data-bs-target="#printEmployeeModal">
+                        <i class="fas fa-print me-1"></i> Cetak
+                    </button>
                 </div>
                 {% endif %}
             </div>
@@ -640,6 +665,19 @@
                         <a href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&active_tab=whatsapp" class="btn btn-warning btn-sm shadow-sm text-dark fw-bold">
                             <i class="fas fa-arrow-left me-1"></i> Matrix
                         </a>
+                    </div>
+                    {% endif %}
+                    {% if wa_mode == 'personal' %}
+                    <div class="col-auto">
+                        <button type="button" 
+                                class="btn btn-danger btn-sm shadow-sm fw-bold"
+                                hx-get="{% url 'portal:print_employee_modal' wa_personal_employee.id %}"
+                                hx-target="#print-employee-modal-content"
+                                hx-trigger="click"
+                                data-bs-toggle="modal"
+                                data-bs-target="#printEmployeeModal">
+                            <i class="fas fa-print me-1"></i> Cetak
+                        </button>
                     </div>
                     {% endif %}
                 </div>
@@ -1035,9 +1073,22 @@
                     {% if not is_locked %}
                         {% if report %}
                         <div class="me-3">
-                            <span class="badge bg-warning text-dark border border-warning px-3 py-2 rounded-pill fs-6 shadow-sm">
-                                <i class="fas fa-pencil-alt me-2"></i>STATUS: DRAFT
-                            </span>
+                            {% if report.status == 'REQ_REVISI' %}
+                                <span class="badge bg-danger text-white border border-danger px-3 py-2 rounded-pill fs-6 shadow-sm">
+                                    <i class="fas fa-edit me-2"></i>STATUS: PERLU REVISI
+                                </span>
+                                <span class="ms-2 text-danger fw-bold small d-none d-lg-inline">
+                                    <i class="fas fa-exclamation-circle me-1"></i> Pengajuan edit disetujui HRD.
+                                </span>
+                            {% elif report.status == 'REJECTED' %}
+                                <span class="badge bg-danger text-white border border-danger px-3 py-2 rounded-pill fs-6 shadow-sm">
+                                    <i class="fas fa-times-circle me-2"></i>STATUS: DITOLAK
+                                </span>
+                            {% else %}
+                                <span class="badge bg-warning text-dark border border-warning px-3 py-2 rounded-pill fs-6 shadow-sm">
+                                    <i class="fas fa-pencil-alt me-2"></i>STATUS: DRAFT
+                                </span>
+                            {% endif %}
                         </div>
                         {% else %}
                         <div class="me-3">
@@ -1068,8 +1119,8 @@
                     <div class="ms-3">
                         <span class="badge bg-info text-dark border border-info px-3 py-2 rounded-pill fs-6 shadow-sm" 
                               data-bs-toggle="tooltip" 
-                              title="Total permintaan edit yang diajukan ke HRD">
-                            <i class="fas fa-history me-2"></i>{{ report.total_unlock_requests }}x Request Edit
+                              title="Total riwayat revisi dan pengajuan edit">
+                            <i class="fas fa-history me-2"></i>{{ report.total_unlock_requests }}x Riwayat Revisi
                         </span>
                     </div>
                     {% endif %}
@@ -1127,35 +1178,32 @@
                                 <button id="btn-verify-report" 
                                         class="btn btn-success fw-bold px-4 shadow-sm" 
                                         hx-post="{% url 'portal:verify_report' report.id %}"
-                                        hx-indicator="#verify-spinner">
+                                        hx-trigger="confirmed"
+                                        hx-indicator="#verify-spinner"
+                                        onclick="confirmVerifyReport(this)">
                                     <i class="fas fa-check-double me-2"></i> VERIFIKASI LAPORAN
                                     <span id="verify-spinner" class="htmx-indicator spinner-border spinner-border-sm ms-2"></span>
                                 </button>
                                 
                                 <script>
-                                    document.addEventListener('DOMContentLoaded', function() {
-                                        document.body.addEventListener('htmx:confirm', function(evt) {
-                                            if (evt.target.id === 'btn-verify-report') {
-                                                evt.preventDefault();
-                                                Swal.fire({
-                                                    title: 'Verifikasi Laporan?',
-                                                    html: "Status laporan akan berubah menjadi <b>VERIFIED</b>.<br>Pastikan data sudah benar.",
-                                                    icon: 'question',
-                                                    showCancelButton: true,
-                                                    confirmButtonColor: '#198754',
-                                                    cancelButtonColor: '#6c757d',
-                                                    confirmButtonText: '<i class="fas fa-check-double me-2"></i>Ya, Verifikasi',
-                                                    cancelButtonText: 'Batal',
-                                                    reverseButtons: true,
-                                                    focusCancel: true
-                                                }).then((result) => {
-                                                    if (result.isConfirmed) {
-                                                        evt.detail.issueRequest(true);
-                                                    }
-                                                });
+                                    function confirmVerifyReport(btn) {
+                                        Swal.fire({
+                                            title: 'Verifikasi Laporan?',
+                                            html: "Status laporan akan berubah menjadi <b>VERIFIED</b>.<br>Pastikan data sudah benar.",
+                                            icon: 'question',
+                                            showCancelButton: true,
+                                            confirmButtonColor: '#198754',
+                                            cancelButtonColor: '#6c757d',
+                                            confirmButtonText: '<i class="fas fa-check-double me-2"></i>Ya, Verifikasi',
+                                            cancelButtonText: 'Batal',
+                                            reverseButtons: true,
+                                            focusCancel: true
+                                        }).then((result) => {
+                                            if (result.isConfirmed) {
+                                                htmx.trigger(btn, 'confirmed');
                                             }
                                         });
-                                    });
+                                    }
                                 </script>
                                 
                             {% elif report.status == 'REQ_UNLOCK' %}
@@ -1208,5 +1256,19 @@
             </div>
         </div>
     </div>
+
+<!-- Print Employee Modal -->
+<div class="modal fade" id="printEmployeeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content" id="print-employee-modal-content">
+            <!-- Content loaded via HTMX -->
+            <div class="modal-body text-center py-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 {% endblock %}

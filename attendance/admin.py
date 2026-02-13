@@ -62,6 +62,14 @@ class BulkLocationAssignmentForm(forms.Form):
     )
 
 
+class BulkEmployeeTypeForm(forms.Form):
+    """Form for bulk employee type assignment."""
+    employee_type = forms.ChoiceField(
+        choices=Employee.TYPE_CHOICES,
+        label="Pilih Tipe Karyawan",
+        help_text="Tentukan tipe karyawan untuk pegawai terpilih"
+    )
+
 # =============================================================================
 # LOCATION & DEVICE ADMINS
 # =============================================================================
@@ -192,7 +200,7 @@ class EmployeeAdmin(admin.ModelAdmin):
     search_fields = ('nik', 'full_name', 'phone_number', 'device_user_id', 'telegram_user_id')
     list_editable = ('is_active',)
     date_hierarchy = 'joined_date'
-    actions = ['assign_shift_pattern', 'mark_as_unverified', 'soft_delete_selected']
+    actions = ['assign_shift_pattern', 'set_employee_type', 'mark_as_unverified', 'soft_delete_selected']
     
     # Fieldsets for easy mutation (change location/device ID)
     fieldsets = (
@@ -302,6 +310,75 @@ class EmployeeAdmin(admin.ModelAdmin):
                 <a href="{% url 'admin:attendance_employee_changelist' %}" 
                    style="background: #6c757d; color: white; padding: 11px 25px; border-radius: 5px; text-decoration: none; margin-left: 10px;">
                     ❌ Cancel
+                </a>
+            </div>
+        </form>
+        {% endblock %}
+        """
+        
+        template = Template(html_template)
+        rendered = template.render(RequestContext(request, context))
+        return HttpResponse(rendered)
+
+    @admin.action(description="⚡ Generate Employee Type (Bulk Set)")
+    def set_employee_type(self, request, queryset):
+        """Bulk action to set employee type."""
+        if 'apply' in request.POST:
+            form = BulkEmployeeTypeForm(request.POST)
+            if form.is_valid():
+                new_type = form.cleaned_data['employee_type']
+                count = queryset.update(employee_type=new_type)
+                
+                self.message_user(
+                    request,
+                    f"✅ Berhasil mengubah tipe {count} karyawan menjadi '{new_type}'.",
+                    messages.SUCCESS
+                )
+                return HttpResponseRedirect(request.get_full_path())
+        else:
+            form = BulkEmployeeTypeForm()
+        
+        context = {
+            'title': 'Generate Employee Type (Bulk Set)',
+            'queryset': queryset,
+            'form': form,
+            'action_checkbox_name': admin.helpers.ACTION_CHECKBOX_NAME,
+            'opts': self.model._meta,
+            'media': self.media,
+        }
+        
+        from django.template import Template, RequestContext
+        from django.http import HttpResponse
+        
+        html_template = """
+        {% extends "admin/base_site.html" %}
+        {% load i18n admin_urls %}
+        {% block content %}
+        <h1>⚡ Generate Employee Type</h1>
+        <p>Anda akan mengubah <strong>Tipe Karyawan</strong> untuk <strong>{{ queryset.count }}</strong> data berikut:</p>
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0; max-height: 200px; overflow-y: auto;">
+            <ol>
+            {% for employee in queryset %}
+                <li><strong>{{ employee.nik }}</strong> - {{ employee.full_name }} (Saat ini: {{ employee.employee_type }})</li>
+            {% endfor %}
+            </ol>
+        </div>
+        <form method="post">
+            {% csrf_token %}
+            <fieldset style="padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
+                <legend style="font-weight: bold;">Pilih Tipe Baru</legend>
+                <table style="margin: 10px 0;">{{ form.as_table }}</table>
+            </fieldset>
+            {% for obj in queryset %}
+                <input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk }}" />
+            {% endfor %}
+            <div style="margin-top: 20px;">
+                <input type="hidden" name="action" value="set_employee_type" />
+                <input type="submit" name="apply" value="✅ Update Tipe Karyawan" 
+                       style="background: #417690; color: white; padding: 10px 25px; border: none; border-radius: 5px; cursor: pointer;" />
+                <a href="#" onclick="window.history.back(); return false;" 
+                   style="background: #6c757d; color: white; padding: 11px 25px; border-radius: 5px; text-decoration: none; margin-left: 10px;">
+                    ❌ Batal
                 </a>
             </div>
         </form>

@@ -206,8 +206,9 @@
                                     {% if month.report.status == 'SUBMITTED' %}
                                         <button class="btn btn-success w-100" 
                                                 hx-post="{% url 'portal:verify_report' month.report.id %}"
-                                                hx-confirm="Verifikasi laporan bulan ini? Status akan menjadi VERIFIED."
-                                                hx-swap="none">
+                                                hx-trigger="confirmed"
+                                                hx-swap="none"
+                                                onclick="confirmVerifyReport(this)">
                                             <i class="fas fa-check-double me-2"></i> Verifikasi Laporan
                                         </button>
                                         
@@ -380,7 +381,9 @@
                                         {% if month.report.status == 'SUBMITTED' %}
                                             <button class="btn btn-sm btn-success ms-1" 
                                                     hx-post="{% url 'portal:verify_report' month.report.id %}"
-                                                    hx-confirm="Verifikasi?" hx-swap="none"
+                                                    hx-trigger="confirmed"
+                                                    hx-swap="none"
+                                                    onclick="confirmVerifyReport(this)"
                                                     data-bs-toggle="tooltip" title="Verifikasi">
                                                 <i class="fas fa-check-double"></i>
                                             </button>
@@ -488,5 +491,24 @@
         const savedView = localStorage.getItem('attendance_report_view') || 'list';
         switchView(savedView);
     });
+
+    function confirmVerifyReport(btn) {
+        Swal.fire({
+            title: 'Verifikasi Laporan?',
+            html: "Status laporan akan berubah menjadi <b>VERIFIED</b>.<br>Pastikan data sudah benar.<br><small class='text-muted'>Laporan yang diverifikasi akan dikunci dan diteruskan ke Accounting.</small>",
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#198754',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: '<i class="fas fa-check-double me-2"></i>Ya, Verifikasi',
+            cancelButtonText: 'Batal',
+            reverseButtons: true,
+            focusCancel: true
+        }).then((result) => {
+            if (result.isConfirmed) {
+                htmx.trigger(btn, 'confirmed');
+            }
+        });
+    }
 </script>
 {% endblock %}

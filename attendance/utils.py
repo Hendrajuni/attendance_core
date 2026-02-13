@@ -362,4 +362,16 @@ def fetch_users_from_wa_source(source):
         return created_count, samples, None
 
     except Exception as e:
-        return 0, [], str(e)
+        # Check for HTTPError (e.g. 401 Unauthorized)
+        import urllib.error
+        if isinstance(e, urllib.error.HTTPError):
+            if e.code == 401 or e.code == 403:
+                print(f"[SPREADSHEET ERROR] Permission Denied: {e}")
+                return 0, [], "Gagal: Spreadsheet tidak publik. Ubah izin ke 'Anyone with the link'."
+            elif e.code == 404:
+                print(f"[SPREADSHEET ERROR] Not Found: {e}")
+                return 0, [], "Gagal: Spreadsheet tidak ditemukan (404)."
+        
+        # Generic error
+        print(f"[SPREADSHEET ERROR] {str(e)}")
+        return 0, [], f"Error: {str(e)}"

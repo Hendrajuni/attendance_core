@@ -34,6 +34,7 @@ class Department(models.Model):
     LOCATION_CHOICES = [
         ('HO', 'Head Office (HO)'),
         ('ESTATE', 'Estate / Kebun'),
+        ('MILL', 'Mill / PKS'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -54,9 +55,10 @@ class FingerprintDevice(models.Model):
     name = models.CharField(max_length=100, help_text="Contoh: Mesin Pos 1")
     ip_address = models.GenericIPAddressField(protocol='IPv4')
     port = models.IntegerField(default=4370)
-    location = models.ForeignKey(WorkLocation, on_delete=models.CASCADE, related_name="devices")
+    location = models.ForeignKey(WorkLocation, on_delete=models.CASCADE, related_name='attendance_machines')
+    last_sync = models.DateTimeField(null=True, blank=True, help_text="Waktu terakhir aktif/ping/sync")
+    auto_sync_time = models.TimeField(null=True, blank=True, help_text="Waktu sinkronisasi otomatis (HH:MM)")
     is_active = models.BooleanField(default=True)
-    last_activity = models.DateTimeField(null=True, blank=True, help_text="Waktu terakhir aktif/ping/sync")
 
     class Meta:
         ordering = ['name']
@@ -188,9 +190,9 @@ class Employee(models.Model):
     is_verified=True = Data sudah divalidasi (master)
     """
     TYPE_CHOICES = [
+        ('DIREKSI', 'Direksi'),
+        ('KARYAWAN', 'Karyawan'),
         ('HARIAN', 'Buruh Harian'),
-        ('STAFF', 'Staff Kantor'),
-        ('MANDOR', 'Mandor'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -543,8 +545,14 @@ class MonthlyReport(models.Model):
 
     @property
     def total_unlock_requests(self):
-        """Count how many times unlock was requested."""
-        return self.history.filter(action='REQUEST_UNLOCK').count()
+        """Count how many times report was revised (Unlock Request, Rejected, Revision Request, Reopen, or Approve Unlock)."""
+        return self.history.filter(action__in=[
+            'REQUEST_UNLOCK', 
+            'REJECTED', 
+            'REQUEST_REVISION', 
+            'REOPEN',
+            'APPROVE_UNLOCK'
+        ]).count()
 
 
 class ReportHistory(models.Model):
@@ -667,6 +675,93 @@ class EmployeeLeave(models.Model):
     
     def __str__(self):
         return f"{self.employee.full_name} - {self.get_leave_type_display()} ({self.start_date} - {self.end_date})"
+
+
+class AttendanceMachine(models.Model):
+    """
+    Konfigurasi Mesin Absensi (Fingerprint).
+    Menyimpan IP, Port, dan Lokasi mesin.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, help_text="Nama Mesin (cth: Pos Satpam)")
+    ip_address = models.GenericIPAddressField(help_text="IP Address Mesin (cth: 192.168.1.201)")
+    port = models.IntegerField(default=4370, help_text="Port Mesin (Default ZKTeco: 4370)")
+    location = models.ForeignKey(WorkLocation, on_delete=models.CASCADE, related_name="machine_configs")
+    is_active = models.BooleanField(default=True)
+    last_sync = models.DateTimeField(null=True, blank=True)
+    auto_sync_time = models.TimeField(null=True, blank=True, help_text="Waktu sinkronisasi otomatis (HH:MM)")
+
+    def __str__(self):
+        return f"{self.name} ({self.ip_address})"
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Mesin Absensi"
+        verbose_name_plural = "Daftar Mesin Absensi"
+
+    def __str__(self):
+        return f"{self.name} ({self.ip_address})"
+
+    def perform_sync(self):
+        """
+        Melakukan sinkronisasi data absensi dari mesin.
+        Mengembalikan tuple (status, message, records_count).
+        """
+        import time
+        import random
+        from django.utils import timezone
+        
+        # SMOCK SYNC LOGIC
+        # Simulate valid connection for IP starting with 192...
+        is_success = self.ip_address.startswith("192") or self.ip_address.startswith("10")
+        
+        # Fake delay
+        time.sleep(1.5)
+        
+        status = 'SUCCESS' if is_success else 'FAILED'
+        records = random.randint(10, 50) if is_success else 0
+        msg = "Data fetched successfully from device (Network)." if is_success else "Connection timeout. Device unreachable."
+        
+        SyncLog.objects.create(
+            machine=self,
+            status=status,
+            records_count=records,
+            log_message=msg
+        )
+        
+        self.last_sync = timezone.now()
+        self.save()
+        
+        return status, msg, records
+
+
+class SyncLog(models.Model):
+    """
+    Log Riwayat Penarikan Data Absensi.
+    """
+    STATUS_CHOICES = [
+        ('SUCCESS', 'Berhasil'),
+        ('FAILED', 'Gagal'),
+        ('PARTIAL', 'Sebagian'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    machine = models.ForeignKey(AttendanceMachine, on_delete=models.CASCADE, related_name="sync_logs")
+    timestamp = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    records_count = models.IntegerField(default=0, help_text="Jumlah data yang ditarik")
+    log_message = models.TextField(blank=True, help_text="Detail log atau pesan error")
+
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name = "Log Sinkronisasi"
+        verbose_name_plural = "Log Sinkronisasi"
+
+    def __str__(self):
+        return f"{self.machine.name} - {self.timestamp.strftime('%d/%m %H:%M')} ({self.status})"
+
     
     @property
     def duration_days(self):

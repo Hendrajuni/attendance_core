@@ -1,0 +1,88 @@
+<tr id="machine-row-{{ machine.id }}">
+    <td class="ps-4">
+        <div class="fw-bold text-dark">{{ machine.name }}</div>
+        <div class="small text-muted">{{ machine.location.name }}</div>
+    </td>
+    <td>
+        <div class="d-flex flex-column">
+            <span class="fw-bold text-dark">{{ machine.ip_address }}</span>
+            <span class="small text-muted">Port: {{ machine.port }}</span>
+            {% if machine.auto_sync_time %}
+            <span class="small text-info"><i class="fas fa-clock me-1"></i>Auto: {{ machine.auto_sync_time|date:"H:i" }}</span>
+            {% endif %}
+        </div>
+    </td>
+    <td>{{ machine.location.code }}</td>
+    <td class="text-center">
+        <div class="form-check form-switch d-flex justify-content-center">
+            <input class="form-check-input" type="checkbox" role="switch" 
+                   id="activeSwitch-{{ machine.id }}" 
+                   {% if machine.is_active %}checked{% endif %}
+                   {% if is_admin %}
+                   hx-post="{% url 'portal:machine_toggle_active' machine.id %}"
+                   hx-target="#machine-row-{{ machine.id }}"
+                   hx-swap="outerHTML"
+                   style="cursor: pointer;"
+                   {% else %}
+                   disabled
+                   {% endif %}>
+        </div>
+    </td>
+    <td>
+        {% if machine.last_sync %}
+            {% with logs=machine.sync_logs.first %}
+                {% if logs.status == 'SUCCESS' %}
+                    <span class="badge bg-success-subtle text-success rounded-pill px-3">
+                        <i class="fas fa-check-circle me-1"></i>Online
+                    </span>
+                {% else %}
+                    <span class="badge bg-danger-subtle text-danger rounded-pill px-3">
+                        <i class="fas fa-times-circle me-1"></i>Offline
+                    </span>
+                {% endif %}
+            {% endwith %}
+        {% else %}
+            <span class="badge bg-secondary-subtle text-secondary rounded-pill px-3">
+                <i class="fas fa-minus-circle me-1"></i>Belum Sync
+            </span>
+        {% endif %}
+    </td>
+    <td>
+        {% if machine.last_sync %}
+            <div class="small fw-bold">{{ machine.last_sync|date:"d M Y, H:i" }}</div>
+            <div class="small text-muted">{{ machine.last_sync|timesince }} ago</div>
+        {% else %}
+            <span class="text-muted small">-</span>
+        {% endif %}
+    </td>
+    <td class="text-end pe-4">
+        {% if is_admin %}
+        <div class="d-flex justify-content-end gap-2">
+            <button class="btn btn-sm btn-primary shadow-sm" 
+                    hx-post="{% url 'portal:trigger_sync' machine.id %}"
+                    hx-target="#machine-row-{{ machine.id }}"
+                    hx-swap="outerHTML"
+                    hx-indicator="#sync-spinner-{{ machine.id }}">
+                <i class="fas fa-sync-alt me-1"></i> Sync
+                <span id="sync-spinner-{{ machine.id }}" class="htmx-indicator spinner-border spinner-border-sm ms-1"></span>
+            </button>
+            <button class="btn btn-sm btn-outline-warning shadow-sm" 
+                    hx-get="{% url 'portal:machine_edit' machine.id %}" 
+                    hx-target="#editMachineModalContent"
+                    data-bs-toggle="modal" 
+                    data-bs-target="#editMachineModal">
+                <i class="fas fa-edit"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-danger" 
+                    hx-delete="{% url 'portal:machine_delete' machine.id %}"
+                    hx-confirm="Hapus mesin ini?"
+                    hx-target="#machine-row-{{ machine.id }}"
+                    hx-swap="outerHTML">
+                <i class="fas fa-trash"></i>
+            </button>
+        </div>
+        {% else %}
+        <span class="badge bg-light text-muted border">Read Only</span>
+        {% endif %}
+    </td>
+</tr>

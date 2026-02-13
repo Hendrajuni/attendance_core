@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block page_title %}Kelola Departemen{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="mb-0 fw-bold">Daftar Departemen</h4>
+        <p class="text-muted small mb-0">Kelola data departemen perusahaan.</p>
+    </div>
+    <div>
+        <button hx-get="{% url 'portal:department_add' %}" 
+                hx-target="#modal-container" 
+                class="btn btn-primary">
+            <i class="fas fa-plus me-1"></i> Tambah Departemen
+        </button>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="bg-light">
+                    <tr>
+                        <th class="ps-4" style="width: 50px;">#</th>
+                        <th>Nama Departemen</th>
+                        <th>Tipe Lokasi</th>
+                        <th class="text-end pe-4" style="width: 150px;">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for dept in departments %}
+                    <tr>
+                        <td class="ps-4 text-muted small">{{ forloop.counter }}</td>
+                        <td class="fw-medium">{{ dept.name }}</td>
+                        <td>
+                            {% if dept.location_type == 'HO' %}
+                                <span class="badge bg-info text-dark">Head Office</span>
+                            {% elif dept.location_type == 'MILL' %}
+                                <span class="badge bg-warning text-dark">Mill / PKS</span>
+                            {% else %}
+                                <span class="badge bg-success">Estate / Kebun</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end pe-4">
+                            <button hx-get="{% url 'portal:department_edit' dept.id %}" 
+                                    hx-target="#modal-container" 
+                                    class="btn btn-link btn-sm text-primary p-0 me-2" 
+                                    title="Edit">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            
+                            <form action="{% url 'portal:department_delete' dept.id %}" method="POST" class="d-inline"
+                                  onsubmit="return confirm('Apakah Anda yakin ingin menghapus departemen ini?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-link btn-sm text-danger p-0" title="Hapus">
+                                    <i class="fas fa-trash-alt"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-center py-5 text-muted">
+                            <i class="fas fa-building fs-3 mb-3 d-block text-secondary"></i>
+                            Belum ada data departemen.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Container -->
+<div id="modal-container"></div>
+
+<script>
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+        if (evt.detail.target.id === "modal-container") {
+            const modalEl = evt.detail.target.querySelector('.modal');
+            if (modalEl) {
+                const modal = new bootstrap.Modal(modalEl);
+                modal.show();
+            }
+        }
+    });
+</script>
+{% endblock %}

@@ -11,6 +11,7 @@ from django.urls import reverse
 import calendar
 import holidays
 from django.utils import timezone
+from django.utils.timezone import localtime
 
 # Constants
 SCHEDULE_IN = time(8, 0)
@@ -404,7 +405,7 @@ def tree_explorer(request):
     # Annotate with device and spreadsheet presence
     from django.db.models import Count
     locations = locations.annotate(
-        device_count=Count('devices', distinct=True),
+        device_count=Count('machine_configs', distinct=True),
         wa_count=Count('spreadsheets', distinct=True)
     )
 
@@ -794,8 +795,11 @@ def sync_machine_htmx(request, device_id):
             current_time = timezone.now().strftime("%H:%M:%S")
             
             # --- Update Last Activity ---
-            device.last_activity = timezone.now()
-            device.save(update_fields=['last_activity'])
+            device.last_sync = timezone.now()
+            device.save(update_fields=['last_sync'])
+            
+            # OOB Status Update
+            status_html = f'<span id="status-device-{device.id}" class="badge bg-success" hx-swap-oob="true">OK ({created_count})</span>'
             
             # --- Create Notification (ALWAYS) ---
             from portal.models import Notification
@@ -941,17 +945,19 @@ def ping_machine_htmx(request, device_id):
     
     try:
         from zk import ZK
-        zk = ZK(device.ip_address, port=device.port, timeout=3)
+        # Increase timeout to 10s matching debug script
+        zk = ZK(device.ip_address, port=device.port, timeout=10)
         conn = zk.connect()
         if conn:
             conn.disconnect()
-            device.last_activity = timezone.now()
-            device.save(update_fields=['last_activity'])
+            device.last_sync = timezone.now()
+            device.save(update_fields=['last_sync'])
             return HttpResponse('<span class="badge bg-success">Online</span>')
         else:
-            return HttpResponse('<span class="badge bg-danger">Offline</span>')
-    except Exception:
-        return HttpResponse('<span class="badge bg-danger">Offline</span>')
+            return HttpResponse('<span class="badge bg-danger">Offline (No Conn)</span>')
+    except Exception as e:
+        print(f"PING ERROR {device.ip_address}: {str(e)}") # Log error to console
+        return HttpResponse(f'<span class="badge bg-danger" title="{str(e)}">Offline</span>')
 
 @login_required
 @require_POST
@@ -1934,9 +1940,13 @@ def recap_matrix_view(request):
                         dt_in = datetime.combine(dummy_date, cin_time)
                         # Late calculated from Threshold Time (tolerance not counted as late)
                         diff = (dt_in - dt_threshold).total_seconds() / 60
-                        day_stat['late_minutes'] = int(diff)
-                        summary_stats['late'] += int(diff)
-                        summary_stats['late_count'] += 1
+                        
+                        mins_late = int(diff)
+                        day_stat['late_minutes'] = mins_late
+                        summary_stats['late'] += mins_late
+                        
+                        if mins_late > 0:
+                            summary_stats['late_count'] += 1
                     
                     # Ensure 'HADIR' status also counts as Hadir
                     if first_log.status == 'HADIR' and not day_stat['status_class']:
@@ -2045,16 +2055,27 @@ def recap_matrix_view(request):
     fp_summary_stats = {}
     wa_summary_data = {}
     
+    # FETCH DEPARTMENTS FOR FILTER
+    from attendance.models import Department
+    all_departments = Department.objects.all()
+    selected_department_id = request.GET.get('department_id')
+    
     if selected_location:
         # Get all sub-locations (include self)
         sub_locations = selected_location.get_descendants(include_self=True)
         
         # Get active employees in these locations
-        employees = Employee.objects.filter(
+        employees_qs = Employee.objects.filter(
             home_base__in=sub_locations,
             is_verified=True,
             is_active=True
-        ).select_related('department', 'home_base').order_by('full_name')
+        )
+        
+        # FILTER BY DEPARTMENT IF SELECTED
+        if selected_department_id:
+            employees_qs = employees_qs.filter(department_id=selected_department_id)
+            
+        employees = employees_qs.select_related('department', 'home_base').order_by('full_name')
         
         page_obj = None
         if mode == 'matrix':
@@ -2282,15 +2303,30 @@ def recap_matrix_view(request):
     fingerprint_employees = []
     wa_employees = []
 
-    if employees:
+    if employees: # Use filtered 'employees' list, but we need ORIGINAL list for categorization if pagination didn't happen yet?
+                  # Actually 'employees' variable above is already Paginated if mode=matrix
+                  # But here we probably want the Full list for WA splits if we weren't in matrix mode?
+                  # Wait, the logic below separates employees into FP and WA.
+                  # If we use the PAGINATED 'employees' list, we only get the current page's items.
+                  # That seems correct for "Visualizing what's on screen", but the WA tab might need its own pagination if it uses distinct logic?
+                  # The code uses 'employees' which IS paginated if mode==matrix.
+                  # If active_tab is WA, 'employees' contains WA employees (page N).
+                  # If active_tab is FP, 'employees' contains FP employees (page N).
+                  # So we iterate 'employees' and split them, meaning one list will be populated and the other empty/small.
+        
+        # NOTE: logic below relies on 'employees' being a list of Employee objects.
+        
         # Get employees with confirmed log sources
+        # Optim: IDs only
+        emp_ids = [e.id for e in employees]
+        
         has_wa_logs = set(AttendanceLog.objects.filter(
-            employee__in=employees,
+            employee_id__in=emp_ids,
             source_type='TELEGRAM'
         ).values_list('employee_id', flat=True))
         
         has_fp_logs = set(AttendanceLog.objects.filter(
-            employee__in=employees,
+            employee_id__in=emp_ids,
             source_type='FINGERPRINT'
         ).values_list('employee_id', flat=True))
         
@@ -2311,7 +2347,7 @@ def recap_matrix_view(request):
             else:
                 if e.device_user_id:
                      fingerprint_employees.append(e)
-                elif e.employee_type in ['HARIAN', 'MANDOR']:
+                elif e.employee_type == 'HARIAN':
                     wa_employees.append(e)
                 else:
                     fingerprint_employees.append(e)
@@ -2725,6 +2761,8 @@ def recap_matrix_view(request):
         'all_locations': all_locations,
         'can_select_location': can_select_location,
         'user_role': user_role,
+        'all_departments': all_departments,
+        'selected_department_id': selected_department_id,
         'employees': employees,
         'matrix_data': matrix_data,
         'date_range': date_range,
@@ -4337,11 +4375,16 @@ def export_report_pdf(request, report_id):
             while curr <= end:
                 leave_map[l.employee_id][curr] = l.leave_type
                 curr += timedelta(days=1)
+                
+        # Calculate WA Count (exclude FINGERPRINT)
+        wa_count = logs.exclude(source_type='FINGERPRINT').values('employee', 'timestamp__date').distinct().count()
 
         summary_data = [
             ['Total Karyawan', f"{total_employees}"],
             ['Total Man-Days (Kehadiran)', f"{present_count}"],
             ['Kehadiran via Fingerprint', f"{fp_count}"],
+            ['Kehadiran via WA/Manual', f"{wa_count}"],
+            ['Total Revisi', f"{report.total_unlock_requests}x"],
             ['Status Laporan', f"{report.get_status_display().upper()}"],
         ]
         
@@ -4682,6 +4725,8 @@ def export_report_pdf(request, report_id):
             ],
             ["Kerani", "HRD / Personalia", "Accounting/Manager"]
         ]
+        
+        t_sig = Table(sig_data, colWidths=[6*cm, 6*cm, 6*cm])
         t_sig.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
@@ -4695,6 +4740,10 @@ def export_report_pdf(request, report_id):
     else:
         return HttpResponse("Invalid Report Type")
 
+    # 6. Generator Info
+    gen_info = f"Dicetak oleh: {request.user.username} pada {timezone.now().strftime('%d-%m-%Y %H:%M:%S')}"
+    elements.append(Paragraph(gen_info, ParagraphStyle(name='Footer', parent=styles['Normal'], fontSize=8, textColor=colors.grey)))
+    
     # Build PDF
     doc.build(elements)
     buffer.seek(0)
@@ -4749,3 +4798,438 @@ def approve_payment(request, report_id):
     from django.contrib import messages
     messages.success(request, f"Pembayaran untuk {report} telah disetujui. Laporan kini berstatus FINAL/LUNAS.")
     return redirect('portal:dashboard')
+
+
+# =============================================================================
+# PERSONAL PRINT FEATURE
+# =============================================================================
+
+@login_required
+def print_employee_modal(request, employee_id):
+    """
+    HTMX: Load modal for selecting Month/Year for Personal Report.
+    """
+    from attendance.models import Employee
+    from django.utils import timezone
+    
+    employee = get_object_or_404(Employee, id=employee_id)
+    
+    # Default to current month
+    now = timezone.now()
+    years = range(now.year, now.year - 2, -1) # Last 2 years
+    
+    context = {
+        'emp': employee,
+        'current_month': now.month,
+        'current_year': now.year,
+        'years': years,
+        'months': range(1, 13)
+    }
+    return render(request, 'portal/partials/_print_employee_modal.html', context)
+
+@login_required
+def export_employee_pdf(request, employee_id):
+    """
+    Generate PDF Report for a single employee (Corporate Modern Style).
+    """
+    from attendance.models import Employee, AttendanceLog, EmployeeLeave
+    from django.utils import timezone
+    from datetime import date, timedelta, time, datetime
+    import calendar
+    from reportlab.lib.pagesizes import portrait, A4, LEGAL
+    from reportlab.lib.units import cm, mm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, KeepTogether
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from attendance.utils import get_employee_schedule
+    
+    employee = get_object_or_404(Employee, id=employee_id)
+    
+    try:
+        month = int(request.GET.get('month'))
+        year = int(request.GET.get('year'))
+    except (TypeError, ValueError):
+        now = timezone.now()
+        month = now.month
+        year = now.year
+        
+    start_date = date(year, month, 1)
+    _, days_in_month = calendar.monthrange(year, month)
+    end_date = date(year, month, days_in_month)
+    
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=portrait(LEGAL),
+        rightMargin=1.5*cm,
+        leftMargin=1.5*cm,
+        topMargin=1*cm,
+        bottomMargin=1*cm
+    )
+    
+    # --- CORPORATE COLORS ---
+    # Navy Blue: #1f3a93 (31, 58, 147)
+    corpo_blue = colors.Color(31/255, 58/255, 147/255)
+    corpo_grey = colors.Color(240/255, 240/255, 240/255) # Light Grey for rows
+    corpo_red = colors.Color(231/255, 76/255, 60/255)
+    corpo_green = colors.Color(46/255, 204/255, 113/255)
+    corpo_orange = colors.Color(243/255, 156/255, 18/255)
+    
+    # --- HEADER FUNCTION (ON FIRST PAGE) ---
+    def draw_header(canvas, doc):
+        canvas.saveState()
+        
+        # REMOVED COMPANY HEADER AS REQUESTED
+        
+        # Footer Timestamp (All Pages)
+        canvas.setFillColor(colors.grey)
+        canvas.setFont("Helvetica", 8)
+        ts = timezone.now().strftime("%d-%m-%Y %H:%M")
+        canvas.drawRightString(19.5*cm, 1*cm, f"Dicetak pada: {ts}")
+        
+        canvas.restoreState()
+
+    # --- FETCH DATA ---
+    logs = AttendanceLog.objects.filter(
+        employee=employee,
+        timestamp__date__range=[start_date, end_date]
+    ).order_by('timestamp')
+    
+    leaves = EmployeeLeave.objects.filter(
+        employee=employee,
+        start_date__lte=end_date,
+        end_date__gte=start_date
+    )
+    leave_map = {}
+    for l in leaves:
+        curr = max(l.start_date, start_date)
+        end = min(l.end_date, end_date)
+        while curr <= end:
+            leave_map[curr] = l.leave_type
+            curr += timedelta(days=1)
+            
+    # Stats Init
+    stats = {'H': 0, 'I': 0, 'S': 0, 'A': 0, 'L': 0}
+    
+    # --- PREPARE TABLE DATA (With Calculation Logic) ---
+    # Determine Columns
+    is_wa = (employee.attendance_method == 'WHATSAPP')
+    
+    if is_wa:
+        headers = ['Tgl', 'Hari', 'Pagi', 'CP1', 'Isoma', 'CP2', 'Pulang', 'Status']
+        col_widths = [1.8*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 3*cm] 
+    else:
+        headers = ['Tanggal', 'Hari', 'Masuk', 'Pulang', 'Telat', 'Lembur', 'Status']
+        col_widths = [2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2*cm, 2*cm, 4*cm]
+
+    rows_buffer = []
+    wa_missing = {'Pagi': 0, 'CP1': 0, 'Istirahat': 0, 'CP2': 0, 'Pulang': 0}
+    
+    import locale
+    try:
+        locale.setlocale(locale.LC_TIME, 'id_ID')
+    except:
+        pass
+
+    for d in range(1, days_in_month + 1):
+        day_date = date(year, month, d)
+        day_str = day_date.strftime("%d")
+        day_name = day_date.strftime("%a") # Short day name
+        
+        day_logs = logs.filter(timestamp__date=day_date)
+        
+        status = "-"
+        status_color = colors.black
+        
+        leave_type = leave_map.get(day_date)
+        row_vals = []
+        
+        if leave_type:
+            status = leave_type
+            stats[leave_type[0]] += 1
+            if leave_type.startswith('C'): stats['I'] += 1 # Cuti -> Izin category
+            row_vals = ["-"] * (len(headers) - 3)
+            status_color = corpo_blue # Blue for Leave
+            
+        elif day_logs.exists():
+            status = "HADIR"
+            stats['H'] += 1
+            
+            if is_wa:
+                # WA LOGIC
+                l_pagi = day_logs.filter(log_category='MASUK').first()
+                l_cp1  = day_logs.filter(log_category='CHECK1').first()
+                l_isti = day_logs.filter(log_category='ISTIRAHAT').first()
+                l_cp2  = day_logs.filter(log_category='CHECK2').first()
+                l_plg  = day_logs.filter(log_category='PULANG').last()
+                
+                times = []
+                # Pagi Check
+                if l_pagi: 
+                    t_str = timezone.localtime(l_pagi.timestamp).strftime("%H:%M")
+                    times.append(t_str)
+                    # Late Check (Hardcoded > 08:05 for WA as requested/legacy)
+                    if timezone.localtime(l_pagi.timestamp).time() > time(8, 5):
+                         status += " (TRL)"
+                         stats['L'] += 1
+                         status_color = corpo_orange
+                else: 
+                    times.append("-")
+                    wa_missing['Pagi'] += 1
+                
+                # Other Checkpoints
+                for l_chk, k in [(l_cp1, 'CP1'), (l_isti, 'Istirahat'), (l_cp2, 'CP2'), (l_plg, 'Pulang')]:
+                    if l_chk: times.append(timezone.localtime(l_chk.timestamp).strftime("%H:%M"))
+                    else: 
+                        times.append("-")
+                        wa_missing[k] += 1
+                row_vals = times
+
+            else:
+                # FINGERPRINT LOGIC (With Dynamic Schedule Fix)
+                l_in = day_logs.filter(log_category='MASUK').first()
+                l_out = day_logs.filter(log_category='PULANG').last()
+                
+                t_in = timezone.localtime(l_in.timestamp).strftime("%H:%M") if l_in else "-"
+                t_out = timezone.localtime(l_out.timestamp).strftime("%H:%M") if l_out else "-"
+                
+                # Telat Calculation
+                telat_str = "-"
+                
+                # --- FIXED DYNAMIC LOGIC START ---
+                daily_sch, _ = get_employee_schedule(employee, day_date)
+                sch_in = time(8, 0)
+                tol = 0
+                if daily_sch:
+                    sch_in = daily_sch.clock_in
+                    tol = daily_sch.late_tolerance
+                
+                dt_sch = datetime.combine(date(2000,1,1), sch_in)
+                dt_threshold = dt_sch + timedelta(minutes=tol)
+                
+                if l_in:
+                    tm = timezone.localtime(l_in.timestamp).time()
+                    if tm > dt_threshold.time():
+                        dt_in = datetime.combine(date(2000,1,1), tm)
+                        diff = (dt_in - dt_threshold).total_seconds() / 60
+                        mins_late = int(diff)
+                        if mins_late > 0:
+                            telat_str = f"{mins_late}m"
+                            stats['L'] += 1
+                            status += " (TRL)"
+                            status_color = corpo_orange
+                # --- FIXED DYNAMIC LOGIC END ---
+                
+                # Lembur Logic (simplified)
+                lembur_str = "-"
+                work_end_hour = 12 if day_date.weekday() == 5 else 17
+                if l_out and timezone.localtime(l_out.timestamp).time() > time(work_end_hour, 0):
+                     tm = timezone.localtime(l_out.timestamp).time()
+                     mins_over = (tm.hour * 60 + tm.minute) - (work_end_hour * 60)
+                     if mins_over > 0:
+                         lembur_str = f"+{mins_over}m"
+                
+                row_vals = [t_in, t_out, telat_str, lembur_str]
+            
+        else:
+            if day_date.weekday() == 6:
+                status = "LIBUR"
+                status_color = colors.grey
+            else:
+                status = "ALPHA"
+                stats['A'] += 1
+                status_color = corpo_red
+            
+            row_vals = ["-"] * (len(headers) - 3)
+            
+        # Build Table Row
+        # Tgl, Hari, ...data..., Status
+        row = [f"{day_date.strftime('%d')}-{day_date.strftime('%m')}", day_name] + row_vals + [status]
+        
+        # Add Style for this specific row later? No, usually by index.
+        # We'll store row data and styles separately or use conditional formatting in TableStyle
+        rows_buffer.append((row, status_color)) # Tuple (data, color)
+
+    # --- BUILD FLOWABLES ---
+    elements = []
+    
+    # 1. Spacer for Header (REDUCED from 2.5cm to 1cm)
+    elements.append(Spacer(1, 1*cm))
+    
+    # 2. Report Title
+    styles = getSampleStyleSheet()
+    # CENTERED TITLE
+    title_style = ParagraphStyle(name='Title', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=14, textColor=corpo_blue, spaceAfter=2, alignment=TA_CENTER)
+    elements.append(Paragraph("LAPORAN ABSENSI PERSONAL", title_style))
+    
+    # Check current locale for Month Name
+    elements.append(Paragraph(f"Periode: {calendar.month_name[month]} {year}", ParagraphStyle(name='SubTitle', parent=styles['Normal'], alignment=TA_CENTER)))
+    
+    # REDUCED SPACER (Previously 0.8cm)
+    elements.append(Spacer(1, 0.4*cm))
+    
+    # 3. Bio & Summary Cards (Side by Side)
+    # Left: Bio Text
+    # Right: Grid of 4 cards
+    
+    # Bio Table
+    bio_data = [
+        [Paragraph("<b>Nama</b>", styles['Normal']), Paragraph(f": {employee.full_name}", styles['Normal'])],
+        [Paragraph("<b>NIK</b>", styles['Normal']), Paragraph(f": {employee.nik}", styles['Normal'])],
+        [Paragraph("<b>Jabatan</b>", styles['Normal']), Paragraph(f": {employee.get_employee_type_display()}", styles['Normal'])],
+        [Paragraph("<b>Lokasi</b>", styles['Normal']), Paragraph(f": {employee.home_base.name if employee.home_base else '-'}", styles['Normal'])],
+    ]
+    t_bio = Table(bio_data, colWidths=[2.5*cm, 5*cm])
+    t_bio.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+    ]))
+    
+    # Cards Table
+    # Helper to make a colored card
+    def make_card(number, label, bg_color):
+        s_card = ParagraphStyle(name='CardVal', parent=styles['Normal'], fontSize=16, textColor=colors.white, alignment=TA_CENTER, fontName='Helvetica-Bold')
+        s_lbl = ParagraphStyle(name='CardLbl', parent=styles['Normal'], fontSize=8, textColor=colors.white, alignment=TA_CENTER)
+        return Table([
+            [Paragraph(str(number), s_card)],
+            [Paragraph(label, s_lbl)]
+        ], colWidths=[2.2*cm], rowHeights=[1*cm, 0.5*cm], style=TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), bg_color),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ROUNDEDCORNERS', [5,5,5,5]), # Not supported in all reportlab versions, but ignored if not
+            ('TOPPADDING', (0,0), (-1,-1), 2),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ]))
+
+    card_hadir = make_card(stats['H'], "HADIR", corpo_green)
+    card_telat = make_card(stats['L'], "TELAT", corpo_orange)
+    card_izin  = make_card(stats['S'] + stats['I'], "IZIN/SKT", corpo_blue)
+    card_alpha = make_card(stats['A'], "ALPHA", corpo_red)
+    
+    t_cards = Table([
+        [card_hadir, card_telat, card_izin, card_alpha]
+    ], colWidths=[2.4*cm]*4)
+    t_cards.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
+    ]))
+    
+    # Master Layout Table (Bio | Cards)
+    t_master = Table([
+        [t_bio, t_cards]
+    ], colWidths=[8*cm, 10*cm])
+    t_master.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+    ]))
+    
+    elements.append(t_master)
+    
+    # REDUCED SPACER (Previously 0.8cm)
+    elements.append(Spacer(1, 0.3*cm))
+    
+    # 4. Attendance Table
+    final_rows = [headers] + [x[0] for x in rows_buffer]
+    
+    t = Table(final_rows, colWidths=col_widths)
+    
+    # Base Style
+    tbl_style = [
+        ('BACKGROUND', (0,0), (-1,0), corpo_blue), # Header BG
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white), # Header Text
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 9),
+        ('BOTTOMPADDING', (0,0), (-1,0), 8),
+        ('TOPPADDING', (0,0), (-1,0), 8),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('FONTSIZE', (0,1), (-1,-1), 8),
+        ('LINEBELOW', (0,0), (-1,0), 0, corpo_blue), # Header Line
+        ('LINEBELOW', (0,1), (-1,-1), 0.5, colors.lightgrey), # Horizontal Lines
+    ]
+    
+    # Zebra & Status Color
+    for i, (row_data, text_color) in enumerate(rows_buffer):
+        row_idx = i + 1 # Skip header
+        if i % 2 == 1:
+            tbl_style.append(('BACKGROUND', (0, row_idx), (-1, row_idx), corpo_grey))
+        
+        # Apply Text Color to Status Column (Last Col)
+        tbl_style.append(('TEXTCOLOR', (-1, row_idx), (-1, row_idx), text_color))
+        # Bold if Alpha or Late
+        if text_color in [corpo_red, corpo_orange]:
+             tbl_style.append(('FONTNAME', (-1, row_idx), (-1, row_idx), 'Helvetica-Bold'))
+
+    t.setStyle(TableStyle(tbl_style))
+    elements.append(t)
+    
+    # 5. Signatures (Wrapped in KeepTogether)
+    sig_elements = []
+    sig_elements.append(Spacer(1, 0.5*cm)) # Reduced from 1cm
+    
+    sig_style = ParagraphStyle(name='Sig', parent=styles['Normal'], alignment=TA_CENTER, fontSize=9)
+    # Layout using table
+    ts = timezone.now().strftime("%d %B %Y")
+    # Determine Month Name in ID if possible, otherwise English
+    try:
+        import locale
+        locale.setlocale(locale.LC_TIME, 'id_ID')
+        ts = timezone.now().strftime("%d %B %Y")
+    except:
+        pass
+        
+    sig_table = Table([
+        [Paragraph(f"Jambi, {ts}", sig_style), ""],
+        [Paragraph("Dibuat Oleh,", sig_style), Paragraph("Mengetahui,", sig_style)],
+        ["", ""],
+        ["", ""],
+        ["", ""],
+        [Paragraph("( Admin )", sig_style), Paragraph("( HRD Manager )", sig_style)]
+    ], colWidths=[9*cm, 9*cm])
+    
+    sig_elements.append(sig_table)
+    elements.append(KeepTogether(sig_elements))
+    
+    # Build
+    doc.build(elements, onFirstPage=draw_header)
+    
+    pdf = buffer.getvalue()
+    buffer.close()
+    
+    response = HttpResponse(content_type='application/pdf')
+    filename = f"Laporan_{employee.full_name}_{calendar.month_name[month]}_{year}.pdf"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response.write(pdf)
+    return response
+
+@login_required
+def admin_notification_list(request):
+    """
+    List all notifications for Admin monitoring.
+    """
+    # Authorization Check
+    user_role = 'USER'
+    if hasattr(request.user, 'employee_profile'):
+        user_role = request.user.employee_profile.role
+    
+    if not (request.user.is_superuser or user_role == 'ADMIN'):
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied("Hanya Admin yang dapat mengakses halaman ini.")
+    
+    from .models import Notification
+    from django.core.paginator import Paginator
+    
+    # Query all notifications
+    notif_list = Notification.objects.all().select_related('recipient').order_by('-created_at')
+    
+    # Pagination
+    paginator = Paginator(notif_list, 20)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    context = {
+        'page_title': 'Notifikasi Sistem',
+        'notifications': page_obj,
+        'page_obj': page_obj,
+    }
+    return render(request, 'portal/admin_notification_list.html', context)

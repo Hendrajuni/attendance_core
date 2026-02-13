@@ -1,0 +1,35 @@
+<div class="modal-header">
+    <h5 class="modal-title" id="printEmployeeModalLabel">Cetak Laporan: {{ emp.full_name }}</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+</div>
+<div class="modal-body">
+    <form action="{% url 'portal:export_employee_pdf' emp.id %}" method="get" target="_blank">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label for="month" class="form-label">Bulan</label>
+                <select name="month" id="month" class="form-select">
+                    {% for m in months %}
+                    <option value="{{ m }}" {% if m == current_month %}selected{% endif %}>
+                        {{ m }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label for="year" class="form-label">Tahun</label>
+                <select name="year" id="year" class="form-select">
+                    {% for y in years %}
+                    <option value="{{ y }}" {% if y == current_year %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="col-12 mt-4 text-end">
+                <button type="button" class="btn btn-secondary me-2" data-bs-dismiss="modal">Batal</button>
+                <button type="submit" class="btn btn-primary" onclick="setTimeout(function(){ $('#printEmployeeModal').modal('hide'); }, 1000);">
+                    <i class="fas fa-file-pdf me-1"></i> Download PDF
+                </button>
+            </div>
+        </div>
+    </form>
+</div>

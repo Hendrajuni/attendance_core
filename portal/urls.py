@@ -1,10 +1,28 @@
 from django.urls import path
-from . import views
+from . import views, views_machine, views_department
 
 app_name = 'portal'
 
 urlpatterns = [
+    # ... existing patterns ...
+    
+    # HRM - Department Management
+    path('hrm/departments/', views_department.department_list, name='department_list'),
+    path('hrm/departments/add/', views_department.department_add, name='department_add'),
+    path('hrm/departments/edit/<uuid:department_id>/', views_department.department_edit, name='department_edit'),
+    path('hrm/departments/delete/<uuid:department_id>/', views_department.department_delete, name='department_delete'),
+
     path('dashboard/', views.dashboard, name='dashboard'),
+    
+    # Machine Management
+    path('machines/', views_machine.machine_list, name='machine_list'),
+    path('machines/add/', views_machine.machine_add, name='machine_add'),
+    path('machines/delete/<uuid:machine_id>/', views_machine.machine_delete, name='machine_delete'),
+    path('machines/sync/<uuid:machine_id>/', views_machine.trigger_sync, name='trigger_sync'),
+    path('machines/import/', views_machine.machine_import_log, name='machine_import_log'),
+    path('machines/toggle/<uuid:machine_id>/', views_machine.machine_toggle_active, name='machine_toggle_active'),
+    path('machines/edit/<uuid:machine_id>/', views_machine.machine_edit, name='machine_edit'),
+
     path('tree-explorer/', views.tree_explorer, name='tree_explorer'),
     path('location-detail/<uuid:location_id>/', views.location_detail_view, name='location_detail'),
     
@@ -29,6 +47,7 @@ urlpatterns = [
     path('search/', views.global_search, name='global_search'),
     
     # Notification Action
+    path('notifications/', views.admin_notification_list, name='admin_notification_list'),
     path('notification/<uuid:notification_id>/read/', views.mark_notification_read_htmx, name='mark_notification_read_htmx'),
     
     # Employee Mutation
@@ -74,4 +93,9 @@ urlpatterns = [
     
     # Dashboard Laporan (Digital Archive)
     path('reports/attendance/', views.attendance_reports_dashboard, name='attendance_reports_dashboard'),
+    
+    # Personal Print
+    path('employee/<uuid:employee_id>/print-modal/', views.print_employee_modal, name='print_employee_modal'),
+    path('employee/<uuid:employee_id>/export-pdf/', views.export_employee_pdf, name='export_employee_pdf'),
+
 ]
