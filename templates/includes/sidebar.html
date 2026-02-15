@@ -17,7 +17,7 @@
                 </a>
             </li>
 
-            <!-- HRM Menu (HRD & Admin) -->
+            <!-- HRM Menu (HRD & Admin & Supervisor) -->
             {% if user.is_superuser or user.employee_profile.role == 'ADMIN' or user.employee_profile.role == 'HRD' %}
             <li class="nav-item">
                 <a href="#submenu-hrm" data-bs-toggle="collapse" class="nav-link text-white d-flex align-items-center align-items-center justify-content-between {% if 'hrm' in request.resolver_match.url_name %}active bg-primary{% endif %}">
@@ -39,7 +39,7 @@
             </li>
             {% endif %}
 
-            {% if user_role != 'ACCOUNTING' %}
+            {% if user_role != 'ACCOUNTING' and user_role != 'DEPT_ADMIN' %}
             <li class="nav-item">
                 <a href="{% url 'portal:tree_explorer' %}"
                     class="nav-link text-white {% if request.resolver_match.url_name == 'tree_explorer' %}active bg-primary{% endif %} d-flex align-items-center">
@@ -47,7 +47,9 @@
                     Data Wilayah
                 </a>
             </li>
+            {% endif %}
 
+            {% if user_role != 'ACCOUNTING' %}
             <li class="nav-item">
                 <a href="{% url 'portal:recap_matrix' %}"
                     class="nav-link text-white {% if request.resolver_match.url_name == 'recap_matrix' %}active bg-primary{% endif %} d-flex align-items-center">
@@ -55,8 +57,10 @@
                     Rekapitulasi
                 </a>
             </li>
+            {% endif %}
 
             <!-- Sync Center Dropdown -->
+            {% if user_role != 'ACCOUNTING' and user_role != 'DEPT_ADMIN' and user_role != 'SUPERVISOR' %}
             <li class="nav-item">
                 <a href="#submenu-sync" data-bs-toggle="collapse" class="nav-link text-white d-flex align-items-center align-items-center justify-content-between {% if 'sync' in request.resolver_match.url_name %}active bg-primary{% endif %}">
                     <div class="d-flex align-items-center">
@@ -83,7 +87,7 @@
             {% endif %}
 
             {# Role Based Menu: Reports only for Staff/Superusers #}
-            {% if user.is_staff or user.is_superuser or user.employee_profile.role in 'ADMIN,HRD,ACCOUNTING,KERANI' %}
+            {% if user.is_staff or user.is_superuser or user.employee_profile.role in 'ADMIN,HRD,ACCOUNTING,KERANI,SUPERVISOR' %}
             <li class="nav-item">
                 <a href="#submenu-reports" data-bs-toggle="collapse" class="nav-link text-white d-flex align-items-center align-items-center justify-content-between {% if 'reports' in request.resolver_match.url_name or 'attendance_reports' in request.resolver_match.url_name %}active bg-primary{% endif %}">
                     <div class="d-flex align-items-center">
@@ -125,6 +129,7 @@
             {% endif %}
 
             <!-- Settings Dropdown -->
+            {% if user_role != 'DEPT_ADMIN' %}
             <li class="nav-item">
                 <a href="#submenu-settings" data-bs-toggle="collapse" class="nav-link text-white d-flex align-items-center align-items-center justify-content-between {% if 'settings' in request.resolver_match.url_name or 'machine' in request.resolver_match.url_name %}active bg-primary{% endif %}">
                     <div class="d-flex align-items-center">
@@ -148,6 +153,7 @@
                     </ul>
                 </div>
             </li>
+            {% endif %}
         </ul>
     </div>
 

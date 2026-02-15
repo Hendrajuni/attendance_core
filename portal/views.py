@@ -132,29 +132,96 @@ def dashboard(request):
     context['user_location'] = user_location
 
     # =========================================================
-    # Context for HRD / SUPERUSER / ADMIN
+    # SICK & LEAVE WIDGET DATA
     # =========================================================
-    if user_role in ['HRD', 'SUPERUSER', 'ADMIN', 'ACCOUNTING'] or request.user.is_superuser:
+    from attendance.models import AttendanceLog, EmployeeLeave
+    
+    # Base Filters
+    today = timezone.now().date()
+    log_filter = Q(timestamp__date=today, status__in=['IZIN', 'SAKIT'])
+    leave_filter = Q(start_date__lte=today, end_date__gte=today, leave_type__in=['CUTI', 'CUTI_KHUSUS'])
+    
+    # RBAC Location Filter (For Kerani, Supervisor, Dept Admin)
+    # HRD & Superuser see ALL
+    if user_role in ['KERANI', 'SUPERVISOR', 'DEPT_ADMIN'] and user_location:
+         allowed_locations = user_location.get_descendants(include_self=True)
+         log_filter &= Q(employee__home_base__in=allowed_locations)
+         leave_filter &= Q(employee__home_base__in=allowed_locations)
+    
+    # Queries
+    sick_logs = AttendanceLog.objects.filter(log_filter).select_related('employee', 'employee__department', 'employee__home_base')
+    active_leaves = EmployeeLeave.objects.filter(leave_filter).select_related('employee', 'employee__department')
+    
+    # Combine Data
+    sick_leave_list = []
+    
+    # Helper to avoid duplicates if needed (using set of IDs)
+    processed_ids = set()
+
+    for log in sick_logs:
+        if log.employee_id not in processed_ids:
+            sick_leave_list.append({
+                'employee': log.employee,
+                'status_label': log.get_status_display(),
+                'status_code': log.status, # IZIN, SAKIT
+                'notes': log.notes,
+                'location': log.employee.home_base,
+                'start_date': log.timestamp.date(),
+                'end_date': log.timestamp.date(),
+                'is_leave': False
+            })
+            processed_ids.add(log.employee_id)
+        
+    for leave in active_leaves:
+        if leave.employee_id not in processed_ids:
+            sick_leave_list.append({
+                'employee': leave.employee,
+                'status_label': leave.get_leave_type_display(),
+                'status_code': leave.leave_type, # CUTI, CUTI_KHUSUS
+                'notes': leave.notes,
+                'location': leave.employee.home_base,
+                'start_date': leave.start_date,
+                'end_date': leave.end_date,
+                'is_leave': True
+            })
+            processed_ids.add(leave.employee_id)
+            
+    context['sick_leave_list'] = sick_leave_list
+    if user_role in ['HRD', 'SUPERUSER', 'ADMIN', 'ACCOUNTING', 'SUPERVISOR'] or request.user.is_superuser:
         
         # 1. Approval Queue (Submitted Reports)
-        approval_queue = MonthlyReport.objects.filter(
-            status='SUBMITTED'
-        ).select_related('location').order_by('submitted_at')
-        
-        context['approval_queue'] = approval_queue
+        approval_qs = MonthlyReport.objects.filter(status='SUBMITTED')
         
         # 2. Unlock Request Queue
-        unlock_queue = MonthlyReport.objects.filter(
-            status='REQ_UNLOCK'
-        ).select_related('location').order_by('-updated_at')
-         
-        context['unlock_queue'] = unlock_queue
+        unlock_qs = MonthlyReport.objects.filter(status='REQ_UNLOCK')
+        
+        # 3. Payment Queue (Verified Reports) - For Supervisor/Accounting
+        payment_qs = MonthlyReport.objects.filter(status='VERIFIED')
+
+        # FILTER BY LOCATION FOR SUPERVISOR
+        if user_role == 'SUPERVISOR' and user_location:
+            allowed_locations = user_location.get_descendants(include_self=True)
+            approval_qs = approval_qs.filter(location__in=allowed_locations)
+            unlock_qs = unlock_qs.filter(location__in=allowed_locations)
+            payment_qs = payment_qs.filter(location__in=allowed_locations)
+        elif user_role == 'SUPERVISOR' and not user_location:
+            # Supervisor without location sees nothing
+            approval_qs = approval_qs.none()
+            unlock_qs = unlock_qs.none()
+            payment_qs = payment_qs.none()
+
+        context['approval_queue'] = approval_qs.select_related('location').order_by('submitted_at')
+        context['unlock_queue'] = unlock_qs.select_related('location').order_by('-updated_at')
+        context['payment_queue'] = payment_qs.select_related('location').order_by('-verified_at')
 
         # 3. Employee Stats per Location + Trend (7 Hari)
         # Filter only leaf nodes or locations with employees
-        location_stats = WorkLocation.objects.filter(
-             rght=F('lft') + 1  # Leaf nodes
-        ).annotate(
+        loc_stats_qs = WorkLocation.objects.filter(rght=F('lft') + 1)
+        
+        if user_role == 'SUPERVISOR' and user_location:
+            loc_stats_qs = loc_stats_qs.filter(id__in=user_location.get_descendants(include_self=True))
+            
+        location_stats = loc_stats_qs.annotate(
             total_employees=Count('home_employees'),
             active_employees=Count('home_employees', filter=Q(home_employees__is_active=True)),
             inactive_employees=Count('home_employees', filter=Q(home_employees__is_active=False)),
@@ -213,11 +280,12 @@ def dashboard(request):
         context['location_stats'] = location_stats
         
         # 4. Global Activity Log
-        recent_activity = ReportHistory.objects.select_related(
-            'report', 'report__location', 'actor'
-        ).order_by('-timestamp')[:8]
+        activity_qs = ReportHistory.objects.select_related('report', 'report__location', 'actor')
         
-        context['recent_activity'] = recent_activity
+        if user_role == 'SUPERVISOR' and user_location:
+             activity_qs = activity_qs.filter(report__location__in=user_location.get_descendants(include_self=True))
+             
+        context['recent_activity'] = activity_qs.order_by('-timestamp')[:8]
 
     # =========================================================
     # Context for KERANI (Location Admin)
@@ -398,7 +466,7 @@ def tree_explorer(request):
     # RBAC: Kerani only sees their location and descendants
     if hasattr(request.user, 'employee_profile'):
         profile = request.user.employee_profile
-        if profile.role == 'KERANI' and profile.assigned_location:
+        if profile.role in ['KERANI', 'SUPERVISOR', 'DEPT_ADMIN'] and profile.assigned_location:
             # get_descendants(include_self=True) handles the tree traversal efficiently
             locations = profile.assigned_location.get_descendants(include_self=True)
             
@@ -1469,7 +1537,7 @@ def employee_edit_view(request, employee_id):
         is_full_edit = True
     elif hasattr(request.user, 'employee_profile'):
         role = request.user.employee_profile.role
-        if role in ['ADMIN', 'HRD']:
+        if role in ['ADMIN', 'HRD', 'SUPERVISOR']:
             is_full_edit = True
         elif role == 'KERANI':
             is_full_edit = False # Basic edit only
@@ -1565,6 +1633,40 @@ def employee_edit_view(request, employee_id):
     
     # GET: Render form
     departments = Department.objects.all()
+    
+    # RBAC: Filter Departments for Supervisor & Kerani
+    if hasattr(request.user, 'employee_profile'):
+        profile = request.user.employee_profile
+        if profile.role in ['SUPERVISOR', 'KERANI'] and profile.assigned_location:
+            # Get location scope (include descendants)
+            user_locations = profile.assigned_location.get_descendants(include_self=True)
+            
+            # Determine Location Type Compatibility (Chicken & Egg Fix)
+            # Use keywords in Location Name/Code to guess type
+            loc_types = []
+            
+            # Check root assigned location
+            root_loc = profile.assigned_location
+            name_upper = root_loc.name.upper()
+            code_upper = root_loc.code.upper()
+            
+            if code_upper == 'HO' or 'HEAD OFFICE' in name_upper:
+                loc_types.append('HO')
+            elif 'PKS' in name_upper or 'MILL' in name_upper or 'PABRIK' in name_upper or 'PKS' in code_upper:
+                loc_types.append('MILL')
+            else:
+                # Default to ESTATE for Kebun, Afdeling, etc.
+                loc_types.append('ESTATE')
+            
+            # Filter departments:
+            # 1. Have active employees in my territory OR
+            # 2. Match my location type (even if empty)
+            from django.db.models import Q
+            departments = departments.filter(
+                Q(employees__home_base__in=user_locations, employees__is_active=True) |
+                Q(location_type__in=loc_types)
+            ).distinct()
+
     shift_patterns = ShiftPattern.objects.all()
     
     # Get current shift assignment
@@ -1639,8 +1741,8 @@ def recap_matrix_view(request):
         profile = request.user.employee_profile
         user_role = profile.role
         
-        if profile.role == 'KERANI':
-            # KERANI: Can see assigned location AND its descendants
+        if profile.role in ['KERANI', 'SUPERVISOR', 'DEPT_ADMIN']:
+            # LOCATION RESTRICTED ROLES: Can see assigned location AND its descendants
             if profile.assigned_location:
                 # Get descendants including self
                 user_locations = profile.assigned_location.get_descendants(include_self=True)
@@ -1654,6 +1756,7 @@ def recap_matrix_view(request):
                 all_locations = user_locations.order_by('tree_id', 'lft')
                 
                 # Allow selection if there's more than 1 location in the subtree
+                # For DEPT_ADMIN, they might be restricted to just one location if needed, but per plan they follow location scope
                 if all_locations.count() > 1:
                     can_select_location = True
                 else:
@@ -1678,6 +1781,7 @@ def recap_matrix_view(request):
             else:
                  # Fallback if no assigned location
                  pass
+
         if profile.role in ['ADMIN', 'HRD', 'ACCOUNTING']:
             can_select_location = True
             # Allow selecting ANY location (not just leaf nodes)
@@ -2074,6 +2178,23 @@ def recap_matrix_view(request):
         # FILTER BY DEPARTMENT IF SELECTED
         if selected_department_id:
             employees_qs = employees_qs.filter(department_id=selected_department_id)
+        
+        # SUPERVISOR / DEPT_ADMIN LOGIC
+        if profile and profile.role == 'DEPT_ADMIN':
+            if profile.assigned_department:
+                employees_qs = employees_qs.filter(department=profile.assigned_department)
+                # Filter dropdown options to only the assigned department
+                all_departments = all_departments.filter(id=profile.assigned_department.id)
+
+        # SUPERVISOR & KERANI LOGIC: Filter departments to those active in their location
+        if profile and profile.role in ['SUPERVISOR', 'KERANI'] and profile.assigned_location:
+            # Get location scope (include descendants)
+            sup_locations = profile.assigned_location.get_descendants(include_self=True)
+            # Filter departments that have active employees in these locations
+            all_departments = all_departments.filter(
+                employees__home_base__in=sup_locations,
+                employees__is_active=True
+            ).distinct()
             
         employees = employees_qs.select_related('department', 'home_base').order_by('full_name')
         
@@ -3749,11 +3870,24 @@ def verify_report(request, report_id):
         
         report = get_object_or_404(MonthlyReport, id=report_id)
         
-        # Check Permissions: Only HRD or Superuser
+        # Check Permissions: Only HRD or SUPERVISOR or Superuser
         profile = getattr(request.user, 'employee_profile', None)
-        is_hrd = profile and profile.role == 'HRD'
+        is_hrd = profile and profile.role in ['HRD', 'SUPERVISOR']
+        
         if not (request.user.is_superuser or is_hrd):
              return HttpResponse("Unauthorized", status=403)
+
+        # SUPERVISOR LOCATION CHECK
+        if profile and profile.role == 'SUPERVISOR':
+             # Ensure report location matches assigned location (or is descendant)
+             # Simplify: Just check if report.location is in user's allowed locations
+             if profile.assigned_location:
+                 allowed_locations = profile.assigned_location.get_descendants(include_self=True)
+                 if report.location not in allowed_locations:
+                     return HttpResponse("Unauthorized Location", status=403)
+             else:
+                 # Supervisor without location cannot verify anything
+                 return HttpResponse("Unauthorized: No Assigned Location", status=403)
 
         # Update Status
         report.status = 'VERIFIED'
@@ -3905,7 +4039,7 @@ def export_matrix_excel(request, report_id):
     from django.http import HttpResponse
     from django.utils import timezone
     from calendar import monthrange
-    from datetime import date, timedelta, datetime
+    from datetime import date, timedelta, datetime, time
     import holidays
 
     # 1. Fetch Report & Meta
@@ -3966,7 +4100,7 @@ def export_matrix_excel(request, report_id):
         employee__home_base=location,
         timestamp__year=year,
         timestamp__month=month
-    ).select_related('employee')
+    ).select_related('employee').order_by('timestamp')
     
     # Map Logs: emp_id -> day -> list of logs
     log_map = {}
@@ -3996,6 +4130,9 @@ def export_matrix_excel(request, report_id):
     # Holidays
     id_holidays = holidays.ID(years=[year])
     
+    # Import for schedule
+    from attendance.utils import get_employee_schedule
+    
     # =============================================================================
     # SHEET 1: FINGERPRINT (EXISTING LOGIC)
     # =============================================================================
@@ -4018,7 +4155,8 @@ def export_matrix_excel(request, report_id):
             
             if emp_logs_day:
                 # Logic Hadir/Telat
-                # Prioritize 'MASUK' or first log
+                # Prioritize 'MASUK' or first log (Check-In)
+                # Logs are sorted by timestamp asc, so [0] is Check-In
                 first_log = next((l for l in emp_logs_day if l.log_category == 'MASUK'), emp_logs_day[0])
                 
                 status_map = {'CHECKIN': 'H', 'HADIR': 'H', 'SICK': 'S', 'SAKIT': 'S', 'PERMIT': 'I', 'IZIN': 'I', 'ALPHA': 'A'}
@@ -4027,15 +4165,44 @@ def export_matrix_excel(request, report_id):
                 if st == 'H':
                     stats['H'] += 1
                     cell_val = "H"
-                    # Late Calculation (Simple) - 08:05 Threshold
+                    
+                    # Late Calculation (Dynamic)
                     try:
                         dt_log = timezone.localtime(first_log.timestamp)
-                        threshold_hr = 8
-                        threshold_min = 5 
-                        if dt_log.hour > threshold_hr or (dt_log.hour == threshold_hr and dt_log.minute > threshold_min):
+                        log_time = dt_log.time()
+                        
+                        # Get Dynamic Schedule
+                        daily_sch, _ = get_employee_schedule(emp, day_date)
+                        
+                        # Default Values
+                        sch_in = time(8, 0)
+                        tol = 5
+                        
+                        if daily_sch:
+                            sch_in = daily_sch.clock_in
+                            tol = daily_sch.late_tolerance
+                            
+                        # Threshold
+                        dummy_date = date(2000, 1, 1)
+                        dt_sch = datetime.combine(dummy_date, sch_in)
+                        dt_threshold = dt_sch + timedelta(minutes=tol)
+                        
+                        # Truncate Seconds to match Web Matrix (Lenient)
+                        log_time_trunc = log_time.replace(second=0, microsecond=0)
+                        threshold_trunc = dt_threshold.time().replace(second=0, microsecond=0)
+                        
+                        # Exclude Holidays and Sundays from Late Count
+                        if log_time_trunc > threshold_trunc and not is_holiday and not is_weekend:
                             stats['T'] += 1
-                            # diff = ...
-                    except: pass
+                            # Calculate Diff
+                            dt_in = datetime.combine(dummy_date, log_time)
+                            diff = (dt_in - dt_threshold).total_seconds() / 60
+                            stats['LateM'] += int(diff)
+                            
+                    except Exception as e:
+                        print(f"Excel Calc Error: {e}")
+                        pass
+
                     
                 elif st == 'S': 
                      stats['S'] += 1
@@ -4311,7 +4478,73 @@ def export_report_pdf(request, report_id):
             bottomMargin=1*cm
         )
         
+        # --- CORPORATE HEADER FUNCTION ---
+        import os
+        from django.conf import settings
+        from datetime import time
+        from django.utils import timezone
+        
+        def draw_corporate_header(canvas, doc):
+            canvas.saveState()
+            
+            # Constants
+            COMPANY_NAME = "PT. PETALING MANDRAGUNA"
+            COMPANY_ADDRESS = "Jl. Hayam Wuruk, Kota Jambi, Jambi"
+            COMPANY_CONTACT = "Telp: (0741) 33264 | Email: hr@mandraguna.com"
+            
+            # Colors
+            corpo_blue = colors.Color(31/255, 58/255, 147/255)
+            
+            # Dimensions
+            page_width, page_height = doc.pagesize
+            # Landscape Legal: 35.56 cm width, 21.59 cm height
+            
+            # 1. Logo
+            logo_path = os.path.join(settings.BASE_DIR, 'static', 'img', 'company_logo.png')
+            
+            # Position: Top Left
+            # Page Height is ~21.6cm. Top Margin is 1cm.
+            # We want header in top 3.5cm.
+            
+            logo_x = 1.0*cm
+            logo_y = page_height - 3.5*cm
+            logo_w = 2.5*cm
+            logo_h = 2.5*cm
+            
+            try:
+                canvas.drawImage(logo_path, logo_x, logo_y, width=logo_w, height=logo_h, mask='auto', preserveAspectRatio=True)
+                text_x = logo_x + logo_w + 0.5*cm
+            except Exception:
+                text_x = 1.0*cm # Fallback if no logo
+            
+            # 2. Text
+            # 2. Text
+            # Name
+            canvas.setFont("Helvetica-Bold", 16)
+            canvas.setFillColor(corpo_blue)
+            canvas.drawCentredString(page_width / 2.0, logo_y + 1.8*cm, COMPANY_NAME)
+            
+            # Address
+            canvas.setFont("Helvetica", 10)
+            canvas.setFillColor(colors.darkgrey)
+            canvas.drawCentredString(page_width / 2.0, logo_y + 1.3*cm, COMPANY_ADDRESS)
+            
+            # Contact
+            canvas.drawCentredString(page_width / 2.0, logo_y + 0.9*cm, COMPANY_CONTACT)
+            
+            # 3. Separator
+            canvas.setLineWidth(1.5)
+            canvas.setStrokeColor(corpo_blue)
+            sep_y = logo_y - 0.2*cm
+            canvas.line(1.0*cm, sep_y, page_width - 1.0*cm, sep_y)
+            
+            canvas.restoreState()
+            
         elements = []
+        
+        # SPACER to push content down (Corporate Header takes approx 3.5cm)
+        elements.append(Spacer(1, 3.5*cm))
+        
         styles = getSampleStyleSheet()
         style_center = ParagraphStyle(name='Center', parent=styles['Normal'], alignment=TA_CENTER, fontName='Helvetica-Bold', fontSize=14)
         style_normal = styles['Normal']
@@ -4346,7 +4579,7 @@ def export_report_pdf(request, report_id):
         elements.append(Spacer(1, 0.5*cm))
         
         # Periode Info
-        elements.append(Paragraph(f"Periode: {calendar.month_name[month]} {year}", styles['Normal']))
+        elements.append(Paragraph(f"Periode: {calendar.month_name[month]} {year}", style_center))
         elements.append(Spacer(1, 0.5*cm))
         
         # Summary Table
@@ -4388,7 +4621,8 @@ def export_report_pdf(request, report_id):
             ['Status Laporan', f"{report.get_status_display().upper()}"],
         ]
         
-        t_summary = Table(summary_data, colWidths=[6*cm, 6*cm], hAlign='LEFT')
+        
+        t_summary = Table(summary_data, colWidths=[6*cm, 6*cm], hAlign='CENTER')
         t_summary.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 1, colors.black),
             ('BACKGROUND', (0,0), (0,-1), colors.lightgrey),
@@ -4407,81 +4641,151 @@ def export_report_pdf(request, report_id):
         ]))
         elements.append(t_sig_cover)
         elements.append(PageBreak())
-
-        elements.append(Paragraph(f"LAMPIRAN: MATRIX ABSENSI", style_center))
-        elements.append(Spacer(1, 0.5*cm))
         
-        header_row = ['No', 'Nama'] + [str(d) for d in range(1, days_in_month + 1)] + ['H', 'T', 'A', 'S', 'I']
-        data = [header_row]
+        # --- PAGE 2 ONWARDS: MATRIX ---
+        # Add Spacer for Header on subsequent pages too?
+        # If we use onFirstPage only, then subsequent pages won't have it.
+        # But `doc.build` has `onLaterPages`.
+        # Usually Matrix page doesn't need big header, but "BERITA ACARA" title implies cover page.
+        # Let's keep matrix page clean or add simplified header?
+        # User only asked for "header korporat sebelum judul utama laporan".
+        # So mainly first page.
         
+        # However, if we put `onFirstPage`, we need `onLaterPages` if we want it there too.
+        # Ideally, matrix page has minimal header title.
+        
+        # --- PAGE 2 ONWARDS: MATRIX ---
+        
+        # Split Employees by Method
+        employees_finger = employees.filter(attendance_method='FINGERPRINT')
+        employees_wa = employees.exclude(attendance_method='FINGERPRINT') # Catch-all for WA/Manual
+        
+        groups = [
+            ("SUMBER: MESIN FINGERPRINT", employees_finger),
+            ("SUMBER: WHATSAPP / TELEGRAM / MANUAL", employees_wa)
+        ]
+        
+        # Helper for holidays
         id_holidays = holidays.Indonesia(years=year)
         
-        for idx, emp in enumerate(employees, 1):
-            row = [str(idx), emp.full_name]
-            emp_logs = logs.filter(employee=emp)
-            
-            stats = {'H': 0, 'T': 0, 'A': 0, 'S': 0, 'I': 0}
-
-            for d in range(1, days_in_month + 1):
-                day_date = date(year, month, d)
-                day_log = emp_logs.filter(timestamp__date=day_date).first()
-                val = '-'
+        for title, emp_group in groups:
+            if not emp_group.exists():
+                continue
                 
-                # Check Leave First (Priority)
-                leave_type = leave_map.get(emp.id, {}).get(day_date)
-                if leave_type:
-                    if leave_type == 'SAKIT': val = 'S'; stats['S'] += 1
-                    elif leave_type in ['IZIN', 'CUTI', 'CUTI_KHUSUS']: val = 'I'; stats['I'] += 1
-                    else: val = 'I'; stats['I'] += 1 # Fallback
+            # Title Source
+            elements.append(Paragraph(title, style_center))
+            elements.append(Spacer(1, 0.2*cm))
+            
+            header_row = ['No', 'Nama'] + [str(d) for d in range(1, days_in_month + 1)] + ['H', 'T', 'A', 'S', 'I']
+            data = [header_row]
+            
+            for idx, emp in enumerate(emp_group, 1):
+                row = [str(idx), emp.full_name]
+                emp_logs = logs.filter(employee=emp)
                 
-                elif day_log:
-                    # Log Check
-                    if day_log.status == 'PRESENT': 
-                        val = 'H'; stats['H'] += 1
-                    elif day_log.status == 'LATE': 
-                        val = 'T'; stats['T'] += 1
-                    elif day_log.status == 'SAKIT': # If log has Sakit status
-                        val = 'S'; stats['S'] += 1
-                    elif day_log.status == 'IZIN': # If log has Izin status
-                        val = 'I'; stats['I'] += 1
-                    else: 
-                        val = 'H'; stats['H'] += 1
-                else:
-                    # No Log, No Leave
-                    if day_date.weekday() == 6: val = 'L' # Sunday
-                    elif day_date in id_holidays: val = 'L' # Holiday
-                    else: 
-                        val = 'A'; stats['A'] += 1
+                stats = {'H': 0, 'T': 0, 'A': 0, 'S': 0, 'I': 0}
 
-                row.append(val)
+                for d in range(1, days_in_month + 1):
+                    day_date = date(year, month, d)
+                    is_holiday = day_date in id_holidays
+                    is_weekend = day_date.weekday() == 6
+                    # FIX: Use order_by('timestamp') to get the FIRST log (Check-In)
+                    # Default ordering is -timestamp (Check-Out), which caused False Late.
+                    day_log = emp_logs.filter(timestamp__date=day_date).order_by('timestamp').first()
+                    val = '-'
+                    
+                    # Check Leave First (Priority)
+                    leave_type = leave_map.get(emp.id, {}).get(day_date)
+                    if leave_type:
+                        if leave_type == 'SAKIT': val = 'S'; stats['S'] += 1
+                        elif leave_type in ['IZIN', 'CUTI', 'CUTI_KHUSUS']: val = 'I'; stats['I'] += 1
+                        else: val = 'I'; stats['I'] += 1 # Fallback
+                    
+                    elif day_log:
+                        # Log Check
+                        if day_log.status == 'SAKIT':
+                            val = 'S'; stats['S'] += 1
+                        elif day_log.status == 'IZIN':
+                            val = 'I'; stats['I'] += 1
+                        else:
+                            # Dynamic Late Check
+                            # Import helper locally to avoid circular imports or ensure availability
+                            from attendance.utils import get_employee_schedule
+                            from datetime import datetime, timedelta
+                            
+                            val = 'H'
+                            stats['H'] += 1
+                            
+                            log_dt = timezone.localtime(day_log.timestamp)
+                            log_time = log_dt.time()
+                            
+                            # Get Schedule
+                            daily_sch, _ = get_employee_schedule(emp, day_date)
+                            
+                            # Std defaults
+                            sch_in = time(8, 0)
+                            tol = 5
+                            
+                            if daily_sch:
+                                sch_in = daily_sch.clock_in
+                                tol = daily_sch.late_tolerance
+                            
+                            # Calc Threshold
+                            dummy_date = date(2000, 1, 1)
+                            dt_sch = datetime.combine(dummy_date, sch_in)
+                            dt_threshold = dt_sch + timedelta(minutes=tol)
+                            
+                            # Truncate Seconds to match Web Matrix (Lenient)
+                            log_time_trunc = log_time.replace(second=0, microsecond=0)
+                            threshold_trunc = dt_threshold.time().replace(second=0, microsecond=0)
+                            
+                            # Exclude Holidays and Sundays from Late Count
+                            if log_time_trunc > threshold_trunc and not is_holiday and not is_weekend:
+                                # Late!
+                                stats['T'] += 1
+                                # val remains 'H' to match Excel/Web matrix
+                                # If user WANTS 'T' in cell, we can change this back.
+                                # But standardizing means 'H' in cell, 'T' in summary.
+                                # User said "matrix finger... tidak sinkron", and matrix uses 'H' usually.
+                                pass
+                    else:
+                        # No Log, No Leave
+                        if day_date.weekday() == 6: val = 'L' # Sunday
+                        elif day_date in id_holidays: val = 'L' # Holiday
+                        else: 
+                            val = 'A'; stats['A'] += 1
+
+                    row.append(val)
+                
+                # Append Stats Columns
+                row.extend([str(stats['H']), str(stats['T']), str(stats['A']), str(stats['S']), str(stats['I'])])
+                
+                data.append(row)
             
-            # Append Stats Columns
-            row.extend([str(stats['H']), str(stats['T']), str(stats['A']), str(stats['S']), str(stats['I'])])
+            # Column Widths for Legal Landscape (~33cm usable)
+            col_widths = [1*cm, 5*cm] + [0.7*cm] * days_in_month + [0.8*cm] * 5
             
-            data.append(row)
-        
-        # Column Widths for Legal Landscape (~33cm usable)
-        # No: 1cm, Name: 5cm. Remainder 27cm.
-        # Days: 31 cols. Stats: 5 cols. Total columns: 2 + 31 + 5 = 38 cols.
-        # 27cm / 36 cols = 0.75cm.
-        # Let's adjust: Name 5cm, No 1cm.
-        # Days (31) * 0.7cm = 21.7cm
-        # Stats (5) * 0.8cm = 4cm
-        # Total: 1 + 5 + 21.7 + 4 = 31.7cm. Fits in 33cm.
-        col_widths = [1*cm, 5*cm] + [0.7*cm] * days_in_month + [0.8*cm] * 5
-        
-        t_matrix = Table(data, repeatRows=1, colWidths=col_widths)
-        t_matrix.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-            ('FONTSIZE', (0,0), (-1,-1), 8), # Slightly larger font
-            ('ALIGN', (2,0), (-1,-1), 'CENTER'),
-            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-            ('LEFTPADDING', (0,0), (-1,-1), 2),
-            ('RIGHTPADDING', (0,0), (-1,-1), 2),
-        ]))
-        elements.append(t_matrix)
+            t_matrix = Table(data, repeatRows=1, colWidths=col_widths)
+            t_matrix.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ('FONTSIZE', (0,0), (-1,-1), 8),
+                ('ALIGN', (2,0), (-1,-1), 'CENTER'), # Center data days
+                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey), # Header bg
+                ('LEFTPADDING', (0,0), (-1,-1), 2),
+                ('RIGHTPADDING', (0,0), (-1,-1), 2),
+            ]))
+            elements.append(t_matrix)
+            elements.append(Spacer(1, 1*cm)) # Space between tables
         
         filename = f"Laporan_Utama_{location.name}_{month}-{year}.pdf"
+
+        # Build with Header
+        doc.build(elements, onFirstPage=draw_corporate_header)
+        
+        buffer.seek(0)
+        response = HttpResponse(buffer, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
     # =========================================================================
     # TYPE: WA REPORT (Summary Table) - A4 PORTRAIT
@@ -4762,15 +5066,32 @@ def approve_payment(request, report_id):
     Accounting approve payment -> Finalize Report.
     """
     # 1. Permission Check
-    if not (request.user.is_superuser or (hasattr(request.user, 'employee_profile') and request.user.employee_profile.role == 'ACCOUNTING')):
+    profile = getattr(request.user, 'employee_profile', None)
+    is_accounting = profile and profile.role == 'ACCOUNTING'
+    is_supervisor = profile and profile.role == 'SUPERVISOR'
+    
+    if not (request.user.is_superuser or is_accounting or is_supervisor):
         from django.contrib import messages
-        messages.error(request, "Akses ditolak. Hanya Accounting yang dapat menyetujui pembayaran.")
+        messages.error(request, "Akses ditolak. Hanya Accounting atau Supervisor yang dapat menyetujui pembayaran.")
         return redirect('portal:dashboard')
 
     # 2. Get Report
     from attendance.models import MonthlyReport, ReportHistory
     from django.utils import timezone
     report = get_object_or_404(MonthlyReport, id=report_id)
+    
+    # SUPERVISOR LOCATION CHECK
+    if is_supervisor and not request.user.is_superuser:
+        if profile.assigned_location:
+             allowed_locations = profile.assigned_location.get_descendants(include_self=True)
+             if report.location not in allowed_locations:
+                 from django.contrib import messages
+                 messages.error(request, "Akses ditolak. Lokasi laporan tidak sesuai dengan otoritas Anda.")
+                 return redirect('portal:dashboard')
+        else:
+             from django.contrib import messages
+             messages.error(request, "Akun Supervisor Anda tidak memiliki lokasi tugas.")
+             return redirect('portal:dashboard')
 
     # 3. Validate Status
     if report.status != 'VERIFIED':
@@ -4932,6 +5253,9 @@ def export_employee_pdf(request, employee_id):
     except:
         pass
 
+    import holidays
+    id_holidays = holidays.Indonesia(years=year)
+
     for d in range(1, days_in_month + 1):
         day_date = date(year, month, d)
         day_str = day_date.strftime("%d")
@@ -5036,6 +5360,9 @@ def export_employee_pdf(request, employee_id):
             if day_date.weekday() == 6:
                 status = "LIBUR"
                 status_color = colors.grey
+            elif day_date in id_holidays:
+                status = "LIBUR"
+                status_color = corpo_red
             else:
                 status = "ALPHA"
                 stats['A'] += 1

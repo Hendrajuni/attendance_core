@@ -276,6 +276,10 @@ def fetch_users_from_machine(device):
             name = user.name
             user_id = user.user_id # This is the numeric ID usually used
             
+            # VALIDATION: Skip if user_id is not numeric (e.g. headers or garbage from machine)
+            if not user_id or not str(user_id).isdigit():
+                continue
+            
             # Check if exists by device_user_id
             if not Employee.objects.filter(device_user_id=user_id).exists():
                 # Create draft employee

@@ -215,6 +215,7 @@ class EmployeeAdmin(admin.ModelAdmin):
             'fields': (
                 'home_base',
                 ('device_user_id', 'telegram_user_id'),
+                'phone_number',
             ),
             'description': 'Edit lokasi dan ID device untuk kasus mutasi/pindah lokasi.'
         }),

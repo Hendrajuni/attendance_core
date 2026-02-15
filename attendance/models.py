@@ -279,12 +279,15 @@ class EmployeeProfile(models.Model):
     ROLE_CHOICES = [
         ('ADMIN', 'Administrator'),
         ('HRD', 'HRD / Manager'),
+        ('SUPERVISOR', 'Supervisor (Head of Location)'),
         ('ACCOUNTING', 'Accounting'),
         ('KERANI', 'Kerani (Admin Lapangan)'),
+        ('DEPT_ADMIN', 'Admin Departemen'),
     ]
     
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='employee_profile')
     assigned_location = models.ForeignKey(WorkLocation, on_delete=models.SET_NULL, null=True, blank=True, help_text="Lokasi kerja utama (untuk filtering data)")
+    assigned_department = models.ForeignKey('Department', on_delete=models.SET_NULL, null=True, blank=True, help_text="Departemen (untuk Admin Dept)")
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='KERANI')
     
     def __str__(self):

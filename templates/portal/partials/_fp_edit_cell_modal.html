@@ -22,9 +22,11 @@
         
         <!-- Action Buttons -->
         <div class="d-grid gap-2">
+            {% if user.employee_profile.role != 'KERANI' and user.employee_profile.role != 'DEPT_ADMIN' %}
             <button type="submit" name="action" value="hadir" class="btn btn-primary btn-sm">
                 <i class="fas fa-check-circle"></i> Set Hadir (Manual)
             </button>
+            {% endif %}
             
             <div class="d-flex gap-2">
                 <button type="submit" name="action" value="izin" class="btn btn-warning btn-sm flex-fill">
@@ -35,17 +37,23 @@
                 </button>
             </div>
             
+            {% if user.employee_profile.role != 'KERANI' and user.employee_profile.role != 'DEPT_ADMIN' %}
             <button type="submit" name="action" value="alpha" class="btn btn-dark btn-sm">
                 <i class="fas fa-times-circle"></i> Set Alpha
             </button>
+            {% endif %}
         </div>
         
         {% if existing_status or existing_log %}
         <hr>
         <div class="text-center">
+            {% if user.employee_profile.role != 'KERANI' and user.employee_profile.role != 'DEPT_ADMIN' %}
             <button type="submit" name="action" value="delete" class="btn btn-outline-danger btn-sm">
                 <i class="fas fa-trash"></i> Hapus Status Manual
             </button>
+            {% else %}
+            <small class="text-muted">Hubungi Admin/HRD untuk menghapus status.</small>
+            {% endif %}
         </div>
         {% endif %}
     </form>

@@ -269,12 +269,14 @@
             <span class="badge bg-secondary ms-2">{{ fp_count }}</span>
         </a>
     </li>
+    {% if user.employee_profile.role != 'DEPT_ADMIN' %}
     <li class="nav-item">
         <a class="nav-link {% if active_tab == 'whatsapp' %}active{% endif %}" id="wa-tab" href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&per_page={{ per_page }}&active_tab=whatsapp">
             <i class="fab fa-whatsapp me-2 text-success"></i> WhatsApp / Telegram
             <span class="badge bg-success ms-2">{{ wa_count }}</span>
         </a>
     </li>
+    {% endif %}
 </ul>
 
 <!-- TABS CONTENT -->
@@ -643,6 +645,10 @@
     <!-- =====================================================================
          TAB 2: WHATSAPP / LAPANGAN (SPREADSHEET FORMAT)
          ===================================================================== -->
+    <!-- =====================================================================
+         TAB 2: WHATSAPP / TELEGRAM
+         ===================================================================== -->
+    {% if user.employee_profile.role != 'DEPT_ADMIN' %}
     <div class="tab-pane fade {% if active_tab == 'whatsapp' %}show active{% endif %}" id="tab-whatsapp" role="tabpanel">
         {% if wa_mode == 'personal' %}
             <!-- WA PERSONAL VIEW (Monthly Detail for Single Employee) -->
@@ -1007,6 +1013,7 @@
             </div>
         {% endif %}
     </div>
+    {% endif %}
 </div>
 
 <div id="modal-container"></div>
@@ -1133,6 +1140,7 @@
                         </a>
 
                     {% if report %}
+                    {% if user.employee_profile.role != 'DEPT_ADMIN' %}
                     <button id="btn-publish-report" 
                             class="btn btn-primary fw-bold px-4 shadow-sm" 
                             hx-post="{% url 'portal:publish_report' report.id %}"
@@ -1171,8 +1179,9 @@
                         <i class="fas fa-spinner fa-spin me-2"></i> Report Not Found
                     </button>
                     {% endif %}
+                    {% endif %}
                     {% else %}
-                        {% if user.is_superuser or user.employee_profile.role == 'HRD' %}
+                        {% if user.is_superuser or user.employee_profile.role == 'HRD' or user.employee_profile.role == 'SUPERVISOR' %}
                             
                             {% if report.status == 'SUBMITTED' %}
                                 <button id="btn-verify-report" 
@@ -1232,7 +1241,7 @@
                             
                         {% else %}
                             <!-- NON-HRD (Assume Kerani/Manager) -->
-                            {% if report.status == 'SUBMITTED' %}
+                            {% if report.status == 'SUBMITTED' and user.employee_profile.role != 'DEPT_ADMIN' %}
                                 <button class="btn btn-warning fw-bold px-4 shadow-sm" 
                                         hx-post="{% url 'portal:request_unlock' report.id %}"
                                         hx-confirm="Ajukan permintaan edit ke HRD? Status akan berubah menjadi REQ_UNLOCK."

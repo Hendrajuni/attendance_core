@@ -26,7 +26,10 @@
     <!-- ======================================================== -->
     <!-- VIEW UNTUK KERANI (UNIT ADMIN)                           -->
     <!-- ======================================================== -->
-    {% if user_role == 'KERANI' %}
+    <!-- ======================================================== -->
+    <!-- VIEW UNTUK KERANI (UNIT ADMIN) & DEPT ADMIN              -->
+    <!-- ======================================================== -->
+    {% if user_role == 'KERANI' or user_role == 'DEPT_ADMIN' %}
     
     <!-- Hero Status Card -->
     <div class="col-md-8">
@@ -131,7 +134,8 @@
                     </div>
                 </div>
             </div>
-            <!-- Machine Manager Link -->
+            <!-- Machine Manager Link (Hide for DEPT_ADMIN) -->
+            {% if user_role != 'DEPT_ADMIN' %}
             <div class="col-12">
                 <a href="{% url 'portal:machine_list' %}" class="text-decoration-none">
                     <div class="card border-0 shadow-sm h-100 bg-white">
@@ -150,11 +154,58 @@
                     </div>
                 </a>
             </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Sick & Leave Widget (KERANI / DEPT_ADMIN) -->
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h6 class="mb-0 fw-bold"><i class="fas fa-notes-medical me-2 text-warning"></i>Karyawan Izin & Sakit Hari Ini</h6>
+                <span class="badge bg-warning text-dark">{{ sick_leave_list|length }}</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="bg-light">
+                        <tr>
+                            <th class="ps-4">Nama Karyawan</th>
+                            <th>Departemen</th>
+                            <th>Status</th>
+                            <th>Mulai</th>
+                            <th>Selesai</th>
+                            <th>Keterangan</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in sick_leave_list %}
+                        <tr>
+                            <td class="ps-4 fw-medium">{{ item.employee.full_name }}</td>
+                            <td>{{ item.employee.department.name|default:"-" }}</td>
+                            <td>
+                                {% if item.status_code == 'SAKIT' %}
+                                <span class="badge bg-danger rounded-pill"><i class="fas fa-user-injured me-1"></i> Sakit</span>
+                                {% elif item.status_code == 'IZIN' %}
+                                <span class="badge bg-warning text-dark rounded-pill"><i class="fas fa-file-alt me-1"></i> Izin</span>
+                                {% elif item.status_code == 'CUTI' or item.status_code == 'CUTI_KHUSUS' %}
+                                <span class="badge bg-info text-dark rounded-pill"><i class="fas fa-plane-departure me-1"></i> Cuti</span>
+                                {% endif %}
+                            </td>
+                            <td class="small">{{ item.start_date|date:"d M" }}</td>
+                            <td class="small">{{ item.end_date|date:"d M" }}</td>
+                            <td class="text-muted small">{{ item.notes|default:"-"|truncatechars:50 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="6" class="text-center py-4 text-muted">Tidak ada karyawan izin/sakit hari ini.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
     
     <!-- Timeline Activity -->
-    <div class="col-12">
+    <div class="col-md-6">
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white py-3">
                 <h6 class="mb-0 fw-bold"><i class="fas fa-history me-2 text-primary"></i>Aktivitas Terakhir</h6>
@@ -438,6 +489,37 @@
         </div>
         {% endif %}
 
+        <!-- Payment Queue (For Supervisor Logic) -->
+        {% if payment_queue and user_role == 'SUPERVISOR' %}
+        <div class="card border-0 shadow-sm mb-4 border-start border-success border-4">
+            <div class="card-header bg-success bg-opacity-10 py-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 fw-bold text-dark"><i class="fas fa-money-bill-wave me-2 text-success"></i>Antrian Final Approval (Siap Bayar)</h6>
+                    <span class="badge bg-success rounded-pill">{{ payment_queue.count }} Pending</span>
+                </div>
+            </div>
+            <div class="list-group list-group-flush">
+                {% for report in payment_queue %}
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="fw-bold">{{ report.location.name }}</span>
+                        <small class="text-muted d-block">{{ report.get_period_month_display }} {{ report.period_year }}</small>
+                        <span class="badge bg-success rounded-pill small">Verified</span>
+                    </div>
+                    <div class="d-flex gap-1">
+                         <a href="{% url 'portal:export_matrix_excel' report.id %}" class="btn btn-sm btn-outline-success" title="Cek Excel">
+                            <i class="fas fa-file-excel"></i>
+                        </a>
+                        <button class="btn btn-sm btn-primary" onclick="confirmApprove(event, '{% url 'portal:approve_payment' report.id %}')">
+                            <i class="fas fa-check-circle me-1"></i> Approve
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Approval Queue -->
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-white py-3">
@@ -518,6 +600,54 @@
                     <div class="text-center py-4 text-muted">Belum ada aktivitas.</div>
                     {% endfor %}
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sick & Leave Widget (HRD / ADMIN / SUPERVISOR / ACCOUNTING) -->
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h6 class="mb-0 fw-bold"><i class="fas fa-notes-medical me-2 text-warning"></i>Karyawan Izin & Sakit Hari Ini</h6>
+                <span class="badge bg-warning text-dark">{{ sick_leave_list|length }}</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="bg-light">
+                        <tr>
+                            <th class="ps-4">Nama Karyawan</th>
+                            <th>Lokasi</th>
+                            <th>Departemen</th>
+                            <th>Status</th>
+                            <th>Mulai</th>
+                            <th>Selesai</th>
+                            <th>Keterangan</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in sick_leave_list %}
+                        <tr>
+                            <td class="ps-4 fw-medium">{{ item.employee.full_name }}</td>
+                            <td><span class="badge bg-light text-dark border">{{ item.location.code }}</span></td>
+                            <td>{{ item.employee.department.name|default:"-" }}</td>
+                            <td>
+                                {% if item.status_code == 'SAKIT' %}
+                                <span class="badge bg-danger rounded-pill"><i class="fas fa-user-injured me-1"></i> Sakit</span>
+                                {% elif item.status_code == 'IZIN' %}
+                                <span class="badge bg-warning text-dark rounded-pill"><i class="fas fa-file-alt me-1"></i> Izin</span>
+                                {% elif item.status_code == 'CUTI' or item.status_code == 'CUTI_KHUSUS' %}
+                                <span class="badge bg-info text-dark rounded-pill"><i class="fas fa-plane-departure me-1"></i> Cuti</span>
+                                {% endif %}
+                            </td>
+                            <td class="small">{{ item.start_date|date:"d M" }}</td>
+                            <td class="small">{{ item.end_date|date:"d M" }}</td>
+                            <td class="text-muted small">{{ item.notes|default:"-"|truncatechars:50 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="7" class="text-center py-4 text-muted">Tidak ada karyawan izin/sakit hari ini.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
