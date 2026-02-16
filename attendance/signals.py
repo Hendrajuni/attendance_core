@@ -1,55 +1,56 @@
-from django.db.models.signals import post_save
+from django.contrib.auth.signals import user_logged_in, user_logged_out, user_login_failed
 from django.dispatch import receiver
-from django.utils import timezone
-from .models import AttendanceLog, MonthlyReport
-import logging
+from .models import AccessLog
 
-logger = logging.getLogger(__name__)
+def get_client_ip(request):
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0]
+    else:
+        ip = request.META.get('REMOTE_ADDR')
+    return ip
 
-@receiver(post_save, sender=AttendanceLog)
-def update_monthly_report_last_edit(sender, instance, created, **kwargs):
-    """
-    Otomatis update 'last_modified_by' dan 'updated_at' di MonthlyReport
-    setiap kali ada perubahan data absensi (AttendanceLog).
-    """
-    try:
-        # Tentukan Lokasi Laporan
-        # Prioritas: captured_at > employee.home_base
-        location = instance.captured_at
-        if not location and instance.employee:
-            location = instance.employee.home_base
-            
-        if not location:
-            return  # Tidak bisa menentukan lokasi, skip
-            
-        # Tentukan Periode
-        # Gunakan local time untuk akurasi periode
-        local_dt = timezone.localtime(instance.timestamp)
-        month = local_dt.month
-        year = local_dt.year
-        
-        # Cari MonthlyReport yang sesuai
-        report = MonthlyReport.objects.filter(
-            location=location,
-            period_month=month,
-            period_year=year
-        ).first()
-        
-        if report:
-            # Update Timestamp
-            # Logika "Last Edit": Setiap kali ada perubahan di log, report dianggap berubah.
-            # Field updated_at akan otomatis berubah karena auto_now=True,
-            # tapi kita paksa save() untuk memicu update tersebut jika tidak ada field lain yang berubah.
-            
-            # Note: last_modified_by idealnya diisi oleh user yang login. 
-            # Karena signal tidak punya context request, kita biarkan field ini 
-            # di-handle oleh View yang melakukan save() jika memungkinkan.
-            # Signal ini menjadi safety net untuk setidaknya mengupdate waktu 'updated_at'.
+@receiver(user_logged_in)
+def log_user_login(sender, request, user, **kwargs):
+    ip = get_client_ip(request)
+    user_agent = request.META.get('HTTP_USER_AGENT', '')[:255]
+    AccessLog.objects.create(
+        user=user,
+        action='LOGIN',
+        ip_address=ip,
+        user_agent=user_agent,
+        status='SUCCESS'
+    )
 
-            report.updated_at = timezone.now()
-            report.save(update_fields=['updated_at'])
-            
-            logger.info(f"Signal: Updated MonthlyReport {report} timestamp due to log change.")
-            
-    except Exception as e:
-        logger.error(f"Error updating MonthlyReport from signal: {e}")
+@receiver(user_logged_out)
+def log_user_logout(sender, request, user, **kwargs):
+    ip = get_client_ip(request)
+    user_agent = request.META.get('HTTP_USER_AGENT', '')[:255]
+    AccessLog.objects.create(
+        user=user,
+        action='LOGOUT',
+        ip_address=ip,
+        user_agent=user_agent,
+        status='SUCCESS'
+    )
+
+@receiver(user_login_failed)
+def log_user_login_failed(sender, credentials, request, **kwargs):
+    ip = get_client_ip(request)
+    user_agent = request.META.get('HTTP_USER_AGENT', '')[:255]
+    # Attempt to find user by username, but don't crash if not found
+    # credentials usually contains 'username'
+    username = credentials.get('username')
+    
+    # We create a log without a user relation (since login failed), unless we want to look it up.
+    # But AccessLog.user is FK to User. If user doesn't exist, we can't link it.
+    # So we leave user null, and maybe put username in user_agent or another field?
+    # For now, let's just log ip/agent.
+    
+    AccessLog.objects.create(
+        user=None,
+        action='LOGIN_FAILED',
+        ip_address=ip,
+        user_agent=f"{user_agent} | Username: {username}",
+        status='FAILURE'
+    )

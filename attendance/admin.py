@@ -1,5 +1,6 @@
 from datetime import date
 from django import forms
+from django.db import models # Added for global history admin
 from django.contrib import admin, messages
 from django.shortcuts import render, redirect
 from django.http import HttpResponseRedirect
@@ -12,7 +13,9 @@ from .models import (
     DailySchedule, ShiftPattern, EmployeeShiftAssignment,
     NewRegistration, EmployeeMutation,  # Proxy Model + Mutation
     MonthlyReport, ReportHistory,  # Phase 4: Report System
+    AccessLog, # Audit Log
 )
+from simple_history.admin import SimpleHistoryAdmin
 
 
 # =============================================================================
@@ -110,7 +113,7 @@ class SpreadsheetSourceAdmin(admin.ModelAdmin):
 # =============================================================================
 
 @admin.register(DailySchedule)
-class DailyScheduleAdmin(admin.ModelAdmin):
+class DailyScheduleAdmin(SimpleHistoryAdmin):
     list_display = ('name', 'code', 'clock_in', 'clock_out', 'enable_checkin_1', 'enable_checkin_2', 'is_active')
     list_filter = ('is_active', 'enable_checkin_1', 'enable_checkin_2')
     search_fields = ('name', 'code')
@@ -143,7 +146,7 @@ class DailyScheduleAdmin(admin.ModelAdmin):
 
 
 @admin.register(ShiftPattern)
-class ShiftPatternAdmin(admin.ModelAdmin):
+class ShiftPatternAdmin(SimpleHistoryAdmin):
     list_display = ('name', 'code', 'is_active')
     list_filter = ('is_active',)
     search_fields = ('name', 'code')
@@ -187,7 +190,7 @@ class DepartmentAdmin(admin.ModelAdmin):
 # =============================================================================
 
 @admin.register(Employee)
-class EmployeeAdmin(admin.ModelAdmin):
+class EmployeeAdmin(SimpleHistoryAdmin):
     """
     Admin untuk mengelola Karyawan MASTER (is_verified=True).
     Menampilkan hanya karyawan yang sudah divalidasi.
@@ -668,7 +671,7 @@ class UserAdmin(BaseUserAdmin):
 # =============================================================================
 
 @admin.register(AttendanceLog)
-class AttendanceLogAdmin(admin.ModelAdmin):
+class AttendanceLogAdmin(SimpleHistoryAdmin):
     list_display = ('timestamp', 'employee', 'status', 'log_category', 'source_type', 'captured_at', 'verification_method')
     list_filter = ('status', 'log_category', 'source_type', 'timestamp', 'captured_at', 'employee__department')
     search_fields = ('employee__full_name', 'employee__nik')
@@ -798,3 +801,85 @@ class ReportHistoryAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return request.user.is_superuser  # Only superuser can delete (emergency)
 
+
+# =============================================================================
+# AUDIT LOG ADMIN (ACCESS LOG)
+# =============================================================================
+
+@admin.register(AccessLog)
+class AccessLogAdmin(admin.ModelAdmin):
+    list_display = ('timestamp', 'user', 'action', 'status', 'ip_address', 'user_agent_short')
+    list_filter = ('action', 'status', 'timestamp', 'user__employee_profile__role')
+    search_fields = ('user__username', 'ip_address', 'user_agent')
+    date_hierarchy = 'timestamp'
+    ordering = ['-timestamp']
+    
+    def user_agent_short(self, obj):
+        return (obj.user_agent[:50] + '...') if obj.user_agent and len(obj.user_agent) > 50 else obj.user_agent
+    user_agent_short.short_description = "User Agent"
+    
+    def has_add_permission(self, request):
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        return False
+    
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+
+# =============================================================================
+# DATA CHANGE LOG ADMIN (GLOBAL HISTORY)
+# =============================================================================
+
+class ReadOnlyHistoryAdmin(admin.ModelAdmin):
+    """
+    Base Admin class for Historical Models to make them read-only and searchable.
+    """
+    list_display = ('history_date', 'history_user', 'history_type', 'history_id')
+    list_filter = ('history_date', 'history_type', 'history_user')
+    ordering = ['-history_date']
+    
+    def has_add_permission(self, request):
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        return False
+    
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+# Register Historical Models
+# Note: We must unregister them first if they are already registered (unlikely but safe)
+# The model names usually default to "Historical [model name]"
+
+def register_historical_model(model, title):
+    try:
+        history_model = model.history.model
+    except AttributeError:
+        # Model might not have history enabled
+        return
+    
+    if admin.site.is_registered(history_model):
+        admin.site.unregister(history_model)
+
+    @admin.register(history_model)
+    class HistoryAdmin(ReadOnlyHistoryAdmin):
+        # Dynamically set list_display based on fields, excluding internal ones
+        list_display = ['history_date', 'history_user', 'history_type'] + \
+                       [f.name for f in history_model._meta.fields 
+                        if f.name not in ['history_id', 'history_date', 'history_user', 'history_type', 'history_change_reason', 'history_relation_id']][:5]
+        
+        search_fields = [f.name for f in history_model._meta.fields 
+                         if isinstance(f, (models.CharField, models.TextField))][:3]
+        
+        verbose_name_plural = title
+
+# Register specific historical models
+# Check if models are imported. If not, they should be imported at top of file. 
+# Assuming they are already imported as per file content view.
+
+register_historical_model(Employee, "Riwayat Karyawan (Global)")
+register_historical_model(AttendanceLog, "Riwayat Absensi (Global)")
+register_historical_model(DailySchedule, "Riwayat Jadwal (Global)")
+register_historical_model(ShiftPattern, "Riwayat Shift (Global)")

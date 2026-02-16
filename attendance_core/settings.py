@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     'attendance',
     'portal',  # New frontend app
     'mptt',
+    'simple_history', # Audit Log
 ]
 
 MIDDLEWARE = [
@@ -43,6 +44,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'simple_history.middleware.HistoryRequestMiddleware', # Audit Log
 ]
 
 ROOT_URLCONF = 'attendance_core.urls'

@@ -101,10 +101,11 @@ def sync_machine_single(request, device_id):
                     if timezone.is_naive(timestamp):
                         timestamp = timezone.make_aware(timestamp)
                     
-                    # Find employee
+                    # Find employee (Scoped to Device Location)
                     employee = Employee.objects.filter(
                         device_user_id=user_id,
-                        is_active=True
+                        is_active=True,
+                        home_base=device.location  # Fix: Prevent cross-location ID conflict
                     ).first()
                     
                     if not employee:
