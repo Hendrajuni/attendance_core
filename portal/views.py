@@ -11,7 +11,17 @@ from django.urls import reverse
 import calendar
 import holidays
 from django.utils import timezone
+from django.utils import timezone
+from django.contrib import messages
+from django.utils import timezone
+from django.contrib import messages
 from django.utils.timezone import localtime
+import pandas as pd
+from attendance.models import WorkLocation, MonthlyReport, Employee, AttendanceLog, EmployeeLeave, DailySchedule, DailyShiftAssignment
+from attendance.forms import ImportRosterForm
+import pandas as pd
+from attendance.models import WorkLocation, MonthlyReport, Employee, AttendanceLog, EmployeeLeave, DailySchedule, DailyShiftAssignment
+from attendance.forms import ImportRosterForm
 
 # Constants
 SCHEDULE_IN = time(8, 0)
@@ -1060,6 +1070,11 @@ def sync_wa_source_htmx(request, source_id):
                 jam_str = str(row.get('JAM ABSEN', '')).strip()
                 user_id = str(row.get('NOMOR WA', '')).strip()
                 
+                # VALIDATION: Skip if User ID is empty or invalid
+                if not user_id or user_id.lower() in ['nan', 'none', '']:
+                    print(f"DEBUG: Row {idx} skipped - missing NOMOR WA")
+                    continue
+
                 if not tgl_str or not jam_str: 
                     print(f"DEBUG: Row {idx} skipped - missing TANGGAL or JAM ABSEN")
                     continue
@@ -1552,6 +1567,7 @@ def employee_edit_view(request, employee_id):
         # Get form data common to all
         full_name = request.POST.get('full_name', '').strip()
         is_active = request.POST.get('is_active') == 'on'
+        is_shift_worker = request.POST.get('is_shift_worker') == 'on'
         
         # Validation
         if not full_name:
@@ -1562,6 +1578,7 @@ def employee_edit_view(request, employee_id):
                 # Update Common Fields
                 employee.full_name = full_name
                 employee.is_active = is_active
+                employee.is_shift_worker = is_shift_worker
                 
                 # Update Advanced Fields (Full Edit Only)
                 if is_full_edit:
@@ -1912,6 +1929,10 @@ def recap_matrix_view(request):
     summary_stats = {'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0, 'hadir': 0, 'late_count': 0}
     personal_employee = None  # Will hold target employee in personal mode
     
+    # Standard Schedule (Hardcoded for now, can be moved to model later)
+    DEFAULT_SCHEDULE_IN = timezone.datetime.strptime('08:00', '%H:%M').time()
+    DEFAULT_SCHEDULE_OUT = timezone.datetime.strptime('17:00', '%H:%M').time()
+    
     # If specific employee selected, switch to PERSONAL MODE
     if employee_id:
         try:
@@ -1939,10 +1960,6 @@ def recap_matrix_view(request):
                     'log': log,
                     'local_dt': local_dt
                 })
-            
-            # Standard Schedule (Hardcoded for now, can be moved to model later)
-            # SCHEDULE_IN = timezone.datetime.strptime('08:00', '%H:%M').time()
-            # SCHEDULE_OUT = timezone.datetime.strptime('17:00', '%H:%M').time()
             
             # Holiday Object for Indonesia
             id_holidays = holidays.ID(years=[year, year-1])
@@ -2501,6 +2518,18 @@ def recap_matrix_view(request):
     if wa_employees:
         # Build set of holiday dates for quick lookup
         holidays_set = set(holidays_map.keys())
+
+        # PREFETCH ROSTER ASSIGNMENTS FOR WA EMPLOYEES (Moved Up)
+        from attendance.models import DailyShiftAssignment
+        wa_roster_map = {}
+        
+        wa_assignments = DailyShiftAssignment.objects.filter(
+            employee__in=wa_employees,
+            date__range=[wa_date_range[0], wa_date_range[-1]]
+        ).select_related('shift')
+        
+        for asm in wa_assignments:
+            wa_roster_map[(asm.employee_id, asm.date)] = asm.shift
         
         # Initialize matrix for all employees
         for emp in wa_employees:
@@ -2517,16 +2546,99 @@ def recap_matrix_view(request):
             source_type='TELEGRAM'
         ).select_related('employee')
         
-        # Fill in the matrix
+        # DYNAMIC SLOTTING FOR MATRIX VIEW
+        # 1. Group logs by Employee & Date first (to avoid overwriting)
+        wa_logs_grouped = defaultdict(list)
         for log in wa_month_logs:
             local_time = timezone.localtime(log.timestamp)
-            log_date = local_time.date()
-            cat = log.log_category if log.log_category in WA_CATEGORIES else 'UNKNOWN'
-            if cat in WA_CATEGORIES and log_date in wa_matrix_data.get(log.employee_id, {}):
-                wa_matrix_data[log.employee_id][log_date][cat] = local_time.strftime('%H:%M')
-            # Check for izin/sakit (if stored in notes or specific field)
-            if hasattr(log, 'notes') and log.notes and ('IZIN' in log.notes.upper() or 'SAKIT' in log.notes.upper()):
-                wa_matrix_data[log.employee_id][log_date]['IZIN'] = log.notes[:10]
+            key = (log.employee_id, local_time.date())
+            wa_logs_grouped[key].append(log)
+
+        # 2. Iterate Date Range and Slot Logs
+        for emp in wa_employees:
+            for d in wa_date_range:
+                logs = wa_logs_grouped.get((emp.id, d), [])
+                daily_shift = wa_roster_map.get((emp.id, d))
+                
+                # Context to fill
+                day_data = wa_matrix_data[emp.id][d]
+                
+                # Sort logs by time
+                logs.sort(key=lambda x: x.timestamp)
+                
+                # Determine Roster Pivot Points
+                # If Roster exists, use it. If not, use Default (08:00 - 17:00)
+                if daily_shift:
+                    sch_in = daily_shift.clock_in
+                    sch_out = daily_shift.clock_out
+                    has_roster = True
+                else:
+                    sch_in = time(8, 0)
+                    sch_out = time(17, 0)
+                    has_roster = False
+                
+                dummy_date = date(2000, 1, 1)
+                dt_sch_in = datetime.combine(dummy_date, sch_in)
+                dt_sch_out = datetime.combine(dummy_date, sch_out)
+                
+                # Helper to calculate minutes difference
+                def get_diff_mins(t_val, t_target):
+                    dt_val = datetime.combine(dummy_date, t_val)
+                    return (dt_val - t_target).total_seconds() / 60
+
+                # Slotting Logic
+                for log in logs:
+                    local_time = timezone.localtime(log.timestamp)
+                    t_val = local_time.time()
+                    time_str = t_val.strftime('%H:%M')
+                    
+                    category_to_fill = None
+                    
+                    if has_roster:
+                        # Dynamic Slotting based on proximity
+                        diff_in = abs(get_diff_mins(t_val, dt_sch_in))
+                        diff_out = abs(get_diff_mins(t_val, dt_sch_out))
+                        
+                        # Thresholds (e.g. 4 hours)
+                        if diff_in < diff_out and diff_in < 240:
+                            category_to_fill = 'MASUK'
+                        elif diff_out < diff_in and diff_out < 240:
+                            category_to_fill = 'PULANG'
+                        else:
+                            # Fallback to stored category if ambiguous
+                            if log.log_category in WA_CATEGORIES:
+                                category_to_fill = log.log_category
+                    else:
+                        # Standard category behavior
+                        if log.log_category in WA_CATEGORIES:
+                            category_to_fill = log.log_category
+                    
+                    # Special check: If MASUK is already filled, maybe this is PULANG?
+                    # Or if this is clearly later, treat as Pulang.
+                    if category_to_fill == 'MASUK' and day_data.get('MASUK'):
+                         # If we already have Masuk, and this creates a conflict, 
+                         # check if it looks like a Pulang (later time)
+                         existing_val = day_data['MASUK']['value']
+                         if time_str > existing_val:
+                             category_to_fill = 'PULANG' # Re-slot to Pulang
+                    
+                    # Fill the slot
+                    if category_to_fill:
+                        is_late = False
+                        if category_to_fill == 'MASUK':
+                            # Recalc Late
+                            diff_real = get_diff_mins(t_val, dt_sch_in)
+                            is_late = diff_real > 0
+                        
+                        day_data[category_to_fill] = {
+                            'value': time_str,
+                            'is_late': is_late,
+                            'shift_name': daily_shift.name if category_to_fill == 'MASUK' and daily_shift else ''
+                        }
+
+                    # Check Notes for IZIN
+                    if hasattr(log, 'notes') and log.notes and ('IZIN' in log.notes.upper() or 'SAKIT' in log.notes.upper()):
+                        wa_matrix_data[log.employee_id][d]['IZIN'] = log.notes[:10]
         
         # Fetch leaves for all WA employees in range (Inclusive)
         wa_leaves = EmployeeLeave.objects.filter(
@@ -2557,6 +2669,8 @@ def recap_matrix_view(request):
                 
                 curr += timedelta(days=1)
         
+
+
         # Calculate summary per employee
         wa_summary_data = {}
         # We'll use a new dict for the 5-column stats to avoid breaking existing logic if needed
@@ -2586,12 +2700,11 @@ def recap_matrix_view(request):
                     continue
                 
                 # Check Hadir (Masuk)
-                masuk_time = day_data.get('MASUK')
-                if masuk_time:
+                masuk_data = day_data.get('MASUK')
+                if masuk_data and isinstance(masuk_data, dict):
                     wa_summary_data[emp.id]['H'] += 1
-                    # Check Late
-                    # masuk_time is string "HH:MM"
-                    if masuk_time > "08:00":
+                    # Check Late (Already calculated in matrix population)
+                    if masuk_data.get('is_late'):
                         wa_summary_data[emp.id]['T'] += 1
                 else:
                     # No Masuk
@@ -2693,17 +2806,12 @@ def recap_matrix_view(request):
                 timestamp__month=month
             ).order_by('timestamp')
             
-            # Group by date and category
-            wa_grouped = defaultdict(lambda: {cat: None for cat in WA_CATEGORIES})
+            # Group by date (List of logs to avoid overwriting)
+            wa_logs_grouped = defaultdict(list)
             for log in wa_month_logs:
                 local_dt = timezone.localtime(log.timestamp)
                 log_date = local_dt.date()
-                cat = log.log_category if log.log_category in WA_CATEGORIES else 'UNKNOWN'
-                if cat in WA_CATEGORIES:
-                    wa_grouped[log_date][cat] = {
-                        'time': local_dt.strftime('%H:%M'),
-                        'log': log,
-                    }
+                wa_logs_grouped[log_date].append(log)
             
             # Initialize Summary Stats for WA
             wa_summary_stats = {
@@ -2713,18 +2821,82 @@ def recap_matrix_view(request):
             }
             
             # Schedule Constants (Reuse standard or define here)
-            # Assuming standard 08:00 - 17:00 for calculation
-            SCHEDULE_IN = timezone.datetime.strptime('08:00', '%H:%M').time()
-            SCHEDULE_OUT = timezone.datetime.strptime('17:00', '%H:%M').time()
+            # Schedule Constants (Dynamic Lookup per Day)
+            # Default Schedule if no Roster found
+            DEFAULT_SCHEDULE_IN = timezone.datetime.strptime('08:00', '%H:%M').time()
+            DEFAULT_SCHEDULE_OUT = timezone.datetime.strptime('17:00', '%H:%M').time()
             dummy_date = date(2000, 1, 1)
 
             # Build personal logs list
             for d in wa_date_range:
+                # Dynamic Schedule Lookup
+                daily_shift = wa_roster_map.get((wa_personal_employee.id, d)) if 'wa_roster_map' in locals() else None
+                
+                # If personal mode, we might need to fetch roster map if it wasn't built (e.g. direct access)
+                if not 'wa_roster_map' in locals():
+                     from attendance.models import DailyShiftAssignment
+                     daily_shift_obj = DailyShiftAssignment.objects.filter(employee=wa_personal_employee, date=d).first()
+                     daily_shift = daily_shift_obj.shift if daily_shift_obj else None
+
+                SCHEDULE_IN = daily_shift.clock_in if daily_shift else DEFAULT_SCHEDULE_IN
+                SCHEDULE_OUT = daily_shift.clock_out if daily_shift else DEFAULT_SCHEDULE_OUT
+
                 is_holiday = d in id_holidays
                 is_weekend = d.weekday() == 6  # Only Sunday is weekend
                 holiday_name = id_holidays.get(d)
                 
-                day_data = wa_grouped.get(d, {cat: None for cat in WA_CATEGORIES})
+                # DYNAMIC SLOTTING LOGIC for Personal View
+                # Initialize day_data
+                day_data = {cat: None for cat in WA_CATEGORIES}
+                
+                logs = wa_logs_grouped.get(d, [])
+                logs.sort(key=lambda x: x.timestamp)
+                
+                # Helper for diff
+                def get_diff_mins_pv(t_val, t_target):
+                    dt_val = datetime.combine(dummy_date, t_val)
+                    return (dt_val - t_target).total_seconds() / 60
+                
+                dt_sch_in = datetime.combine(dummy_date, SCHEDULE_IN)
+                dt_sch_out = datetime.combine(dummy_date, SCHEDULE_OUT)
+                
+                has_roster = bool(daily_shift)
+                
+                for log in logs:
+                    local_dt = timezone.localtime(log.timestamp)
+                    t_val = local_dt.time()
+                    time_str = t_val.strftime('%H:%M')
+                    
+                    category_to_fill = None
+                    
+                    if has_roster:
+                        diff_in = abs(get_diff_mins_pv(t_val, dt_sch_in))
+                        diff_out = abs(get_diff_mins_pv(t_val, dt_sch_out))
+                        
+                        if diff_in < diff_out and diff_in < 240:
+                            category_to_fill = 'MASUK'
+                        elif diff_out < diff_in and diff_out < 240:
+                            category_to_fill = 'PULANG'
+                        else:
+                            # Fallback
+                            if log.log_category in WA_CATEGORIES:
+                                category_to_fill = log.log_category
+                    else:
+                        # Standard
+                        if log.log_category in WA_CATEGORIES:
+                            category_to_fill = log.log_category
+                    
+                    # Conflict check (similar to Matrix)
+                    if category_to_fill == 'MASUK' and day_data.get('MASUK'):
+                         existing_val = day_data['MASUK']['time']
+                         if time_str > existing_val:
+                             category_to_fill = 'PULANG'
+
+                    if category_to_fill:
+                        day_data[category_to_fill] = {
+                            'time': time_str,
+                            'log': log
+                        }
                 
                 # Count completed checkpoints
                 completed = sum(1 for cat in WA_CATEGORIES if day_data.get(cat))
@@ -2978,7 +3150,27 @@ def edit_attendance_modal(request, employee_id, date_str):
         ('PERMIT', 'Izin (I)'),
         ('ALPHA', 'Alpha (A)'),
     ]
+
+    # --- ROSTER LOGIC (Shift Worker Only) ---
+    is_shift_worker = getattr(employee, 'is_shift_worker', False)
+    shift_choices = []
+    current_roster = None
     
+    if is_shift_worker:
+        from attendance.models import DailySchedule, DailyShiftAssignment
+        # Fetch all active Daily Schedules (Exclude non-shift items)
+        excluded_codes = ['TT', 'HOF', 'KF']
+        shifts = DailySchedule.objects.filter(is_active=True).exclude(code__in=excluded_codes).order_by('clock_in')
+        for s in shifts:
+            label = f"{s.name} ({s.clock_in.strftime('%H:%M')} - {s.clock_out.strftime('%H:%M')})"
+            shift_choices.append((s.id, label))
+            
+        # Fetch current assignment
+        current_roster = DailyShiftAssignment.objects.filter(
+            employee=employee,
+            date=target_date
+        ).first()
+
     context = {
         'employee': employee,
         'target_date': target_date,
@@ -2986,6 +3178,10 @@ def edit_attendance_modal(request, employee_id, date_str):
         'existing_log': existing_log,
         'status_choices': status_choices,
         'is_edit': existing_log is not None,
+        # Roster Context
+        'is_shift_worker': is_shift_worker,
+        'shift_choices': shift_choices,
+        'current_roster': current_roster,
     }
     
     return render(request, 'portal/partials/_modal_edit_log.html', context)
@@ -3037,6 +3233,80 @@ def save_attendance_cell(request):
             
     except Exception:
         pass # Fail safe, allow edit if check fails (or handle stricter)
+        
+    # ... (Rest of save_attendance_cell logic)
+    
+@login_required
+def save_roster_cell(request):
+    """
+    HTMX POST: Simpan/Update Daily Roster dari Matrix Modal.
+    """
+    from attendance.models import Employee, DailySchedule, DailyShiftAssignment
+    from datetime import datetime
+    from django.db import transaction
+    
+    if request.method != 'POST':
+        return HttpResponse('<div class="alert alert-warning">Method not allowed</div>')
+        
+    employee_id = request.POST.get('employee_id')
+    date_str = request.POST.get('date_str')
+    shift_id = request.POST.get('shift_id')
+    
+    try:
+        employee = Employee.objects.get(id=employee_id)
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        
+        # Validation
+        if not getattr(employee, 'is_shift_worker', False):
+             return HttpResponse('<div class="alert alert-danger">Karyawan bukan Shift Worker</div>')
+        
+        with transaction.atomic():
+            if shift_id:
+                shift = DailySchedule.objects.get(id=shift_id)
+                DailyShiftAssignment.objects.update_or_create(
+                    employee=employee,
+                    date=target_date,
+                    defaults={
+                        'shift': shift,
+                        'created_by': request.user
+                    }
+                )
+                msg = f"Shift diset: {shift.name}"
+                cls = "success"
+            else:
+                # Delete assignment if empty (optional, if we allow clearing shift)
+                # Currently UI might not support clearing, but good to handle
+                DailyShiftAssignment.objects.filter(employee=employee, date=target_date).delete()
+                msg = "Shift dihapus"
+                cls = "warning"
+                
+        # Return generic success message or toast trigger
+        # create valid HTML for the target (optional) or just close modal + toast
+        # For now, we return OOB swap to show toast? 
+        # Or simpler: Just a success alert in the modal target?
+        # The modal target is #cell-id. We don't want to replace the cell with text.
+        # Ideally we want to refresh the cell content.
+        # But roster change affects EXPECTED schedule, not directly the cell content (unless we show roster info).
+        # Let's return a Toast trigger + Keep cell as is (or refresh it).
+        
+        # Trigger client-side refresh of the cell?
+        # Actually, simply returning 200 with HX-Trigger='rosterUpdated' is best.
+        # But we need to close the modal.
+        
+        # Let's return the cell content again (refresh).
+        # Reuse logic from edit_attendance_modal? No, that returns modal.
+        # We need to return the CELL html (like recap_matrix_view renders).
+        # But fetching cell logic is complex (in recap_matrix_view).
+        
+        # Alternative: Return a "Success" div that disappears?
+        # Or use HX-Refresh to reload the page/table?
+        # Reloading table is safest to reflect changes (e.g. Late calc might change).
+        
+        return HttpResponse(status=200, headers={'HX-Refresh': 'true'})
+
+    except Exception as e:
+        return HttpResponse(f'<div class="alert alert-danger">Error: {str(e)}</div>')
+
 
     # Determine display status code
     status_map = {
@@ -3124,6 +3394,34 @@ def wa_edit_cell(request, employee_id, date_str, category):
     # Get user role
     profile = getattr(request.user, 'employee_profile', None)
     user_role = profile.role if profile else 'KERANI'
+
+    # --- ROSTER LOGIC (Shift Worker Only) ---
+    is_shift_worker = getattr(employee, 'is_shift_worker', False)
+    shift_choices = []
+    current_roster = None
+    
+    if is_shift_worker:
+        from attendance.models import DailySchedule, DailyShiftAssignment
+        # Fetch all active Daily Schedules (Exclude non-shift items)
+        excluded_codes = ['TT', 'HOF', 'KF']
+        shifts = DailySchedule.objects.filter(is_active=True).exclude(code__in=excluded_codes).order_by('clock_in')
+        
+        wa_shifts = []
+        finger_shifts = []
+        
+        for s in shifts:
+            label = f"{s.name} ({s.clock_in.strftime('%H:%M')} - {s.clock_out.strftime('%H:%M')})"
+            item = (s.id, label)
+            if 'WA' in s.name.upper():
+                wa_shifts.append(item)
+            else:
+                finger_shifts.append(item)
+            
+        # Fetch current assignment
+        current_roster = DailyShiftAssignment.objects.filter(
+            employee=employee,
+            date=target_date
+        ).first()
     
     # Check if log exists for this cell
     existing_log = AttendanceLog.objects.filter(
@@ -3155,6 +3453,12 @@ def wa_edit_cell(request, employee_id, date_str, category):
         'existing_notes': existing_notes,
         'is_admin': user_role in ['ADMIN', 'HRD'],
         'cell_id': f"wa-cell-{employee.id}-{date_str}-{category}", # Target ID for HTMX
+        # Roster Context
+        'is_shift_worker': is_shift_worker,
+        'shift_choices': shift_choices,
+        'wa_shifts': wa_shifts,
+        'finger_shifts': finger_shifts,
+        'current_roster': current_roster,
     }
     
     return render(request, 'portal/partials/_wa_edit_cell_modal.html', context)
@@ -3682,11 +3986,47 @@ def fp_edit_cell(request, employee_id, date_str):
         if existing_log.notes == 'Manual Entry':
             existing_status = 'Hadir (Manual)'
             
+    # --- ROSTER LOGIC (Shift Worker Only) ---
+    is_shift_worker = getattr(employee, 'is_shift_worker', False)
+    shift_choices = []
+    current_roster = None
+    
+    if is_shift_worker:
+        from attendance.models import DailySchedule, DailyShiftAssignment
+        # Fetch all active Daily Schedules (Exclude non-shift items)
+        excluded_codes = ['TT', 'HOF', 'KF']
+        shifts = DailySchedule.objects.filter(is_active=True).exclude(code__in=excluded_codes).order_by('clock_in')
+        
+        wa_shifts = []
+        finger_shifts = []
+
+        for s in shifts:
+            label = f"{s.name} ({s.clock_in.strftime('%H:%M')} - {s.clock_out.strftime('%H:%M')})"
+            item = (s.id, label)
+            shift_choices.append(item)
+            
+            if 'WA' in s.name.upper():
+                wa_shifts.append(item)
+            else:
+                finger_shifts.append(item)
+            
+        # Fetch current assignment
+        current_roster = DailyShiftAssignment.objects.filter(
+            employee=employee, 
+            date=target_date
+        ).first()
+
     context = {
         'employee': employee,
         'date_str': date_str,
         'existing_status': existing_status,
         'existing_log': existing_log,
+        # Roster Context
+        'is_shift_worker': is_shift_worker,
+        'shift_choices': shift_choices,
+        'wa_shifts': wa_shifts if is_shift_worker else [],
+        'finger_shifts': finger_shifts if is_shift_worker else [],
+        'current_roster': current_roster,
     }
     
     return render(request, 'portal/partials/_fp_edit_cell_modal.html', context)
@@ -5560,3 +5900,88 @@ def admin_notification_list(request):
         'page_obj': page_obj,
     }
     return render(request, 'portal/admin_notification_list.html', context)
+
+
+@login_required
+def import_roster_view(request):
+    """
+    Frontend view for importing Daily Roster via Excel.
+    Accessible by Kerani/Dept Admin/Supervisor.
+    """
+    if request.method == "POST":
+        form = ImportRosterForm(request.POST, request.FILES)
+        if form.is_valid():
+            excel_file = request.FILES["excel_file"]
+            try:
+                # Read Excel
+                df = pd.read_excel(excel_file)
+                
+                # Normalize columns (strip whitespace, upper case)
+                df.columns = df.columns.str.strip()
+                
+                # Check required columns
+                required_cols = ['NIK', 'Tanggal', 'Kode Shift']
+                if not all(col in df.columns for col in required_cols):
+                    messages.error(request, f"Format Error: Kolom wajib ada: {', '.join(required_cols)}")
+                    return redirect('portal:import_roster')
+
+                success_count = 0
+                errors = []
+                
+                with transaction.atomic():
+                    for index, row in df.iterrows():
+                        nik = str(row['NIK']).strip()
+                        # Handle date parsing safely
+                        try:
+                            date_val = pd.to_datetime(row['Tanggal']).date()
+                        except:
+                            errors.append(f"Baris {index+2}: Format tanggal salah ({row['Tanggal']})")
+                            continue
+
+                        shift_code = str(row['Kode Shift']).strip()
+                        
+                        # Find Employee
+                        employee = Employee.objects.filter(nik=nik).first()
+                        if not employee:
+                            errors.append(f"Baris {index+2}: Karyawan NIK {nik} tidak ditemukan")
+                            continue
+                            
+                        # Find Shift
+                        shift = DailySchedule.objects.filter(code=shift_code).first()
+                        if not shift:
+                            errors.append(f"Baris {index+2}: Shift Code {shift_code} tidak valid")
+                            continue
+                            
+                        # Update or Create
+                        DailyShiftAssignment.objects.update_or_create(
+                            employee=employee,
+                            date=date_val,
+                            defaults={
+                                'shift': shift,
+                                'created_by': request.user
+                            }
+                        )
+                        success_count += 1
+                
+                if errors:
+                    # Show top 5 errors
+                    error_msg = "<br>".join(errors[:5])
+                    if len(errors) > 5:
+                        error_msg += f"<br>... dan {len(errors)-5} error lainnya."
+                    
+                    messages.warning(request, f"Import Partial. Berhasil: {success_count}. Gagal: {len(errors)}.<br>{error_msg}")
+                else:
+                    messages.success(request, f"Sukses! Berhasil import {success_count} jadwal.")
+                    return redirect('portal:dashboard')
+
+            except Exception as e:
+                messages.error(request, f"System Error: {str(e)}")
+    else:
+        form = ImportRosterForm()
+    
+    context = {
+        'form': form,
+        'page_title': 'Import Roster'
+    }
+    return render(request, 'portal/import_roster.html', context)
+

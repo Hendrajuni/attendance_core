@@ -6,6 +6,8 @@ from django.shortcuts import render, redirect
 from django.http import HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.utils import timezone
+from django.urls import path
+import pandas as pd
 from mptt.admin import DraggableMPTTAdmin
 from .models import (
     Department, Employee, AttendanceLog, WorkLocation, 
@@ -14,7 +16,9 @@ from .models import (
     NewRegistration, EmployeeMutation,  # Proxy Model + Mutation
     MonthlyReport, ReportHistory,  # Phase 4: Report System
     AccessLog, # Audit Log
+    DailyShiftAssignment, # Dynamic Shift
 )
+from .forms import ImportRosterForm
 from simple_history.admin import SimpleHistoryAdmin
 
 
@@ -174,6 +178,87 @@ class EmployeeShiftAssignmentAdmin(admin.ModelAdmin):
     date_hierarchy = 'effective_from'
 
 
+@admin.register(DailyShiftAssignment)
+class DailyShiftAssignmentAdmin(SimpleHistoryAdmin):
+    list_display = ('employee', 'date', 'shift', 'created_by')
+    list_filter = ('date', 'shift', 'employee__department')
+    search_fields = ('employee__full_name', 'employee__nik')
+    autocomplete_fields = ['employee', 'shift']
+    date_hierarchy = 'date'
+    change_list_template = "admin/attendance/dailyshiftassignment/change_list.html"
+
+    def get_urls(self):
+        urls = super().get_urls()
+        my_urls = [
+            path('import/', self.admin_site.admin_view(self.import_roster), name='attendance_dailyshiftassignment_import'),
+        ]
+        return my_urls + urls
+
+    def import_roster(self, request):
+        if request.method == "POST":
+            form = ImportRosterForm(request.POST, request.FILES)
+            if form.is_valid():
+                excel_file = request.FILES["excel_file"]
+                try:
+                    df = pd.read_excel(excel_file)
+                    
+                    # Validate columns
+                    required_cols = ['NIK', 'Tanggal', 'Kode Shift']
+                    if not all(col in df.columns for col in required_cols):
+                        self.message_user(request, "Format Error: Kolom harus ada NIK, Tanggal, Kode Shift", level=messages.ERROR)
+                        return redirect("..")
+
+                    success_count = 0
+                    errors = []
+
+                    for index, row in df.iterrows():
+                        nik = str(row['NIK']).strip()
+                        date_val = pd.to_datetime(row['Tanggal']).date()
+                        shift_code = str(row['Kode Shift']).strip()
+                        
+                        # Find Employee
+                        employee = Employee.objects.filter(nik=nik).first()
+                        if not employee:
+                            errors.append(f"Row {index+2}: NIK {nik} not found")
+                            continue
+                            
+                        # Find Shift
+                        shift = DailySchedule.objects.filter(code=shift_code).first()
+                        if not shift:
+                            errors.append(f"Row {index+2}: Shift Code {shift_code} not found")
+                            continue
+                            
+                        # Update or Create
+                        DailyShiftAssignment.objects.update_or_create(
+                            employee=employee,
+                            date=date_val,
+                            defaults={
+                                'shift': shift,
+                                'created_by': request.user
+                            }
+                        )
+                        success_count += 1
+                    
+                    if errors:
+                        self.message_user(request, f"Imported {success_count} rows. Errors: {'; '.join(errors[:5])}...", level=messages.WARNING)
+                    else:
+                        self.message_user(request, f"Successfully imported {success_count} assignments.", level=messages.SUCCESS)
+                        
+                    return redirect("..")
+                    
+                except Exception as e:
+                    self.message_user(request, f"Error processing file: {str(e)}", level=messages.ERROR)
+        else:
+            form = ImportRosterForm()
+            
+        context = dict(
+            self.admin_site.each_context(request),
+            form=form,
+            opts=self.model._meta,
+        )
+        return render(request, "admin/attendance/dailyshiftassignment/import_roster.html", context)
+
+
 # =============================================================================
 # DEPARTMENT ADMIN
 # =============================================================================
@@ -196,7 +281,7 @@ class EmployeeAdmin(SimpleHistoryAdmin):
     Menampilkan hanya karyawan yang sudah divalidasi.
     """
     list_display = (
-        'nik', 'full_name', 'employee_type', 'home_base', 
+        'nik', 'full_name', 'employee_type', 'is_shift_worker', 'home_base', 
         'phone_number', 'device_user_id', 'telegram_user_id', 'joined_date', 'is_active'
     )
     list_filter = ('employee_type', 'is_active', 'department', 'home_base', 'joined_date')
@@ -212,6 +297,7 @@ class EmployeeAdmin(SimpleHistoryAdmin):
                 ('nik', 'full_name'),
                 ('employee_type', 'department'),
                 ('joined_date', 'is_active'),
+                'is_shift_worker',
             )
         }),
         ('Penempatan & Mutasi', {

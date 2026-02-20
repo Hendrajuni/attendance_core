@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="card-title">Import Daily Roster (Excel)</h4>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">
+                    Upload file Excel untuk import jadwal shift harian secara massal.
+                    <br>
+                    Format kolom Wajib: <code>NIK</code>, <code>Tanggal</code> (YYYY-MM-DD), <code>Kode Shift</code>.
+                </p>
+
+                <div class="alert alert-info">
+                    <strong>Note:</strong> 
+                    <ul>
+                        <li>Pastikan NIK karyawan sudah terdaftar.</li>
+                        <li>Kode Shift harus sesuai Master (Contoh: SHIFT-PAGI, SHIFT-SORE, OFF).</li>
+                        <li>Format Tanggal Excel harus benar (Date format).</li>
+                    </ul>
+                </div>
+
+                <form method="post" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    
+                    {% if form.errors %}
+                        <div class="alert alert-danger">
+                            {{ form.errors }}
+                        </div>
+                    {% endif %}
+
+                    <div class="form-group mb-3">
+                        <label for="id_excel_file" class="form-label">Pilih File Excel (.xlsx)</label>
+                        {{ form.excel_file }}
+                        {% if form.excel_file.help_text %}
+                            <small class="form-text text-muted">{{ form.excel_file.help_text }}</small>
+                        {% endif %}
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-upload"></i> Upload & Import
+                        </button>
+                        <a href="{% url 'portal:dashboard' %}" class="btn btn-secondary">
+                            Kembali ke Dashboard
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

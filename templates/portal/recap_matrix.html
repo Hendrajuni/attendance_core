@@ -943,8 +943,16 @@
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'MASUK' %}" 
                                                 hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal"
                                                 {% endif %}>
-                                                {% with time=emp_day_data|dict_get:'MASUK' %}
-                                                    {% if time %}<span class="text-success" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
+                                                {% with cell_data=emp_day_data|dict_get:'MASUK' %}
+                                                    {% if cell_data %}
+                                                        {% if cell_data.is_late %}
+                                                            <span class="text-danger fw-bold" style="font-size: 0.6rem;" title="Telat (Shift: {{ cell_data.shift_name }})">{{ cell_data.value }}</span>
+                                                        {% else %}
+                                                            <span class="text-success" style="font-size: 0.6rem;">{{ cell_data.value }}</span>
+                                                        {% endif %}
+                                                    {% else %}
+                                                        <span class="text-muted opacity-25">-</span>
+                                                    {% endif %}
                                                 {% endwith %}
                                             </td>
                                             <!-- CHECKPOINT_1 -->
@@ -953,8 +961,12 @@
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'CHECKPOINT_1' %}" 
                                                 hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal"
                                                 {% endif %}>
-                                                {% with time=emp_day_data|dict_get:'CHECKPOINT_1' %}
-                                                    {% if time %}<span class="text-primary" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
+                                                {% with cell_data=emp_day_data|dict_get:'CHECKPOINT_1' %}
+                                                    {% if cell_data %}
+                                                        <span class="text-primary" style="font-size: 0.6rem;">{{ cell_data.value }}</span>
+                                                    {% else %}
+                                                        <span class="text-muted opacity-25">-</span>
+                                                    {% endif %}
                                                 {% endwith %}
                                             </td>
                                             <!-- ISTIRAHAT -->
@@ -963,8 +975,12 @@
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'ISTIRAHAT' %}" 
                                                 hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal"
                                                 {% endif %}>
-                                                {% with time=emp_day_data|dict_get:'ISTIRAHAT' %}
-                                                    {% if time %}<span class="text-secondary" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
+                                                {% with cell_data=emp_day_data|dict_get:'ISTIRAHAT' %}
+                                                    {% if cell_data %}
+                                                        <span class="text-secondary" style="font-size: 0.6rem;">{{ cell_data.value }}</span>
+                                                    {% else %}
+                                                        <span class="text-muted opacity-25">-</span>
+                                                    {% endif %}
                                                 {% endwith %}
                                             </td>
                                             <!-- CHECKPOINT_2 -->
@@ -973,8 +989,12 @@
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'CHECKPOINT_2' %}" 
                                                 hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal"
                                                 {% endif %}>
-                                                {% with time=emp_day_data|dict_get:'CHECKPOINT_2' %}
-                                                    {% if time %}<span class="text-info" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
+                                                {% with cell_data=emp_day_data|dict_get:'CHECKPOINT_2' %}
+                                                    {% if cell_data %}
+                                                        <span class="text-info" style="font-size: 0.6rem;">{{ cell_data.value }}</span>
+                                                    {% else %}
+                                                        <span class="text-muted opacity-25">-</span>
+                                                    {% endif %}
                                                 {% endwith %}
                                             </td>
                                             <!-- PULANG -->
@@ -983,8 +1003,12 @@
                                                 hx-get="{% url 'portal:wa_edit_cell' emp.id date_str 'PULANG' %}" 
                                                 hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal"
                                                 {% endif %}>
-                                                {% with time=emp_day_data|dict_get:'PULANG' %}
-                                                    {% if time %}<span class="text-dark fw-bold" style="font-size: 0.6rem;">{{ time }}</span>{% else %}<span class="text-muted opacity-25">-</span>{% endif %}
+                                                {% with cell_data=emp_day_data|dict_get:'PULANG' %}
+                                                    {% if cell_data %}
+                                                        <span class="text-dark fw-bold" style="font-size: 0.6rem;">{{ cell_data.value }}</span>
+                                                    {% else %}
+                                                        <span class="text-muted opacity-25">-</span>
+                                                    {% endif %}
                                                 {% endwith %}
                                             </td>
                                         {% endwith %}
@@ -1020,7 +1044,7 @@
 
 <!-- WA Edit Cell Modal -->
 <div class="modal fade" id="waEditModal" tabindex="-1" aria-labelledby="waEditModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content">
             <div id="wa-edit-modal-content">
                 <div class="modal-body text-center py-4">
@@ -1036,7 +1060,7 @@
 
 <!-- FP Edit Cell Modal -->
 <div class="modal fade" id="fpEditModal" tabindex="-1" aria-labelledby="fpEditModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content">
             <div id="fp-edit-modal-content">
                 <div class="modal-body text-center py-4">

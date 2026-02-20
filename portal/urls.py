@@ -61,10 +61,12 @@ urlpatterns = [
     
     # Recap Matrix (Meja Kerja Rekapitulasi)
     path('recap-matrix/', views.recap_matrix_view, name='recap_matrix'),
+    path('roster/import/', views.import_roster_view, name='import_roster'),
     
     # Attendance Cell Edit (HTMX)
     path('attendance/edit/<uuid:employee_id>/<str:date_str>/', views.edit_attendance_modal, name='edit_attendance_modal'),
     path('attendance/save/', views.save_attendance_cell, name='save_attendance_cell'),
+    path('attendance/save-roster/', views.save_roster_cell, name='save_roster_cell'),
     
     # WA Cell Edit (HTMX)
     path('wa/edit-cell/<uuid:employee_id>/<str:date_str>/<str:category>/', views.wa_edit_cell, name='wa_edit_cell'),

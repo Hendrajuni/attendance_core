@@ -29,7 +29,13 @@ def is_within_range(current_time, start_time, end_time):
     start = time_to_minutes(start_time)
     end = time_to_minutes(end_time)
     
-    return start <= current <= end
+    if start <= end:
+        # Standard range (e.g. 08:00 to 16:00)
+        return start <= current <= end
+    else:
+        # Crossover range (e.g. 23:00 to 07:00)
+        # In range if: >= 23:00 OR <= 07:00
+        return current >= start or current <= end
 
 
 def make_aware_timestamp(dt):
@@ -62,7 +68,21 @@ def get_employee_schedule(employee, target_date):
     Returns:
         tuple: (DailySchedule object or None, ShiftPattern object or None)
     """
-    from attendance.models import EmployeeShiftAssignment
+    from attendance.models import EmployeeShiftAssignment, DailyShiftAssignment
+    
+    # 1. OPTIMIZATION: Check Daily Roster for Shift Workers
+    # Only query this table if the employee is flagged as a shift worker
+    if getattr(employee, 'is_shift_worker', False):
+        roster = DailyShiftAssignment.objects.filter(
+            employee=employee, 
+            date=target_date
+        ).select_related('shift').first()
+        
+        if roster:
+            # Return direct schedule, no pattern
+            return (roster.shift, None)
+
+    # 2. Standard Weekly Pattern Logic (Fallback for Shift Workers, Default for Regulars)
     
     # Find active assignment for the target date
     assignment = EmployeeShiftAssignment.objects.filter(
@@ -121,6 +141,10 @@ def determine_category(employee, log_datetime):
     
     # Get employee's schedule for this date
     schedule, shift_pattern = get_employee_schedule(employee, target_date)
+    
+    # Explicit OFF Day Check (from Daily Roster)
+    if schedule and schedule.code == 'OFF':
+        return ('LIBUR', schedule.name)
     
     # No shift assigned or day is off (null in pattern)
     if schedule is None:

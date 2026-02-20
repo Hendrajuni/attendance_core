@@ -227,6 +227,12 @@ class Employee(models.Model):
     joined_date = models.DateField(null=True, blank=True, help_text="Tanggal mulai bekerja")
     imported_at = models.DateTimeField(null=True, blank=True, help_text="Tanggal data di-import")
     
+    # Shift Worker Flag (Daily Roster)
+    is_shift_worker = models.BooleanField(
+        default=False, 
+        help_text="Jika dicentang, sistem akan mengecek tabel Daily Roster untuk jadwal orang ini."
+    )
+
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -804,3 +810,32 @@ class AccessLog(models.Model):
 
     def __str__(self):
         return f"{self.user} - {self.action} ({self.timestamp})"
+
+
+class DailyShiftAssignment(models.Model):
+    """
+    Jadwal Harian Spesifik (Daily Roster).
+    Digunakan untuk karyawan Shift (Security, Operator) yang jadwalnya tidak tentu.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name="daily_assignments")
+    date = models.DateField(help_text="Tanggal spesifik assignment")
+    shift = models.ForeignKey(DailySchedule, on_delete=models.CASCADE, related_name="daily_assignments")
+    
+    # Audit Trail
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True, blank=True)
+    
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ['date']
+        verbose_name = "Daily Shift Assignment (Roster)"
+        verbose_name_plural = "Daily Shift Assignments (Roster)"
+        unique_together = ['employee', 'date']
+        indexes = [
+            models.Index(fields=['employee', 'date']),
+        ]
+
+    def __str__(self):
+        return f"{self.employee.full_name} @ {self.date} : {self.shift.name}"

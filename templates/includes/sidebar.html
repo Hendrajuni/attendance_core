@@ -59,6 +59,16 @@
             </li>
             {% endif %}
 
+            {% if user.is_superuser or user_role in 'ADMIN,HRD,KERANI,DEPT_ADMIN,SUPERVISOR' %}
+            <li class="nav-item">
+                <a href="{% url 'portal:import_roster' %}"
+                    class="nav-link text-white {% if request.resolver_match.url_name == 'import_roster' %}active bg-primary{% endif %} d-flex align-items-center">
+                    <i class="fas fa-file-excel fa-fw me-3"></i>
+                    Import Roster
+                </a>
+            </li>
+            {% endif %}
+
             <!-- Sync Center Dropdown -->
             {% if user_role != 'ACCOUNTING' and user_role != 'DEPT_ADMIN' and user_role != 'SUPERVISOR' %}
             <li class="nav-item">

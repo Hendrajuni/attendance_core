@@ -65,6 +65,20 @@
             </div>
             {% endif %}
             
+            <!-- Is Shift Worker (Always Editable) -->
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="is_shift_worker" name="is_shift_worker" 
+                           {% if emp.is_shift_worker %}checked{% endif %}>
+                    <label class="form-check-label fw-bold" for="is_shift_worker">
+                        <i class="fas fa-user-clock me-1 text-primary"></i> Is Shift Worker
+                    </label>
+                </div>
+                <small class="text-muted d-block mt-1" style="font-size: 0.75rem;">
+                    Jika dicentang, sistem akan mengecek tabel Daily Roster untuk jadwal orang ini.
+                </small>
+            </div>
+
             <!-- Status Aktif (Always Editable) -->
             <div class="mb-3">
                 <div class="form-check form-switch">
