@@ -9,3 +9,4 @@ requests
 openpyxl
 # Production only
 gunicorn
+django-mptt
