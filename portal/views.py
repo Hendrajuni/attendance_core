@@ -2595,19 +2595,24 @@ def recap_matrix_view(request):
                     category_to_fill = None
                     
                     if has_roster:
-                        # Dynamic Slotting based on proximity
-                        diff_in = abs(get_diff_mins(t_val, dt_sch_in))
-                        diff_out = abs(get_diff_mins(t_val, dt_sch_out))
-                        
-                        # Thresholds (e.g. 4 hours)
-                        if diff_in < diff_out and diff_in < 240:
-                            category_to_fill = 'MASUK'
-                        elif diff_out < diff_in and diff_out < 240:
-                            category_to_fill = 'PULANG'
+                        # First, respect explicit Checkpoint mappings set by determine_category
+                        explicit_categories = ['CHECKPOINT_1', 'CHECKPOINT_2', 'ISTIRAHAT']
+                        if log.log_category in explicit_categories:
+                            category_to_fill = log.log_category
                         else:
-                            # Fallback to stored category if ambiguous
-                            if log.log_category in WA_CATEGORIES:
-                                category_to_fill = log.log_category
+                            # Dynamic Slotting based on proximity for MASUK / PULANG
+                            diff_in = abs(get_diff_mins(t_val, dt_sch_in))
+                            diff_out = abs(get_diff_mins(t_val, dt_sch_out))
+                            
+                            # Thresholds (e.g. 4 hours)
+                            if diff_in < diff_out and diff_in < 240:
+                                category_to_fill = 'MASUK'
+                            elif diff_out < diff_in and diff_out < 240:
+                                category_to_fill = 'PULANG'
+                            else:
+                                # Fallback to stored category if ambiguous
+                                if log.log_category in WA_CATEGORIES:
+                                    category_to_fill = log.log_category
                     else:
                         # Standard category behavior
                         if log.log_category in WA_CATEGORIES:

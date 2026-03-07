@@ -42,3 +42,9 @@ implementation_plan_sync_employees.md
 response.html
 clean_phones.py
 create_dummy_leave.py
+test_logs.py
+check_csv.py
+check_schedules.py
+check_arlond.py
+check_csv_arlond.py
+check_arlond_sch.py

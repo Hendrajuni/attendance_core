@@ -102,7 +102,7 @@ def get_employee_schedule(employee, target_date):
     return (None, None)
 
 
-def determine_category(employee, log_datetime):
+def determine_category(employee, log_datetime, source_type=None):
     """
     Determine log category based on employee's shift assignment and log datetime.
     
@@ -113,6 +113,8 @@ def determine_category(employee, log_datetime):
         employee: Employee model instance
         log_datetime: A datetime object (timezone-aware or naive).
                       If naive, it will be treated as local time.
+        source_type: Optional string ('TELEGRAM', 'WHATSAPP', 'FINGERPRINT')
+                     Used to prioritize logic (e.g. WA Checkpoints)
     
     Returns:
         tuple: (category: str, schedule_name: str or None)
@@ -157,23 +159,53 @@ def determine_category(employee, log_datetime):
             return (category, None)
     
     # Determine category based on schedule configuration
-    category = _determine_category_with_schedule(current_time, schedule)
+    category = _determine_category_with_schedule(current_time, schedule, source_type)
     return (category, schedule.name)
 
 
-def _determine_category_with_schedule(current_time, schedule):
+def _determine_category_with_schedule(current_time, schedule, source_type=None):
     """
     Determine category using DailySchedule configuration.
     
     Priority order:
-    1. MASUK (scan-in window)
+    1. MASUK (scan-in window) - Default High Priority
     2. CHECKPOINT_1 (if enabled and within range)
     3. ISTIRAHAT (break time)
     4. CHECKPOINT_2 (if enabled and within range)
     5. PULANG (scan-out window)
     6. UNKNOWN
+
+    Logic Update (2026-02-20):
+    If source_type is TELEGRAM/WHATSAPP, we prioritize Checkpoints because
+    their time windows often overlap with MASUK/PULANG windows.
     """
-    # 1. Check MASUK (Clock-in window) - HIGHEST PRIORITY
+    is_wa_source = source_type in ['TELEGRAM', 'WHATSAPP']
+
+    # --- HIGH PRIORITY FOR WA: CHECKPOINTS ---
+    if is_wa_source:
+        # Pengecekan 1: Mengikuti Schedule (Jika Diaktifkan secara Spesifik)
+        if hasattr(schedule, 'enable_checkin_1') and schedule.enable_checkin_1:
+            if is_within_range(current_time, schedule.checkin_1_start, schedule.checkin_1_end):
+                return 'CHECKPOINT_1'
+        # Fallback Checkpoint 1 (Default Window 08:31 - 11:30)
+        else:
+            from datetime import time
+            if is_within_range(current_time, time(8, 31), time(11, 30)):
+                return 'CHECKPOINT_1'
+                
+        # Pengecekan 2: Mengikuti Schedule (Jika Diaktifkan secara Spesifik)
+        if hasattr(schedule, 'enable_checkin_2') and schedule.enable_checkin_2:
+            if is_within_range(current_time, schedule.checkin_2_start, schedule.checkin_2_end):
+                return 'CHECKPOINT_2'
+        # Fallback Checkpoint 2 (Default Window 13:01 - 15:30)
+        else:
+            from datetime import time
+            if is_within_range(current_time, time(13, 1), time(15, 30)):
+                return 'CHECKPOINT_2'
+
+    # --- NORMAL PRIORITY (OR FALLBACK FOR WA) ---
+
+    # 1. Check MASUK (Clock-in window)
     if schedule.scan_in_start and schedule.scan_in_end:
         if is_within_range(current_time, schedule.scan_in_start, schedule.scan_in_end):
             return 'MASUK'
@@ -187,8 +219,8 @@ def _determine_category_with_schedule(current_time, schedule):
             if start_mins <= current_mins <= end_mins:
                 return 'MASUK'
     
-    # 2. Check Checkpoint 1 (Telegram-specific)
-    if schedule.enable_checkin_1:
+    # 2. Check Checkpoint 1 (If not already checked or not WA)
+    if not is_wa_source and schedule.enable_checkin_1:
         if is_within_range(current_time, schedule.checkin_1_start, schedule.checkin_1_end):
             return 'CHECKPOINT_1'
     
@@ -196,8 +228,8 @@ def _determine_category_with_schedule(current_time, schedule):
     if is_within_range(current_time, schedule.break_start, schedule.break_end):
         return 'ISTIRAHAT'
     
-    # 4. Check Checkpoint 2 (Telegram-specific)
-    if schedule.enable_checkin_2:
+    # 4. Check Checkpoint 2 (If not already checked or not WA)
+    if not is_wa_source and schedule.enable_checkin_2:
         if is_within_range(current_time, schedule.checkin_2_start, schedule.checkin_2_end):
             return 'CHECKPOINT_2'
     
@@ -226,13 +258,13 @@ def _determine_category_fallback(current_time):
 
     if 500 <= t <= 830:
         return 'MASUK'
-    elif 900 <= t <= 1100:
+    elif 831 <= t <= 1130:
         return 'CHECKPOINT_1'
-    elif 1130 <= t <= 1330:
+    elif 1131 <= t <= 1300:
         return 'ISTIRAHAT'
-    elif 1400 <= t <= 1545:
+    elif 1301 <= t <= 1530:
         return 'CHECKPOINT_2'
-    elif 1600 <= t <= 2359:
+    elif 1531 <= t <= 2359:
         return 'PULANG'
     
     return 'UNKNOWN'

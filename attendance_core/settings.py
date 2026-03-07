@@ -18,8 +18,14 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-default-key-change-in-prod
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = []
+allowed_hosts_env = os.getenv('ALLOWED_HOSTS', '*')
+ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(',')]
 
+# Keamanan tambahan untuk Reverse Proxy (Nginx / Cloudflare)
+# Agar Django mengenali trafik HTTPS yang di-forward dari Cloudflare sebagai trafik yang aman (mencegah Error CSRF saat Login)
+csrf_trusted_env = os.getenv('CSRF_TRUSTED_ORIGINS', 'https://hr.pmgcloud.my.id')
+CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_trusted_env.split(',')]
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 # Application definition
 
 INSTALLED_APPS = [
@@ -109,6 +115,7 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = [
     BASE_DIR / 'static',  # Global static directory
 ]
+STATIC_ROOT = BASE_DIR / 'staticfiles'  # Direktori di mana semua file statis akan dikumpulkan di produksi
 
 # Media files (Uploads)
 MEDIA_URL = '/media/'
