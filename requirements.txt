@@ -5,6 +5,7 @@ pyzk
 gspread
 google-auth
 pandas
+numpy<2.0.0
 requests
 openpyxl
 # Production only
