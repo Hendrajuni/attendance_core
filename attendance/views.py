@@ -167,13 +167,10 @@ def sync_wa_source_single(request, source_id):
     
     try:
         import pandas as pd
-        from .utils import determine_category
+        from .utils import determine_category, get_sheet_dataframe
         
-        # Build CSV URL from spreadsheet_id and sheet_name
-        csv_url = f"https://docs.google.com/spreadsheets/d/{source.spreadsheet_id}/gviz/tq?tqx=out:csv&sheet={source.sheet_name}"
-        
-        # Read CSV
-        df = pd.read_csv(csv_url)
+        # Read Data using gspread authenticated helper
+        df = get_sheet_dataframe(source.spreadsheet_id, source.sheet_name)
         df.columns = [c.strip().upper() for c in df.columns]
         
         created_count = 0

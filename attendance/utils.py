@@ -8,6 +8,26 @@ The Brain: Central logic for time-slot categorization based on employee shift as
 from datetime import time, date, datetime
 from django.utils import timezone
 from django.db.models import Q
+import os
+import json
+
+def get_gspread_client():
+    """Get authenticated gspread client using Env Var or File fallback."""
+    import gspread
+    creds_json = os.environ.get('GOOGLE_SHEETS_CREDENTIALS')
+    if creds_json:
+        creds_dict = json.loads(creds_json)
+        return gspread.service_account_from_dict(creds_dict)
+    else:
+        # Fallback to local file
+        return gspread.service_account(filename='credentials.json')
+
+def get_sheet_dataframe(spreadsheet_id, sheet_name):
+    import pandas as pd
+    client = get_gspread_client()
+    sheet = client.open_by_key(spreadsheet_id).worksheet(sheet_name)
+    data = sheet.get_all_records()
+    return pd.DataFrame(data)
 
 
 def time_to_minutes(t):
@@ -378,14 +398,12 @@ def fetch_users_from_wa_source(source):
     from attendance.models import Employee
     
     try:
-        # Construct URL for specific sheet (Configurable)
-        sheet_name = source.employee_sheet_name if hasattr(source, 'employee_sheet_name') else "Data-Pegawai"
-        csv_url = f"https://docs.google.com/spreadsheets/d/{source.spreadsheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-        
         try:
-            df = pd.read_csv(csv_url)
+            # Construct URL for specific sheet (Configurable)
+            sheet_name = source.employee_sheet_name if hasattr(source, 'employee_sheet_name') else "Data-Pegawai"
+            df = get_sheet_dataframe(source.spreadsheet_id, sheet_name)
         except Exception:
-             return 0, [], "Gagal membaca sheet 'Data-Pegawai'. Pastikan sheet ada."
+             return 0, [], "Gagal membaca sheet 'Data-Pegawai'. Pastikan kredensial benar dan sheet ada."
 
         df.columns = [c.strip().upper() for c in df.columns]
         

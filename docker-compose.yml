@@ -25,6 +25,7 @@ services:
     environment:
       - DB_HOST=postgresql
       - DB_PORT=5432
+      - GOOGLE_SHEETS_CREDENTIALS=${GOOGLE_SHEETS_CREDENTIALS}
     depends_on:
       - postgresql
     restart: unless-stopped

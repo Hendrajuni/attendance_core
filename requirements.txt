@@ -8,6 +8,13 @@ pandas
 numpy<2.0.0
 requests
 openpyxl
+django-mptt
+django-simple-history
+holidays
+qrcode
+beautifulsoup4
+reportlab
+Pillow
+
 # Production only
 gunicorn
-django-mptt

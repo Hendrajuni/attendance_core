@@ -1050,10 +1050,9 @@ def sync_wa_source_htmx(request, source_id):
 
     try:
         import pandas as pd
-        from attendance.utils import determine_category
+        from attendance.utils import determine_category, get_sheet_dataframe
         
-        csv_url = f"https://docs.google.com/spreadsheets/d/{source.spreadsheet_id}/gviz/tq?tqx=out:csv&sheet={source.sheet_name}"
-        df = pd.read_csv(csv_url)
+        df = get_sheet_dataframe(source.spreadsheet_id, source.sheet_name)
         df.columns = [c.strip().upper() for c in df.columns]
         
         # Track detailed logs for UI
