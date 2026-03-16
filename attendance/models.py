@@ -176,16 +176,14 @@ class ShiftPattern(models.Model):
         """
         Get DailySchedule for a given weekday (0=Monday, 6=Sunday).
         """
-        day_map = {
-            0: self.monday,
-            1: self.tuesday,
-            2: self.wednesday,
-            3: self.thursday,
-            4: self.friday,
-            5: self.saturday,
-            6: self.sunday,
-        }
-        return day_map.get(weekday)
+        if weekday == 0: return self.monday
+        elif weekday == 1: return self.tuesday
+        elif weekday == 2: return self.wednesday
+        elif weekday == 3: return self.thursday
+        elif weekday == 4: return self.friday
+        elif weekday == 5: return self.saturday
+        elif weekday == 6: return self.sunday
+        return None
 
 
 class Employee(models.Model):
