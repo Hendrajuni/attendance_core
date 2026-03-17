@@ -839,6 +839,24 @@ def sync_machine_htmx(request, device_id):
             detailed_logs = []
             
             with transaction.atomic():
+                # 1. Fetch existing logs in the time range to avoid duplicate processing
+                existing_logs = set()
+                if attendances:
+                    min_dt = min(a.timestamp for a in attendances)
+                    max_dt = max(a.timestamp for a in attendances)
+                    if timezone.is_naive(min_dt): min_dt = timezone.make_aware(min_dt)
+                    if timezone.is_naive(max_dt): max_dt = timezone.make_aware(max_dt)
+                    
+                    # Store as tuple (employee_id, timestamp) for O(1) lookup
+                    existing_logs = set(
+                        AttendanceLog.objects.filter(
+                            timestamp__gte=min_dt,
+                            timestamp__lte=max_dt
+                        ).values_list('employee_id', 'timestamp')
+                    )
+                    print(f"DEBUG: Found {len(existing_logs)} existing logs in range.")
+
+                new_logs = []
                 for att in attendances:
                     user_id = str(att.user_id)
                     
@@ -851,23 +869,30 @@ def sync_machine_htmx(request, device_id):
                     if timezone.is_naive(timestamp):
                         timestamp = timezone.make_aware(timestamp)
                     
+                    # SKIP if already exists (avoids expensive calculate & insert steps)
+                    if (employee.id, timestamp) in existing_logs:
+                        continue
+                    
                     # Determine category (CPU bound, fast)
                     category, _ = determine_category(employee, timestamp)
                     
-                    # We still use get_or_create for safety, but now 'employee' is already fetched
-                    _, created = AttendanceLog.objects.get_or_create(
+                    log = AttendanceLog(
                         employee=employee, timestamp=timestamp,
-                        defaults={
-                            'status': 'HADIR', 'source_type': 'FINGERPRINT',
-                            'verification_method': 'FINGER', 'captured_at': device.location,
-                            'log_category': category
-                        }
+                        status='HADIR', source_type='FINGERPRINT',
+                        verification_method='FINGER', captured_at=device.location,
+                        log_category=category
                     )
-                    if created: 
-                        created_count += 1
-                        # Store tuple: (name, time_str, category) for rich display
+                    new_logs.append(log)
+                    created_count += 1
+                    
+                    # Store tuple: (name, time_str, category) for rich display
+                    if len(detailed_logs) < 10:
                         time_str = timestamp.strftime("%H:%M")
                         detailed_logs.append((employee.full_name, time_str, category))
+                        
+                # 2. Bulk insert all new logs safely (ignore conflicts just in case)
+                if new_logs:
+                    AttendanceLog.objects.bulk_create(new_logs, batch_size=1000, ignore_conflicts=True)
             
             print(f"DEBUG: Created {created_count} new logs from {total_records} raw records.")
             current_time = timezone.now().strftime("%H:%M:%S")
