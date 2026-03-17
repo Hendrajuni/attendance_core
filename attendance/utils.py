@@ -105,6 +105,7 @@ def get_employee_schedule(employee, target_date):
     # 2. Standard Weekly Pattern Logic (Fallback for Shift Workers, Default for Regulars)
     
     # Find active assignment for the target date
+    from django.db.models import Q
     assignment = EmployeeShiftAssignment.objects.filter(
         employee=employee,
         is_active=True,
@@ -112,6 +113,15 @@ def get_employee_schedule(employee, target_date):
     ).filter(
         # effective_to is null OR effective_to >= target_date
         Q(effective_to__isnull=True) | Q(effective_to__gte=target_date)
+    ).select_related(
+        'shift_pattern',
+        'shift_pattern__monday',
+        'shift_pattern__tuesday',
+        'shift_pattern__wednesday',
+        'shift_pattern__thursday',
+        'shift_pattern__friday',
+        'shift_pattern__saturday',
+        'shift_pattern__sunday'
     ).order_by('-effective_from').first()
     
     if assignment and assignment.shift_pattern:
