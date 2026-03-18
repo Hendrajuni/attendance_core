@@ -14,6 +14,7 @@ RUN apt-get update \
         gcc \
         python3-dev \
         libpq-dev \
+        iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
 # Install python dependencies
