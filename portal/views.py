@@ -863,9 +863,12 @@ def sync_machine_htmx(request, device_id):
                 
                 prefetched_data = {'assignments': defaultdict(list), 'rosters': defaultdict(dict)}
                 if attendances and active_employees:
+                    # Map device IDs to real UUIDs for query
+                    employee_uuids = [e.id for e in active_employees.values()]
+                    
                     # Fetch regular assignments for all users in date range
                     assignments = EmployeeShiftAssignment.objects.filter(
-                        employee_id__in=active_employees.keys(),
+                        employee_id__in=employee_uuids,
                         is_active=True,
                         effective_from__lte=max_dt.date()
                     ).filter(
@@ -880,7 +883,7 @@ def sync_machine_htmx(request, device_id):
                         
                     # Fetch shift rosters
                     rosters = DailyShiftAssignment.objects.filter(
-                        employee_id__in=active_employees.keys(),
+                        employee_id__in=employee_uuids,
                         date__gte=min_dt.date(),
                         date__lte=max_dt.date()
                     ).select_related('shift')
