@@ -440,28 +440,40 @@ def fetch_users_from_wa_source(source):
         created_count = 0
         samples = []
         
+        # O(1) Memory Set for Phone Numbers
+        existing_phones = set(Employee.objects.values_list('phone_number', flat=True))
+        new_employees = []
+        
         for _, row in df.iterrows():
             nama = str(row.get('NAMA PEGAWAI', '')).strip()
             no_wa = str(row.get('NOMOR WA', '')).strip()
             
-            if not no_wa:
+            if not no_wa or str(no_wa) == 'nan':
                 continue
                 
             # Clean Phone Number (simple)
             clean_wa = no_wa.replace('-', '').replace(' ', '')
             
-            # Check if exists
-            if not Employee.objects.filter(phone_number=clean_wa).exists():
-                 Employee.objects.create(
-                    full_name=nama if nama else f"WA User {clean_wa}",
+            # Check if exists efficiently
+            if clean_wa not in existing_phones:
+                 new_emp = Employee(
+                    full_name=nama if nama and str(nama) != 'nan' else f"WA User {clean_wa}",
                     nik=f"WA.{clean_wa[-6:]}", # Temp NIK
                     phone_number=clean_wa,
                     is_verified=False,
                     home_base=source.location
                 )
-                 created_count += 1
+                 new_employees.append(new_emp)
+                 existing_phones.add(clean_wa) # Prevent duplicates in same sheet
+                 
                  if len(samples) < 5:
-                    samples.append(nama if nama else f"WA User {clean_wa}")
+                    samples.append(new_emp.full_name)
+        
+        # Bulk Insert
+        if new_employees:
+            # batch_size protects DB limits on massive inserts
+            Employee.objects.bulk_create(new_employees, batch_size=2000)
+            created_count = len(new_employees)
                  
         return created_count, samples, None
 
