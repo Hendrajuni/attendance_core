@@ -1109,10 +1109,13 @@ def sync_wa_source_htmx(request, source_id):
 
     try:
         import pandas as pd
+        from django.db.models import Q
+        from collections import defaultdict
         from attendance.utils import determine_category, get_sheet_dataframe
+        from attendance.models import EmployeeShiftAssignment, DailyShiftAssignment
         
         df = get_sheet_dataframe(source.spreadsheet_id, source.sheet_name)
-        df.columns = [c.strip().upper() for c in df.columns]
+        df.columns = [str(c).strip().upper() for c in df.columns]
         
         # Track detailed logs for UI
         detailed_logs = []
@@ -1122,63 +1125,109 @@ def sync_wa_source_htmx(request, source_id):
         print(f"DEBUG: Spreadsheet columns = {list(df.columns)}")
         print(f"DEBUG: Total rows in spreadsheet = {len(df)}")
         
-        with transaction.atomic():
-            for idx, row in df.iterrows():
-                tgl_str = str(row.get('TANGGAL', '')).strip()
-                jam_str = str(row.get('JAM ABSEN', '')).strip()
-                user_id = str(row.get('NOMOR WA', '')).strip()
-                
-                # VALIDATION: Skip if User ID is empty or invalid
-                if not user_id or user_id.lower() in ['nan', 'none', '']:
-                    print(f"DEBUG: Row {idx} skipped - missing NOMOR WA")
-                    continue
-
-                if not tgl_str or not jam_str: 
-                    print(f"DEBUG: Row {idx} skipped - missing TANGGAL or JAM ABSEN")
-                    continue
-                
-                try:
-                    full_ts_str = f"{tgl_str} {jam_str}"
-                    timestamp = pd.to_datetime(full_ts_str, dayfirst=True).to_pydatetime()
-                    if timezone.is_naive(timestamp):
-                        timestamp = timezone.make_aware(timestamp)
-                    
-                    # Normalize phone number lookup (handles .0 suffix from float storage)
-                    # Try exact match first
-                    employee = Employee.objects.filter(phone_number=user_id, is_active=True).first()
-                    if not employee:
-                        # Try with .0 suffix (database might have stored as float)
-                        employee = Employee.objects.filter(phone_number=f"{user_id}.0", is_active=True).first()
-                    if not employee:
-                        employee = Employee.objects.filter(telegram_user_id=user_id, is_active=True).first()
-                    if not employee:
-                        # Try telegram_user_id with .0 suffix
-                        employee = Employee.objects.filter(telegram_user_id=f"{user_id}.0", is_active=True).first()
-                    if not employee: 
-                        print(f"DEBUG: Row {idx} - Employee not found for user_id={user_id}")
-                        continue
-                    
-                    category, _ = determine_category(employee, timestamp)
-                    
-                    _, created = AttendanceLog.objects.get_or_create(
-                         employee=employee, timestamp=timestamp,
-                         defaults={
-                            'status': 'HADIR', 'source_type': 'TELEGRAM',
-                            'verification_method': 'WA', 'captured_at': source.location,
-                            'log_category': category
-                        }
-                    )
-                    if created: 
-                        created_count += 1
-                        # Store tuple: (name, time_str, category) for rich display
-                        time_str = timestamp.strftime("%H:%M")
-                        detailed_logs.append((employee.full_name, time_str, category))
-                    else:
-                        print(f"DEBUG: Row {idx} - Log already exists for {employee.full_name} at {timestamp}")
-                except Exception as row_err:
-                    print(f"DEBUG: Row {idx} - Error: {row_err}")
-                    continue
+        # 1. Dictionary maps for quick employee lookup
+        active_employees = list(Employee.objects.filter(is_active=True))
+        employee_uuids = [e.id for e in active_employees]
         
+        phone_map = {str(e.phone_number).strip(): e for e in active_employees if e.phone_number}
+        phone_map_dot_zero = {f"{str(e.phone_number).strip()}.0": e for e in active_employees if e.phone_number}
+        telegram_map = {str(e.telegram_user_id).strip(): e for e in active_employees if e.telegram_user_id}
+        telegram_map_dot_zero = {f"{str(e.telegram_user_id).strip()}.0": e for e in active_employees if e.telegram_user_id}
+
+        # 2. Extract valid rows and find date range
+        valid_rows = []
+        min_dt = None
+        max_dt = None
+        
+        for idx, row in df.iterrows():
+            tgl_str = str(row.get('TANGGAL', '')).strip()
+            jam_str = str(row.get('JAM ABSEN', '')).strip()
+            user_id = str(row.get('NOMOR WA', '')).strip()
+            
+            if not user_id or user_id.lower() in ['nan', 'none', '']: continue
+            if not tgl_str or not jam_str or tgl_str.lower() == 'nan' or jam_str.lower() == 'nan': continue
+            
+            try:
+                full_ts_str = f"{tgl_str} {jam_str}"
+                timestamp = pd.to_datetime(full_ts_str, dayfirst=True).to_pydatetime()
+                if timezone.is_naive(timestamp):
+                    timestamp = timezone.make_aware(timestamp)
+                
+                # Lookup employee
+                employee = phone_map.get(user_id) or phone_map_dot_zero.get(user_id) or telegram_map.get(user_id) or telegram_map_dot_zero.get(user_id)
+                
+                if employee:
+                    valid_rows.append((employee, timestamp))
+                    if min_dt is None or timestamp < min_dt: min_dt = timestamp
+                    if max_dt is None or timestamp > max_dt: max_dt = timestamp
+            except Exception as e:
+                continue
+
+        with transaction.atomic():
+            if valid_rows:
+                # 3. Fetch existing logs to avoid duplicates
+                existing_logs = set()
+                logs_in_db = AttendanceLog.objects.filter(
+                    employee_id__in=employee_uuids,
+                    timestamp__gte=min_dt,
+                    timestamp__lte=max_dt
+                ).values_list('employee_id', 'timestamp')
+                for eid, ts in logs_in_db:
+                    existing_logs.add((eid, ts.replace(second=0, microsecond=0)))
+
+                # 4. Prefetch Assignments & Rosters for O(1) scheduling
+                prefetched_data = {'assignments': defaultdict(list), 'rosters': defaultdict(dict)}
+                
+                assignments = EmployeeShiftAssignment.objects.filter(
+                    employee_id__in=employee_uuids,
+                    is_active=True,
+                    effective_from__lte=max_dt.date()
+                ).filter(
+                    Q(effective_to__isnull=True) | Q(effective_to__gte=min_dt.date())
+                ).select_related(
+                    'shift_pattern', 'shift_pattern__monday', 'shift_pattern__tuesday',
+                    'shift_pattern__wednesday', 'shift_pattern__thursday', 'shift_pattern__friday',
+                    'shift_pattern__saturday', 'shift_pattern__sunday'
+                )
+                for a in assignments:
+                    prefetched_data['assignments'][a.employee_id].append(a)
+                    
+                rosters = DailyShiftAssignment.objects.filter(
+                    employee_id__in=employee_uuids,
+                    date__gte=min_dt.date(),
+                    date__lte=max_dt.date()
+                ).select_related('shift')
+                for r in rosters:
+                    prefetched_data['rosters'][r.employee_id][r.date] = r.shift
+
+                # 5. Process and insert logs
+                new_logs = []
+                batch_seen = set()
+
+                for employee, timestamp in valid_rows:
+                    ts_rounded = timestamp.replace(second=0, microsecond=0)
+                    log_key = (employee.id, ts_rounded)
+                    
+                    if log_key in existing_logs or log_key in batch_seen:
+                        continue
+                        
+                    batch_seen.add(log_key)
+                    category, _ = determine_category(employee, timestamp, prefetched_data=prefetched_data)
+                    
+                    new_logs.append(AttendanceLog(
+                        employee=employee, timestamp=timestamp,
+                        status='HADIR', source_type='TELEGRAM',
+                        verification_method='WA', captured_at=source.location,
+                        log_category=category
+                    ))
+                    
+                    created_count += 1
+                    time_str = timestamp.strftime("%H:%M")
+                    detailed_logs.append((employee.full_name, time_str, category))
+                    
+                if new_logs:
+                    AttendanceLog.objects.bulk_create(new_logs, ignore_conflicts=True)
+                    
         print(f"DEBUG: Created {created_count} new logs")
         
         # --- Update Last Activity ---
