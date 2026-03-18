@@ -448,17 +448,21 @@ def fetch_users_from_wa_source(source):
             nama = str(row.get('NAMA PEGAWAI', '')).strip()
             no_wa = str(row.get('NOMOR WA', '')).strip()
             
-            if not no_wa or str(no_wa) == 'nan':
+            if not no_wa or str(no_wa).lower() == 'nan':
                 continue
                 
-            # Clean Phone Number (simple)
+            # Clean Phone Number (remove floats like 6281.0)
             clean_wa = no_wa.replace('-', '').replace(' ', '')
+            if clean_wa.endswith('.0'):
+                clean_wa = clean_wa[:-2]
             
             # Check if exists efficiently
             if clean_wa not in existing_phones:
+                 import uuid
+                 uid_hex = uuid.uuid4().hex[:6].upper()
                  new_emp = Employee(
-                    full_name=nama if nama and str(nama) != 'nan' else f"WA User {clean_wa}",
-                    nik=f"WA.{clean_wa[-6:]}", # Temp NIK
+                    full_name=nama if nama and str(nama).lower() != 'nan' else f"WA User {clean_wa}",
+                    nik=f"WA.{uid_hex}", # Temp NIK (Unique to prevent IntegrityError)
                     phone_number=clean_wa,
                     is_verified=False,
                     home_base=source.location

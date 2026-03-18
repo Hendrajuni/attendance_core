@@ -21,6 +21,9 @@ services:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
       - ./credentials.json:/app/credentials.json:ro
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     env_file:
       - .env
     environment:
