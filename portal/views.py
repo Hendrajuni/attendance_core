@@ -723,14 +723,20 @@ def sync_employee_wa_htmx(request, source_id):
     count, samples, error = fetch_users_from_wa_source(source)
     
     if error:
-         return HttpResponse(f'''
-            <span id="status-source-{source.id}" class="badge bg-danger" hx-swap-oob="true">Error</span>
-             <tr hx-swap-oob="afterbegin:#sync-log-body">
+         error_tr = f'''<tr>
                 <td>{timezone.now().strftime("%H:%M:%S")}</td>
                 <td>{source.name}</td>
                 <td><span class="badge bg-danger">Gagal</span></td>
                 <td class="text-danger">{error}</td>
-            </tr>
+             </tr>'''.replace('\n', '')
+         
+         return HttpResponse(f'''
+            <span id="status-source-{source.id}" class="badge bg-danger" hx-swap-oob="true">Error</span>
+            <script>
+                if (typeof SyncLogManager !== 'undefined') {{
+                    SyncLogManager.addRows(`{error_tr}`);
+                }}
+            </script>
         ''')
 
     # Main Status Update (OOB) to avoid messy main-swap context

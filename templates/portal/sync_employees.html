@@ -197,17 +197,29 @@
 
         // Add new rows (LIFO - Newest First)
         addRows: function(htmlString) {
+            if (!htmlString || htmlString.trim() === '') return;
             // Create a temp container to parse the HTML string into nodes to split them
             const tempDiv = document.createElement('tbody');
             tempDiv.innerHTML = htmlString;
             const newRows = Array.from(tempDiv.children).map(tr => tr.outerHTML);
             
-            // Add to beginning of array (Newest first)
-            this.rows = [...newRows, ...this.rows];
-            
-            // Reset to page 1 to see new data immediately
-            this.currentPage = 1;
-            this.render();
+            if (newRows.length > 0) {
+                // Add to beginning of array (Newest first)
+                this.rows = [...newRows, ...this.rows];
+                
+                // Reset to page 1 to see new data immediately
+                this.currentPage = 1;
+                this.render();
+            }
+        },
+
+        // This method allows HTMX OOB swaps to be caught and managed
+        trackOobRow: function(trNode) {
+            if (trNode && trNode.outerHTML) {
+                this.rows.unshift(trNode.outerHTML);
+                this.currentPage = 1;
+                this.render();
+            }
         },
 
         render: function() {
