@@ -856,8 +856,38 @@ def sync_machine_htmx(request, device_id):
                     )
                     print(f"DEBUG: Found {len(existing_logs)} existing logs in range.")
 
+                # PREFETCH O(1) Data to completely avoid N+1 DB Queries inside the loop
+                from collections import defaultdict
+                from django.db.models import Q
+                from attendance.models import EmployeeShiftAssignment, DailyShiftAssignment
+                
+                prefetched_data = {'assignments': defaultdict(list), 'rosters': defaultdict(dict)}
+                if attendances and active_employees:
+                    # Fetch regular assignments for all users in date range
+                    assignments = EmployeeShiftAssignment.objects.filter(
+                        employee_id__in=active_employees.keys(),
+                        is_active=True,
+                        effective_from__lte=max_dt.date()
+                    ).filter(
+                        Q(effective_to__isnull=True) | Q(effective_to__gte=min_dt.date())
+                    ).select_related(
+                        'shift_pattern', 'shift_pattern__monday', 'shift_pattern__tuesday',
+                        'shift_pattern__wednesday', 'shift_pattern__thursday', 'shift_pattern__friday',
+                        'shift_pattern__saturday', 'shift_pattern__sunday'
+                    )
+                    for a in assignments:
+                        prefetched_data['assignments'][a.employee_id].append(a)
+                        
+                    # Fetch shift rosters
+                    rosters = DailyShiftAssignment.objects.filter(
+                        employee_id__in=active_employees.keys(),
+                        date__gte=min_dt.date(),
+                        date__lte=max_dt.date()
+                    ).select_related('shift')
+                    for r in rosters:
+                        prefetched_data['rosters'][r.employee_id][r.date] = r.shift
+
                 new_logs = []
-                schedule_cache = {}  # O(1) Memory Cache for O(N) DB queries prevention
                 for att in attendances:
                     user_id = str(att.user_id)
                     
@@ -874,8 +904,8 @@ def sync_machine_htmx(request, device_id):
                     if (employee.id, timestamp) in existing_logs:
                         continue
                     
-                    # Determine category (CPU bound, fast)
-                    category, _ = determine_category(employee, timestamp, schedule_cache=schedule_cache)
+                    # Determine category using prefetched data
+                    category, _ = determine_category(employee, timestamp, prefetched_data=prefetched_data)
                     
                     log = AttendanceLog(
                         employee=employee, timestamp=timestamp,
