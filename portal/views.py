@@ -857,6 +857,7 @@ def sync_machine_htmx(request, device_id):
                     print(f"DEBUG: Found {len(existing_logs)} existing logs in range.")
 
                 new_logs = []
+                schedule_cache = {}  # O(1) Memory Cache for O(N) DB queries prevention
                 for att in attendances:
                     user_id = str(att.user_id)
                     
@@ -874,7 +875,7 @@ def sync_machine_htmx(request, device_id):
                         continue
                     
                     # Determine category (CPU bound, fast)
-                    category, _ = determine_category(employee, timestamp)
+                    category, _ = determine_category(employee, timestamp, schedule_cache=schedule_cache)
                     
                     log = AttendanceLog(
                         employee=employee, timestamp=timestamp,

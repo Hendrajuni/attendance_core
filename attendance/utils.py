@@ -77,17 +77,23 @@ def make_aware_timestamp(dt):
     return dt
 
 
-def get_employee_schedule(employee, target_date):
+def get_employee_schedule(employee, target_date, schedule_cache=None):
     """
     Get the applicable DailySchedule for an employee on a specific date.
     
     Args:
         employee: Employee model instance
         target_date: datetime.date object
+        schedule_cache: Optional dict to cache results during bulk operations
     
     Returns:
         tuple: (DailySchedule object or None, ShiftPattern object or None)
     """
+    if schedule_cache is not None:
+        cache_key = (employee.id, target_date)
+        if cache_key in schedule_cache:
+            return schedule_cache[cache_key]
+
     from attendance.models import EmployeeShiftAssignment, DailyShiftAssignment
     
     # 1. OPTIMIZATION: Check Daily Roster for Shift Workers
@@ -100,7 +106,10 @@ def get_employee_schedule(employee, target_date):
         
         if roster:
             # Return direct schedule, no pattern
-            return (roster.shift, None)
+            result = (roster.shift, None)
+            if schedule_cache is not None:
+                schedule_cache[cache_key] = result
+            return result
 
     # 2. Standard Weekly Pattern Logic (Fallback for Shift Workers, Default for Regulars)
     
@@ -127,12 +136,18 @@ def get_employee_schedule(employee, target_date):
     if assignment and assignment.shift_pattern:
         weekday = target_date.weekday()  # 0=Monday, 6=Sunday
         daily_schedule = assignment.shift_pattern.get_schedule_for_day(weekday)
-        return (daily_schedule, assignment.shift_pattern)
+        result = (daily_schedule, assignment.shift_pattern)
+        if schedule_cache is not None:
+            schedule_cache[cache_key] = result
+        return result
     
-    return (None, None)
+    result = (None, None)
+    if schedule_cache is not None:
+        schedule_cache[cache_key] = result
+    return result
 
 
-def determine_category(employee, log_datetime, source_type=None):
+def determine_category(employee, log_datetime, source_type=None, schedule_cache=None):
     """
     Determine log category based on employee's shift assignment and log datetime.
     
@@ -145,6 +160,7 @@ def determine_category(employee, log_datetime, source_type=None):
                       If naive, it will be treated as local time.
         source_type: Optional string ('TELEGRAM', 'WHATSAPP', 'FINGERPRINT')
                      Used to prioritize logic (e.g. WA Checkpoints)
+        schedule_cache: Optional dictionary passed to get_employee_schedule
     
     Returns:
         tuple: (category: str, schedule_name: str or None)
@@ -172,7 +188,7 @@ def determine_category(employee, log_datetime, source_type=None):
     target_date = local_dt.date()
     
     # Get employee's schedule for this date
-    schedule, shift_pattern = get_employee_schedule(employee, target_date)
+    schedule, shift_pattern = get_employee_schedule(employee, target_date, schedule_cache=schedule_cache)
     
     # Explicit OFF Day Check (from Daily Roster)
     if schedule and schedule.code == 'OFF':
