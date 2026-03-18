@@ -20,12 +20,12 @@ services:
     volumes:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
+      - ./credentials.json:/app/credentials.json:ro
     env_file:
       - .env
     environment:
       - DB_HOST=postgresql
       - DB_PORT=5432
-      - GOOGLE_SHEETS_CREDENTIALS=${GOOGLE_SHEETS_CREDENTIALS}
     depends_on:
       - postgresql
     restart: unless-stopped
