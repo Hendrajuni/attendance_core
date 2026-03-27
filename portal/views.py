@@ -4912,13 +4912,15 @@ def generate_qr(data):
 
 @login_required
 def export_report_pdf(request, report_id):
-    report = get_object_or_404(MonthlyReport, id=report_id)
-    location = report.location
-    month = report.period_month
-    year = report.period_year
-    
-    report_type = request.GET.get('type', 'main')
-    buffer = BytesIO()
+    import traceback
+    try:
+        report = get_object_or_404(MonthlyReport, id=report_id)
+        location = report.location
+        month = report.period_month
+        year = report.period_year
+        
+        report_type = request.GET.get('type', 'main')
+        buffer = BytesIO()
 
     # =========================================================================
     # TYPE: MAIN REPORT (Matrix Fingerprint) - LEGAL LANDSCAPE
@@ -5252,6 +5254,9 @@ def export_report_pdf(request, report_id):
         response = HttpResponse(buffer, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
+    except Exception as e:
+        error_trace = traceback.format_exc()
+        return HttpResponse(f"<pre>{error_trace}</pre>", content_type="text/html", status=500)
 
     # =========================================================================
     # TYPE: WA REPORT (Summary Table) - A4 PORTRAIT
