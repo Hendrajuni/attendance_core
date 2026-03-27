@@ -4910,7 +4910,18 @@ def generate_qr(data):
     buffer.seek(0)
     return buffer
 
+def catch_pdf_error(func):
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            import traceback
+            from django.http import HttpResponse
+            return HttpResponse(f"<pre>Fatal PDF Error:\n\n{traceback.format_exc()}</pre>", status=500)
+    return wrapper
+
 @login_required
+@catch_pdf_error
 def export_report_pdf(request, report_id):
     report = get_object_or_404(MonthlyReport, id=report_id)
     location = report.location
