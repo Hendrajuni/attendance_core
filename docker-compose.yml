@@ -14,7 +14,9 @@ services:
     restart: unless-stopped
 
   web:
-    build: .
+    build:
+      context: .
+      network: host
     network_mode: "host"
     command: >
       bash -c "python manage.py collectstatic --noinput &&
