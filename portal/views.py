@@ -4890,6 +4890,14 @@ from reportlab.lib.units import inch, cm, mm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.pagesizes import LEGAL, A4, landscape, portrait
+from reportlab.lib.units import cm, mm
+from reportlab.lib import colors
+import qrcode
+from io import BytesIO
+import calendar
+from datetime import date, timedelta
+import holidays
 
 def generate_qr(data):
     """Generate in-memory QR code image"""
