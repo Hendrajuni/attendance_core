@@ -26,6 +26,7 @@ services:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
       - ./credentials.json:/app/credentials.json:ro
+      - .:/app
     dns:
       - 8.8.8.8
       - 8.8.4.4
