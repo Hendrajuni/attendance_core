@@ -5078,6 +5078,7 @@ def export_report_pdf(request, report_id):
             end_date__gte=start_date
         )
         from collections import defaultdict
+        from datetime import timedelta
         leave_map = defaultdict(lambda: defaultdict(str))
         for l in leaves:
             curr = max(l.start_date, start_date)
