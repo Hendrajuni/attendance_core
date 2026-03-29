@@ -4823,6 +4823,9 @@ def export_matrix_excel(request, report_id):
                      # Mapping based on codes:
                      if emp_leave_day in ['IZIN', 'SAKIT', 'CUTI', 'CUTI_KHUSUS']:
                          missing_stats['izin_count'] += 1
+                         if times['MASUK'] == '-':
+                             for k in times:
+                                 times[k] = 'Iz'
                  else:
                      # Check each checkpoint
                      if times['MASUK'] == '-': missing_stats['missing_pagi'] += 1
