@@ -15,6 +15,9 @@ RUN apt-get update \
         python3-dev \
         libpq-dev \
         iputils-ping \
+        pkg-config \
+        libcairo2 \
+        libcairo2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install python dependencies
