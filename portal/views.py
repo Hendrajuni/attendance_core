@@ -2784,7 +2784,7 @@ def recap_matrix_view(request):
                      if not wa_matrix_data[leave.employee_id][curr]['MASUK']:
                          for cat in WA_CATEGORIES:
                              wa_matrix_data[leave.employee_id][curr][cat] = {
-                                 'value': status_text,
+                                 'value': 'Iz',
                                  'is_late': False,
                                  'shift_name': ''
                              }
