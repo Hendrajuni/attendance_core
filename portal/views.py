@@ -2783,7 +2783,11 @@ def recap_matrix_view(request):
                      # Only if NO LOG exists strictly (check MASUK is None)
                      if not wa_matrix_data[leave.employee_id][curr]['MASUK']:
                          for cat in WA_CATEGORIES:
-                             wa_matrix_data[leave.employee_id][curr][cat] = status_text
+                             wa_matrix_data[leave.employee_id][curr][cat] = {
+                                 'value': status_text,
+                                 'is_late': False,
+                                 'shift_name': ''
+                             }
                 
                 curr += timedelta(days=1)
         

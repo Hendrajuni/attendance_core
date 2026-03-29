@@ -756,6 +756,8 @@
                                         <span class="badge bg-warning text-dark">Sakit</span>
                                     {% elif day.status == 'Izin' or 'Izin' in day.status %}
                                         <span class="badge bg-info text-dark">Izin</span>
+                                    {% elif 'Cuti' in day.status %}
+                                        <span class="badge bg-success text-white">{{ day.status }}</span>
                                     {% elif day.status == 'Alpha' or 'Alpha' in day.status %}
                                         <span class="badge bg-danger">Alpha</span>
                                     {% elif day.is_holiday %}
