@@ -309,6 +309,14 @@
                         <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
                     </select>
                 </div>
+                {% if mode == 'matrix' %}
+                <div class="col-md-2 ms-auto">
+                    <label class="form-label small fw-bold text-white d-block d-none d-md-block">&nbsp;</label>
+                    <a href="{% url 'portal:export_matrix_pdf' %}?location_id={{ selected_location.id }}&department_id={{ selected_department_id|default:'' }}&month={{ selected_month }}&year={{ selected_year }}" target="_blank" class="btn btn-danger btn-sm w-100 fw-bold shadow-sm" title="Print PDF per Departemen">
+                        <i class="fas fa-file-pdf me-1"></i> Print PDF
+                    </a>
+                </div>
+                {% endif %}
                 {% if mode == 'personal' %}
                 <div class="col-md-2">
                     <a href="?location_id={{ selected_location.id }}&month={{ selected_month }}&year={{ selected_year }}&active_tab=fingerprint" class="btn btn-secondary btn-sm shadow-sm text-white fw-bold w-100">

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+{% load portal_filters %}
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Rekapitulasi Matrix PDF</title>
+    <style>
+        @page {
+            size: a4 landscape;
+            margin: 1cm;
+            margin-bottom: 1.5cm;
+            @frame footer_frame {
+                -pdf-frame-content: footer_content;
+                bottom: 0cm; left: 1cm; right: 1cm; height: 1cm;
+            }
+        }
+        
+        body {
+            font-family: Helvetica, sans-serif;
+            font-size: 8px; /* Extra small for wide tables */
+            color: #333;
+        }
+
+        /* Table Matrix Style */
+        table.matrix {
+            border-collapse: collapse;
+        }
+        table.matrix th, table.matrix td {
+            border: 0.5px solid #bdc3c7;
+            text-align: center;
+            vertical-align: middle;
+            padding: 3px 2px;
+        }
+        table.matrix th {
+            background-color: #ecf0f1;
+            font-weight: bold;
+            font-size: 7px;
+            text-transform: uppercase;
+        }
+        
+        .col-name { 
+            text-align: left !important;
+            padding-left: 5px !important;
+            font-weight: bold !important;
+        }
+        
+        /* Coloring for Cells */
+        .cell-H { color: #27ae60; font-weight: bold; }
+        .cell-A { color: white; background-color: #e74c3c; }
+        .cell-S { color: #2c3e50; background-color: #f1c40f; }
+        .cell-I { color: white; background-color: #3498db; }
+        .cell-L { color: transparent; background-color: #ecf0f1; border-color: #bdc3c7; }
+        
+        /* Stats */
+        .stat-H { color: #27ae60; font-weight: bold; }
+        .stat-T { color: #e67e22; font-weight: bold; }
+        .stat-A { color: #e74c3c; font-weight: bold; }
+        .stat-S { color: #f1c40f; font-weight: bold; }
+        .stat-I { color: #3498db; font-weight: bold; }
+        .bg-light { background-color: #f8f9fa; }
+
+    </style>
+</head>
+<body>
+    <div id="footer_content" style="text-align: right; font-size: 7pt; color: #7f8c8d;">
+        Halaman <pdf:pagenumber> dari <pdf:pagecount>
+    </div>
+
+    <!-- Corporate Header (Only once per document) -->
+    <table width="100%" cellpadding="4" style="border-bottom: 2px solid #2c3e50;">
+        <tr>
+            <td width="70%">
+                <h1 style="color: #2c3e50; font-size: 16pt; margin: 0; padding: 0; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">Rekapitulasi Kehadiran Karyawan</h1>
+                <p style="font-size: 10pt; margin: 5px 0 0 0; color: #555; text-transform: uppercase;">
+                    LOKASI: <span style="color:#2c3e50; font-weight:bold;">{{ location.name }}</span> &nbsp;|&nbsp; 
+                    PERIODE: <span style="color:#2c3e50; font-weight:bold;">{{ month_name }} {{ year }}</span> &nbsp;|&nbsp; 
+                    DEPARTEMEN: <span style="color:#2c3e50; font-weight:bold;">{% if request.GET.department_id %}{{ dept_groups.keys|first|default:'-' }}{% else %}SEMUA DEPARTEMEN{% endif %}</span>
+                </p>
+            </td>
+            <td width="30%" align="right" valign="bottom" style="font-size: 8pt; color: #7f8c8d;">
+                Dicetak pada: {% now "d M Y H:i" %}
+            </td>
+        </tr>
+    </table>
+    <br/>
+
+    {% for dept_name, emps in dept_groups.items %}
+    
+    <div style="background-color: #dcdde1; padding: 5px; font-weight: bold; font-size: 9pt; color: #2c3e50; border-left: 4px solid #34495e; text-transform: uppercase;">
+        DEPARTEMEN: {{ dept_name }} <span style="font-weight:normal; font-size:7pt; color:#555;">(Total: {{ emps|length }} Karyawan)</span>
+    </div>
+    <br/>
+
+    <table class="matrix" width="100%" cellpadding="3">
+        <thead>
+            <tr>
+                <th width="3%">#</th>
+                <th width="17%" class="col-name">Nama Karyawan</th>
+                {% for d in date_range %}
+                    <th width="2%">{{ d|date:"d" }}</th>
+                {% endfor %}
+                <th width="3%" class="bg-light">H</th>
+                <th width="3%" class="bg-light">T</th>
+                <th width="3%" class="bg-light">A</th>
+                <th width="3%" class="bg-light">S</th>
+                <th width="3%" class="bg-light">I</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for emp in emps %}
+            {% with res=matrix_data|dict_get:emp.id %}
+            <tr>
+                <td align="center">{{ forloop.counter }}</td>
+                <td class="col-name">{{ emp.full_name }}</td>
+                
+                {% for d in date_range %}
+                    {% with st=res.matrix|dict_get:d %}
+                    <td class="cell-{{ st|default:'' }}">
+                        {% if st == 'L' %}-{% else %}{{ st|default:'-' }}{% endif %}
+                    </td>
+                    {% endwith %}
+                {% endfor %}
+
+                <!-- Stats summary -->
+                <td class="stat-H bg-light">{{ res.stats.H|default:0 }}</td>
+                <td class="stat-T bg-light">{{ res.stats.T|default:0 }}</td>
+                <td class="stat-A bg-light">{{ res.stats.A|default:0 }}</td>
+                <td class="stat-S bg-light">{{ res.stats.S|default:0 }}</td>
+                <td class="stat-I bg-light">{{ res.stats.I|default:0 }}</td>
+            </tr>
+            {% endwith %}
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    <br/><br/>
+    
+    {% endfor %}
+
+</body>
+</html>

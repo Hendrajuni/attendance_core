@@ -61,6 +61,7 @@ urlpatterns = [
     
     # Recap Matrix (Meja Kerja Rekapitulasi)
     path('recap-matrix/', views.recap_matrix_view, name='recap_matrix'),
+    path('recap-matrix/export-pdf/', views.export_matrix_pdf, name='export_matrix_pdf'),
     path('roster/import/', views.import_roster_view, name='import_roster'),
     
     # Attendance Cell Edit (HTMX)

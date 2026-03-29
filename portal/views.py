@@ -6131,3 +6131,198 @@ def import_roster_view(request):
     }
     return render(request, 'portal/import_roster.html', context)
 
+
+
+# =============================================================================
+# EXPORT PDF MATRIX
+# =============================================================================
+@login_required
+@never_cache
+def export_matrix_pdf(request):
+    """
+    Export Rekapitulasi Matrix ke PDF.
+    Jika department_id tidak diisi (Semua Departemen), maka akan men-generate
+    tabel per departemen dengan page-break di setiap departemen.
+    """
+    from attendance.models import WorkLocation, Employee, AttendanceLog, Department, EmployeeLeave, EmployeeShiftAssignment
+    from django.utils import timezone
+    from calendar import monthrange
+    from datetime import date, timedelta
+    from collections import defaultdict
+    import holidays
+    import uuid
+    from django.db.models import Q
+    from django.http import HttpResponse
+    
+    # Get filters
+    now = timezone.now()
+    try:
+        month = int(request.GET.get("month", now.month))
+        year = int(request.GET.get("year", now.year))
+    except (ValueError, TypeError):
+        month = now.month
+        year = now.year
+
+    location_id = request.GET.get("location_id")
+    department_id = request.GET.get("department_id")
+    
+    selected_location = None
+    if location_id:
+        try:
+            selected_location = WorkLocation.objects.get(id=location_id)
+        except WorkLocation.DoesNotExist:
+            pass
+
+    if not selected_location:
+         return HttpResponse("Lokasi tidak valid", status=400)
+
+    # Base Employees Query
+    sub_locations = selected_location.get_descendants(include_self=True)
+    employees_qs = Employee.objects.filter(
+        home_base__in=sub_locations,
+        is_verified=True,
+        is_active=True,
+        attendance_method__in=["FINGERPRINT", "MANUAL"]
+    ).select_related("department")
+    
+    if department_id:
+        employees_qs = employees_qs.filter(department_id=department_id)
+        
+    employees = list(employees_qs.order_by("department__name", "full_name"))
+    
+    if not employees:
+        return HttpResponse("Tidak ada data karyawan untuk filter ini.")
+
+    # Group by Department
+    dept_groups = defaultdict(list)
+    for emp in employees:
+        k = emp.department.name if emp.department else "Tanpa Departemen"
+        dept_groups[k].append(emp)
+
+    _, days_in_month = monthrange(year, month)
+    date_range = [date(year, month, day) for day in range(1, days_in_month + 1)]
+    id_holidays = holidays.ID(years=[year, year-1])
+    
+    month_start = date(year, month, 1)
+    month_end = date(year, month, days_in_month)
+    
+    bulk_assignments = EmployeeShiftAssignment.objects.filter(
+        employee__in=employees,
+        is_active=True
+    ).filter(
+        Q(effective_to__isnull=True) | Q(effective_to__gte=month_start)
+    ).filter(
+        effective_from__lte=month_end
+    ).select_related("shift_pattern")
+
+    assignment_map = defaultdict(list)
+    for asm in bulk_assignments:
+        assignment_map[asm.employee_id].append(asm)
+
+    logs = AttendanceLog.objects.filter(
+        employee__in=employees,
+        timestamp__year=year,
+        timestamp__month=month
+    ).order_by("employee", "timestamp")
+    
+    employee_date_logs = defaultdict(lambda: defaultdict(list))
+    for log in logs:
+        local_dt = timezone.localtime(log.timestamp)
+        employee_date_logs[log.employee_id][local_dt.date()].append(log)
+
+    leaves = EmployeeLeave.objects.filter(
+        employee__in=employees,
+        start_date__lte=date_range[-1],
+        end_date__gte=date_range[0]
+    )
+    
+    employee_leaves_map = defaultdict(lambda: defaultdict(str))
+    for leave in leaves:
+        curr = max(leave.start_date, date_range[0])
+        end = min(leave.end_date, date_range[-1])
+        while curr <= end:
+            employee_leaves_map[leave.employee_id][curr] = leave.leave_type
+            curr += timedelta(days=1)
+
+    matrix_data = {}
+    DEFAULT_SCHEDULE_IN = timezone.datetime.strptime("08:00", "%H:%M").time()
+
+    for emp in employees:
+        emp_matrix = {}
+        emp_stats = {"H":0, "T":0, "A":0, "S":0, "I":0}
+        emp_assignments = assignment_map.get(emp.id, [])
+
+        for d in date_range:
+            day_logs = employee_date_logs.get(emp.id, {}).get(d, [])
+            is_holiday = d in id_holidays
+            is_weekend = d.weekday() == 6
+
+            if day_logs:
+                first_log = day_logs[0]
+                status_map = {"CHECKIN": "H", "SICK": "S", "PERMIT": "I", "ALPHA": "A"}
+                st = status_map.get(first_log.status, "H")
+                emp_matrix[d] = st
+                if st == "H":
+                    emp_stats["H"] += 1
+                    local_dt = timezone.localtime(first_log.timestamp)
+                    daily_sch = None
+                    for asm in emp_assignments:
+                        if asm.effective_from <= d and (asm.effective_to is None or asm.effective_to >= d):
+                            if asm.shift_pattern: daily_sch = asm.shift_pattern.get_schedule_for_day(d.weekday())
+                            break
+                    sch_in = DEFAULT_SCHEDULE_IN
+                    tol = 0
+                    if daily_sch:
+                        sch_in = daily_sch.clock_in
+                        tol = daily_sch.late_tolerance
+                    from datetime import datetime
+                    dt_thresh = datetime.combine(date(2000,1,1), sch_in) + timedelta(minutes=tol)
+                    t1 = local_dt.time().replace(second=0, microsecond=0)
+                    t2 = dt_thresh.time().replace(second=0, microsecond=0)
+                    if t1 > t2 and not is_holiday and not is_weekend:
+                        emp_stats["T"] += 1
+                else:
+                    if st in emp_stats: emp_stats[st] += 1
+            else:
+                l_type = employee_leaves_map[emp.id].get(d)
+                if l_type:
+                    code_map = {"IZIN": "I", "SAKIT": "S", "CUTI": "I", "CUTI_KHUSUS": "I"}
+                    st = code_map.get(l_type, "I")
+                    emp_matrix[d] = st
+                    if st in emp_stats: emp_stats[st] += 1
+                elif is_holiday or is_weekend:
+                    emp_matrix[d] = "L"
+                elif d < now.date():
+                    emp_matrix[d] = "A"
+                    emp_stats["A"] += 1
+                else:
+                    emp_matrix[d] = ""
+        matrix_data[emp.id] = {"matrix": emp_matrix, "stats": emp_stats}
+
+    context = {
+        "dept_groups": dict(dept_groups),
+        "matrix_data": matrix_data,
+        "date_range": date_range,
+        "month_name": date(year, month, 1).strftime("%B"),
+        "year": year,
+        "location": selected_location,
+        "holidays": id_holidays,
+    }
+
+    from django.template.loader import get_template
+    from xhtml2pdf import pisa
+    from io import BytesIO
+
+    template = get_template("portal/recap_matrix_pdf.html")
+    html = template.render(context)
+    result = BytesIO()
+    
+    pdf = pisa.pisaDocument(BytesIO(html.encode("UTF-8")), result)
+    if not pdf.err:
+        response = HttpResponse(result.getvalue(), content_type="application/pdf")
+        filename = f"Rekap_Matrix_{selected_location.name}_{year}_{month}"
+        if department_id:
+             filename += "_Dept"
+        response["Content-Disposition"] = f"inline; filename=\"{filename}.pdf\""
+        return response
+    return HttpResponse(f"Error Generasi PDF: {pdf.err}")
