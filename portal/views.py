@@ -1745,7 +1745,7 @@ def employee_edit_view(request, employee_id):
                             from datetime import date
                             from django.utils import timezone
                             
-                            start_date = employee.joined_date if employee.joined_date else date(2000, 1, 1)
+                            start_date = date(2000, 1, 1)
                             
                             EmployeeShiftAssignment.objects.create(
                                 employee=employee,
