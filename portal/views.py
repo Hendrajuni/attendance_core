@@ -2466,7 +2466,7 @@ def recap_matrix_view(request):
 
             for emp in employees:
                 emp_matrix = {}
-                emp_stats = {'H': 0, 'A': 0, 'T': 0, 'S': 0, 'I': 0}
+                emp_stats = {'H': 0, 'A': 0, 'T': 0, 'S': 0, 'I': 0, 'O': 0}
                 
                 # Get employee's assignments from memory
                 emp_assignments = assignment_map.get(emp.id, [])
@@ -2474,6 +2474,9 @@ def recap_matrix_view(request):
                 for d in date_range:
                     day_logs = employee_date_logs.get(emp.id, {}).get(d, [])
                     is_holiday = d in id_holidays
+                    
+                    # Target dictionary for this day
+                    day_data = {'status': '', 'in': '-', 'out': '-', 'late': False, 'overtime': 0}
                     
                     if day_logs:
                         # Check specific status from log
@@ -2483,13 +2486,22 @@ def recap_matrix_view(request):
                             'PERMIT': 'I', 'ALPHA': 'A'
                         }
                         st = status_map.get(first_log.status, 'H')
-                        emp_matrix[d] = st
+                        day_data['status'] = st
                         
+                        # Set clock in/out if Hadir
+                        if st == 'H':
+                            day_logs.sort(key=lambda x: x.timestamp)
+                            local_in = timezone.localtime(day_logs[0].timestamp)
+                            day_data['in'] = local_in.strftime('%H:%M')
+                            
+                            if len(day_logs) > 1:
+                                local_out = timezone.localtime(day_logs[-1].timestamp)
+                                day_data['out'] = local_out.strftime('%H:%M')
+                                
                         # Stats Calculation
                         if st == 'H':
                             emp_stats['H'] += 1
-                            # Check Late
-                            local_dt = timezone.localtime(first_log.timestamp)
+                            # Check Late & Overtime
                             
                             # --- OPTIMIZED SCHEDULE RETRIEVAL ---
                             # Find applicable assignment in memory
@@ -2501,31 +2513,45 @@ def recap_matrix_view(request):
                                     break
                             
                             sch_in = DEFAULT_SCHEDULE_IN
+                            sch_out = DEFAULT_SCHEDULE_OUT
                             tol = 0
+                            ot_tol = 0
                             if daily_sch:
                                 sch_in = daily_sch.clock_in
+                                sch_out = daily_sch.clock_out
                                 tol = daily_sch.late_tolerance
+                                ot_tol = daily_sch.overtime_tolerance
                                 
                             dummy_date = date(2000, 1, 1)
-                            dt_sch = datetime.combine(dummy_date, sch_in)
-                            dt_threshold = dt_sch + timedelta(minutes=tol)
+                            dt_sch_in = datetime.combine(dummy_date, sch_in)
+                            dt_threshold = dt_sch_in + timedelta(minutes=tol)
                             
                             # Only count late if NOT holiday and NOT Sunday
                             is_weekend = d.weekday() == 6  # Sunday only
                             
                             # Round clock-in time to minutes (ignore seconds)
-                            clock_time_rounded = local_dt.time().replace(second=0, microsecond=0)
+                            clock_in_rounded = local_in.time().replace(second=0, microsecond=0)
                             threshold_time_rounded = dt_threshold.time().replace(second=0, microsecond=0)
                             
-                            if clock_time_rounded > threshold_time_rounded and not is_holiday and not is_weekend:
+                            if clock_in_rounded > threshold_time_rounded and not is_holiday and not is_weekend:
                                 emp_stats['T'] += 1
+                                day_data['late'] = True
+                                
+                            # Check Overtime if Out exists
+                            if day_data['out'] != '-':
+                                dt_sch_out = datetime.combine(dummy_date, sch_out)
+                                dt_ot_threshold = dt_sch_out + timedelta(minutes=ot_tol)
+                                clock_out_rounded = local_out.time().replace(second=0, microsecond=0)
+                                if clock_out_rounded > dt_ot_threshold.time():
+                                    emp_stats['O'] += 1
+                                    
                         elif st == 'S':
                             emp_stats['S'] += 1
                         elif st == 'I':
                             emp_stats['I'] += 1
                         elif st == 'A':
                             emp_stats['A'] += 1
-
+                            
                     else:
                         # No logs - Check LEAVE first
                         l_type = employee_leaves_map[emp.id].get(d)
@@ -2533,23 +2559,22 @@ def recap_matrix_view(request):
                         if l_type:
                             code_map = {'IZIN': 'I', 'SAKIT': 'S', 'CUTI': 'C', 'CUTI_KHUSUS': 'C'}
                             st = code_map.get(l_type, 'I')
-                            emp_matrix[d] = st
-                            # Map Cuti to Izin stats or leave it?
-                            # Existing stats only has H, A, T, S, I. Map C -> I or ignore?
-                            # Let's map C -> I for now as per minimal stats
+                            day_data['status'] = st
                             stat_key = 'I' if st == 'C' else st
                             if stat_key in emp_stats:
                                 emp_stats[stat_key] += 1
                                 
                         elif is_holiday:
-                            emp_matrix[d] = 'L' # Libur Nasional
+                            day_data['status'] = 'L' # Libur Nasional
                         elif d.weekday() == 6: # Sunday Only
-                            emp_matrix[d] = 'L' # Libur Weekend
+                            day_data['status'] = 'L' # Libur Weekend
                         elif d < now.date():
-                            emp_matrix[d] = 'A'
+                            day_data['status'] = 'A'
                             emp_stats['A'] += 1
                         else:
-                            emp_matrix[d] = ''
+                            day_data['status'] = ''
+                            
+                    emp_matrix[d] = day_data
                 
                 matrix_data[emp.id] = emp_matrix
                 fp_summary_stats[emp.id] = emp_stats
@@ -6276,38 +6301,64 @@ def export_matrix_pdf(request):
 
     for emp in employees:
         emp_matrix = {}
-        emp_stats = {"H":0, "T":0, "A":0, "S":0, "I":0}
+        emp_stats = {"H":0, "T":0, "A":0, "S":0, "I":0, "O":0}
         emp_assignments = assignment_map.get(emp.id, [])
 
         for d in date_range:
             day_logs = employee_date_logs.get(emp.id, {}).get(d, [])
             is_holiday = d in id_holidays
             is_weekend = d.weekday() == 6
+            
+            day_data = {'status': '', 'in': '-', 'out': '-', 'late': False, 'overtime': 0}
 
             if day_logs:
                 first_log = day_logs[0]
                 status_map = {"CHECKIN": "H", "SICK": "S", "PERMIT": "I", "ALPHA": "A"}
                 st = status_map.get(first_log.status, "H")
-                emp_matrix[d] = st
+                day_data['status'] = st
+                
                 if st == "H":
+                    day_logs.sort(key=lambda x: x.timestamp)
+                    local_in = timezone.localtime(day_logs[0].timestamp)
+                    day_data['in'] = local_in.strftime('%H:%M')
+                    
+                    if len(day_logs) > 1:
+                        local_out = timezone.localtime(day_logs[-1].timestamp)
+                        day_data['out'] = local_out.strftime('%H:%M')
+                        
                     emp_stats["H"] += 1
-                    local_dt = timezone.localtime(first_log.timestamp)
+                    
                     daily_sch = None
                     for asm in emp_assignments:
                         if asm.effective_from <= d and (asm.effective_to is None or asm.effective_to >= d):
                             if asm.shift_pattern: daily_sch = asm.shift_pattern.get_schedule_for_day(d.weekday())
                             break
+                            
                     sch_in = DEFAULT_SCHEDULE_IN
+                    sch_out = timezone.datetime.strptime("17:00", "%H:%M").time()
                     tol = 0
+                    ot_tol = 0
                     if daily_sch:
                         sch_in = daily_sch.clock_in
+                        sch_out = daily_sch.clock_out
                         tol = daily_sch.late_tolerance
+                        ot_tol = daily_sch.overtime_tolerance
+                        
                     from datetime import datetime
-                    dt_thresh = datetime.combine(date(2000,1,1), sch_in) + timedelta(minutes=tol)
-                    t1 = local_dt.time().replace(second=0, microsecond=0)
+                    dummy_date = date(2000, 1, 1)
+                    dt_thresh = datetime.combine(dummy_date, sch_in) + timedelta(minutes=tol)
+                    t1 = local_in.time().replace(second=0, microsecond=0)
                     t2 = dt_thresh.time().replace(second=0, microsecond=0)
                     if t1 > t2 and not is_holiday and not is_weekend:
                         emp_stats["T"] += 1
+                        day_data['late'] = True
+                        
+                    if day_data['out'] != '-':
+                        dt_ot_thresh = datetime.combine(dummy_date, sch_out) + timedelta(minutes=ot_tol)
+                        out_t1 = local_out.time().replace(second=0, microsecond=0)
+                        out_t2 = dt_ot_thresh.time().replace(second=0, microsecond=0)
+                        if out_t1 > out_t2:
+                            emp_stats["O"] += 1
                 else:
                     if st in emp_stats: emp_stats[st] += 1
             else:
@@ -6315,15 +6366,18 @@ def export_matrix_pdf(request):
                 if l_type:
                     code_map = {"IZIN": "I", "SAKIT": "S", "CUTI": "I", "CUTI_KHUSUS": "I"}
                     st = code_map.get(l_type, "I")
-                    emp_matrix[d] = st
+                    day_data['status'] = st
                     if st in emp_stats: emp_stats[st] += 1
                 elif is_holiday or is_weekend:
-                    emp_matrix[d] = "L"
+                    day_data['status'] = "L"
                 elif d < now.date():
-                    emp_matrix[d] = "A"
+                    day_data['status'] = "A"
                     emp_stats["A"] += 1
                 else:
-                    emp_matrix[d] = ""
+                    day_data['status'] = ""
+                    
+            emp_matrix[d] = day_data
+            
         matrix_data[emp.id] = {"matrix": emp_matrix, "stats": emp_stats}
 
     context = {

@@ -552,6 +552,7 @@
                                     <th class="text-center bg-light p-2" style="width: 40px;" title="Total Alpha">A</th>
                                     <th class="text-center bg-light p-2" style="width: 40px;" title="Total Sakit">S</th>
                                     <th class="text-center bg-light p-2" style="width: 40px;" title="Total Izin">I</th>
+                                    <th class="text-center bg-light p-2" style="width: 40px;" title="Total Lembur">Lbr</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -581,8 +582,16 @@
                                             data-bs-toggle="modal"
                                             data-bs-target="#fpEditModal"
                                             {% endif %}>
-                                            <div class="status-cell {% if status == 'H' %}cell-hadir{% elif status == 'A' %}cell-alpha{% elif status == 'S' or status == 'I' or status == 'CUTI' %}cell-izin{% elif status == 'L' %}cell-libur{% else %}cell-empty{% endif %}">
-                                                {% if status == 'H' %}H{% elif status == 'A' %}A{% elif status == 'S' %}S{% elif status == 'I' %}I{% elif status == 'CUTI' %}C{% elif status == 'L' %}-{% else %}+{% endif %}
+                                            <div class="status-cell {% if status.status == 'H' %}cell-hadir{% elif status.status == 'A' %}cell-alpha{% elif status.status == 'S' or status.status == 'I' or status.status == 'CUTI' %}cell-izin{% elif status.status == 'L' %}cell-libur{% else %}cell-empty{% endif %}">
+                                                {% if status.status == 'H' %}
+                                                    <div style="font-size: 0.65rem; line-height: 1.1; font-weight: bold; {% if status.late %}color: #dc3545;{% endif %}">{{ status.in }}</div>
+                                                    <div style="font-size: 0.65rem; line-height: 1.1; color: {% if status.overtime > 0 %}#198754{% else %}#6c757d{% endif %}; font-weight: normal;">{{ status.out }}</div>
+                                                {% elif status.status == 'A' %}A
+                                                {% elif status.status == 'S' %}S
+                                                {% elif status.status == 'I' %}I
+                                                {% elif status.status == 'CUTI' %}C
+                                                {% elif status.status == 'L' %}-
+                                                {% else %}+{% endif %}
                                             </div>
                                         </td>
                                         {% endwith %}
@@ -597,6 +606,7 @@
                                     <td id="stats-{{ emp.id }}-A" class="text-center fw-bold bg-light" style="color: #dc3545;">{{ stats.A|default:0 }}</td>
                                     <td id="stats-{{ emp.id }}-S" class="text-center fw-bold bg-light text-warning">{{ stats.S|default:0 }}</td>
                                     <td id="stats-{{ emp.id }}-I" class="text-center fw-bold bg-light text-info">{{ stats.I|default:0 }}</td>
+                                    <td id="stats-{{ emp.id }}-O" class="text-center fw-bold bg-light" style="color: #6f42c1;">{{ stats.O|default:0 }}</td>
                                     {% endwith %}
                                 </tr>
                                 {% endfor %}

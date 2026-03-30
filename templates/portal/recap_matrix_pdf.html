@@ -95,7 +95,7 @@
         <thead>
             <tr>
                 <th width="3%">#</th>
-                <th width="17%" class="col-name">Nama Karyawan</th>
+                <th width="16%" class="col-name">Nama Karyawan</th>
                 {% for d in date_range %}
                     <th width="2%">{{ d|date:"d" }}</th>
                 {% endfor %}
@@ -104,6 +104,7 @@
                 <th width="3%" class="bg-light">A</th>
                 <th width="3%" class="bg-light">S</th>
                 <th width="3%" class="bg-light">I</th>
+                <th width="3%" class="bg-light">Lb</th>
             </tr>
         </thead>
         <tbody>
@@ -115,18 +116,23 @@
                 
                 {% for d in date_range %}
                     {% with st=res.matrix|dict_get:d %}
-                    <td class="cell-{{ st|default:'' }}">
-                        {% if st == 'L' %}-{% else %}{{ st|default:'-' }}{% endif %}
+                    <td class="cell-{{ st.status|default:'' }}" align="center">
+                        {% if st.status == 'H' %}
+                            <div style="font-size: 5pt; line-height: 1; {% if st.late %}color: #e74c3c;{% endif %}">{{ st.in }}</div>
+                            <div style="font-size: 5pt; line-height: 1; color: #7f8c8d;">{{ st.out }}</div>
+                        {% elif st.status == 'L' %}-
+                        {% else %}{{ st.status|default:'-' }}{% endif %}
                     </td>
                     {% endwith %}
                 {% endfor %}
 
                 <!-- Stats summary -->
-                <td class="stat-H bg-light">{{ res.stats.H|default:0 }}</td>
-                <td class="stat-T bg-light">{{ res.stats.T|default:0 }}</td>
-                <td class="stat-A bg-light">{{ res.stats.A|default:0 }}</td>
-                <td class="stat-S bg-light">{{ res.stats.S|default:0 }}</td>
-                <td class="stat-I bg-light">{{ res.stats.I|default:0 }}</td>
+                <td class="stat-H bg-light" align="center">{{ res.stats.H|default:0 }}</td>
+                <td class="stat-T bg-light" align="center">{{ res.stats.T|default:0 }}</td>
+                <td class="stat-A bg-light" align="center">{{ res.stats.A|default:0 }}</td>
+                <td class="stat-S bg-light" align="center">{{ res.stats.S|default:0 }}</td>
+                <td class="stat-I bg-light" align="center">{{ res.stats.I|default:0 }}</td>
+                <td class="bg-light" align="center" style="color: #8e44ad; font-weight: bold;">{{ res.stats.O|default:0 }}</td>
             </tr>
             {% endwith %}
             {% endfor %}
