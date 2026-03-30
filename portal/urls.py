@@ -11,6 +11,7 @@ urlpatterns = [
     path('hrm/departments/add/', views_department.department_add, name='department_add'),
     path('hrm/departments/edit/<uuid:department_id>/', views_department.department_edit, name='department_edit'),
     path('hrm/departments/delete/<uuid:department_id>/', views_department.department_delete, name='department_delete'),
+    path('hrm/departments/<uuid:department_id>/', views_department.department_detail, name='department_detail'),
 
     path('dashboard/', views.dashboard, name='dashboard'),
     

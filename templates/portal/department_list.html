@@ -4,81 +4,142 @@
 {% block page_title %}Kelola Departemen{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <div>
-        <h4 class="mb-0 fw-bold">Daftar Departemen</h4>
-        <p class="text-muted small mb-0">Kelola data departemen perusahaan.</p>
-    </div>
-    <div>
-        <button hx-get="{% url 'portal:department_add' %}" 
-                hx-target="#modal-container" 
-                class="btn btn-primary">
-            <i class="fas fa-plus me-1"></i> Tambah Departemen
-        </button>
-    </div>
-</div>
+<div class="row g-3">
+    <!-- Sidebar / Department Tree -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h6 class="mb-0 fw-bold"><i class="fas fa-sitemap me-2 text-primary"></i>Struktur Departemen</h6>
+                <button hx-get="{% url 'portal:department_add' %}" 
+                        hx-target="#modal-container" 
+                        class="btn btn-sm btn-primary py-0 px-2" title="Tambah Departemen">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+            <div class="card-body overflow-auto p-2" style="max-height: 80vh;">
+                <ul class="list-unstyled m-0">
+                    <!-- Head Office -->
+                    {% if departments_by_type.HO %}
+                    <li class="mb-2">
+                        <div class="fw-bold text-dark mb-1 px-2"><i class="fas fa-building text-info me-2"></i>Head Office</div>
+                        <ul class="list-unstyled ms-3 border-start ps-2 border-light mb-0">
+                            {% for dept in departments_by_type.HO %}
+                            <li>
+                                <div class="d-flex align-items-center py-1 node-item"
+                                     hx-get="{% url 'portal:department_detail' dept.id %}"
+                                     hx-target="#department-content-area"
+                                     hx-swap="innerHTML"
+                                     hx-trigger="click"
+                                     onclick="setActiveNode(this)">
+                                    <i class="fas fa-folder text-warning me-2"></i>
+                                    <span class="fw-medium text-dark">{{ dept.name }}</span>
+                                    <div class="spinner-border spinner-border-sm text-primary ms-auto d-none htmx-indicator" role="status"></div>
+                                </div>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </li>
+                    {% endif %}
 
-<div class="card shadow-sm border-0">
-    <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
-                <thead class="bg-light">
-                    <tr>
-                        <th class="ps-4" style="width: 50px;">#</th>
-                        <th>Nama Departemen</th>
-                        <th>Tipe Lokasi</th>
-                        <th class="text-end pe-4" style="width: 150px;">Aksi</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for dept in departments %}
-                    <tr>
-                        <td class="ps-4 text-muted small">{{ forloop.counter }}</td>
-                        <td class="fw-medium">{{ dept.name }}</td>
-                        <td>
-                            {% if dept.location_type == 'HO' %}
-                                <span class="badge bg-info text-dark">Head Office</span>
-                            {% elif dept.location_type == 'MILL' %}
-                                <span class="badge bg-warning text-dark">Mill / PKS</span>
-                            {% else %}
-                                <span class="badge bg-success">Estate / Kebun</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-end pe-4">
-                            <button hx-get="{% url 'portal:department_edit' dept.id %}" 
-                                    hx-target="#modal-container" 
-                                    class="btn btn-link btn-sm text-primary p-0 me-2" 
-                                    title="Edit">
-                                <i class="fas fa-edit"></i>
-                            </button>
-                            
-                            <form action="{% url 'portal:department_delete' dept.id %}" method="POST" class="d-inline"
-                                  onsubmit="return confirm('Apakah Anda yakin ingin menghapus departemen ini?');">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-link btn-sm text-danger p-0" title="Hapus">
-                                    <i class="fas fa-trash-alt"></i>
-                                </button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="4" class="text-center py-5 text-muted">
-                            <i class="fas fa-building fs-3 mb-3 d-block text-secondary"></i>
-                            Belum ada data departemen.
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                    <!-- Estate / Kebun -->
+                    {% if departments_by_type.ESTATE %}
+                    <li class="mb-2 mt-3">
+                        <div class="fw-bold text-dark mb-1 px-2"><i class="fas fa-leaf text-success me-2"></i>Estate / Kebun</div>
+                        <ul class="list-unstyled ms-3 border-start ps-2 border-light mb-0">
+                            {% for dept in departments_by_type.ESTATE %}
+                            <li>
+                                <div class="d-flex align-items-center py-1 node-item"
+                                     hx-get="{% url 'portal:department_detail' dept.id %}"
+                                     hx-target="#department-content-area"
+                                     hx-swap="innerHTML"
+                                     hx-trigger="click"
+                                     onclick="setActiveNode(this)">
+                                    <i class="fas fa-folder text-warning me-2"></i>
+                                    <span class="fw-medium text-dark">{{ dept.name }}</span>
+                                    <div class="spinner-border spinner-border-sm text-primary ms-auto d-none htmx-indicator" role="status"></div>
+                                </div>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </li>
+                    {% endif %}
+
+                    <!-- Mill / PKS -->
+                    {% if departments_by_type.MILL %}
+                    <li class="mb-2 mt-3">
+                        <div class="fw-bold text-dark mb-1 px-2"><i class="fas fa-industry text-warning me-2"></i>Mill / PKS</div>
+                        <ul class="list-unstyled ms-3 border-start ps-2 border-light mb-0">
+                            {% for dept in departments_by_type.MILL %}
+                            <li>
+                                <div class="d-flex align-items-center py-1 node-item"
+                                     hx-get="{% url 'portal:department_detail' dept.id %}"
+                                     hx-target="#department-content-area"
+                                     hx-swap="innerHTML"
+                                     hx-trigger="click"
+                                     onclick="setActiveNode(this)">
+                                    <i class="fas fa-folder text-warning me-2"></i>
+                                    <span class="fw-medium text-dark">{{ dept.name }}</span>
+                                    <div class="spinner-border spinner-border-sm text-primary ms-auto d-none htmx-indicator" role="status"></div>
+                                </div>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Content Area -->
+    <div class="col-md-9">
+        <div class="card border-0 shadow-sm h-100">
+            <div id="department-content-area" class="card-body p-0 h-100 position-relative">
+                <!-- Placeholder State -->
+                <div class="d-flex flex-column align-items-center justify-content-center text-muted h-100 min-vh-50">
+                    <div class="text-center">
+                        <div class="bg-light rounded-circle d-inline-flex align-items-center justify-content-center mb-3" style="width: 80px; height: 80px;">
+                            <i class="fas fa-building fs-1 text-secondary opacity-50"></i>
+                        </div>
+                        <h5>Pilih Departemen</h5>
+                        <p class="small text-muted mb-0">Klik salah satu departemen di samping untuk melihat detail.</p>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- Modal Container -->
-<div id="modal-container"></div>
+<style>
+    .node-item {
+        cursor: pointer;
+        padding: 6px 10px;
+        border-radius: 6px;
+        transition: all 0.2s;
+    }
+    .node-item:hover {
+        background-color: #e9ecef;
+    }
+    .node-item.active {
+        background-color: #cfe2ff; /* Primary Soft */
+        color: #084298;
+    }
+    
+    /* Show loader when htmx request is in flight */
+    .node-item.htmx-request .htmx-indicator {
+        display: inline-block !important;
+    }
+</style>
 
 <script>
+    function setActiveNode(element) {
+        // Remove active class from all nodes
+        document.querySelectorAll('.node-item').forEach(el => el.classList.remove('active'));
+        // Add active class to clicked node
+        element.classList.add('active');
+    }
+
+    // Modal bootstrap re-initializer for HTMX
     document.body.addEventListener('htmx:afterSwap', function(evt) {
         if (evt.detail.target.id === "modal-container") {
             const modalEl = evt.detail.target.querySelector('.modal');
@@ -89,4 +150,8 @@
         }
     });
 </script>
+
+<!-- Modal Container -->
+<div id="modal-container"></div>
+{% include 'portal/partials/_shared_modals.html' %}
 {% endblock %}
