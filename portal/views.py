@@ -1729,16 +1729,30 @@ def employee_edit_view(request, employee_id):
                     # Handle Shift Assignment
                     if shift_pattern_id:
                         shift_pattern = get_object_or_404(ShiftPattern, id=shift_pattern_id)
-                        # Deactivate previous assignments
-                        EmployeeShiftAssignment.objects.filter(employee=employee, is_active=True).update(is_active=False)
-                        # Create new assignment with effective_from date
-                        from django.utils import timezone
-                        EmployeeShiftAssignment.objects.create(
-                            employee=employee,
-                            shift_pattern=shift_pattern,
-                            is_active=True,
-                            effective_from=timezone.now().date()
-                        )
+                        
+                        # Get current active assignment
+                        active_assignment = EmployeeShiftAssignment.objects.filter(
+                            employee=employee, is_active=True
+                        ).first()
+                        
+                        # Only update if there is no assignment or the pattern changed
+                        if not active_assignment or active_assignment.shift_pattern_id != shift_pattern.id:
+                            # Deactivate previous assignments
+                            EmployeeShiftAssignment.objects.filter(employee=employee, is_active=True).update(is_active=False)
+                            
+                            # Create new assignment with effective_from far in the past 
+                            # (so it applies to previous days in the current matrix)
+                            from datetime import date
+                            from django.utils import timezone
+                            
+                            start_date = employee.joined_date if employee.joined_date else date(2000, 1, 1)
+                            
+                            EmployeeShiftAssignment.objects.create(
+                                employee=employee,
+                                shift_pattern=shift_pattern,
+                                is_active=True,
+                                effective_from=start_date
+                            )
 
                 employee.save()
             
