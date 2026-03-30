@@ -584,7 +584,7 @@
                                             {% endif %}>
                                             <div class="status-cell {% if status.status == 'H' %}cell-hadir{% elif status.status == 'A' %}cell-alpha{% elif status.status == 'S' or status.status == 'I' or status.status == 'CUTI' %}cell-izin{% elif status.status == 'L' %}cell-libur{% else %}cell-empty{% endif %}">
                                                 {% if status.status == 'H' %}
-                                                    <div style="font-size: 0.65rem; line-height: 1.1; font-weight: bold; {% if status.late %}color: #dc3545;{% endif %}">{{ status.in }}</div>
+                                                    <div style="font-size: 0.65rem; line-height: 1.1; font-weight: normal; {% if status.late %}color: #dc3545;{% endif %}">{{ status.in }}</div>
                                                     <div style="font-size: 0.65rem; line-height: 1.1; color: {% if status.overtime > 0 %}#198754{% else %}#6c757d{% endif %}; font-weight: normal;">{{ status.out }}</div>
                                                 {% elif status.status == 'A' %}A
                                                 {% elif status.status == 'S' %}S
