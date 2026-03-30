@@ -136,7 +136,6 @@
                                     <th class="ps-4">Nama Karyawan</th>
                                     <th>Metode</th>
                                     <th>Status</th>
-                                    <th class="text-end pe-4">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -175,23 +174,10 @@
                                             <span class="badge bg-danger">Non-Aktif</span>
                                         {% endif %}
                                     </td>
-                                    <td class="text-end pe-4">
-                                        <a href="{% url 'portal:employee_detail' emp.id %}" class="btn btn-sm btn-outline-primary rounded-pill py-0 px-2" title="Detail Personalia">
-                                            <i class="fas fa-eye text-primary"></i> <span class="d-none d-md-inline ms-1 small">Detail</span>
-                                        </a>
-                                        <a href="{% url 'portal:employee_edit' emp.id %}" class="btn btn-sm btn-outline-warning rounded-pill py-0 px-2 ms-1" title="Edit Profil">
-                                            <i class="fas fa-edit text-warning"></i> <span class="d-none d-md-inline ms-1 small text-dark">Edit</span>
-                                        </a>
-                                        <button hx-get="{% url 'portal:mutate_employee' emp.id %}" 
-                                                hx-target="#modal-container"
-                                                class="btn btn-sm btn-outline-secondary rounded-pill py-0 px-2 ms-1" title="Mutasi Lokasi">
-                                            <i class="fas fa-exchange-alt"></i> <span class="d-none d-md-inline ms-1 small">Mutasi</span>
-                                        </button>
-                                    </td>
                                 </tr>
                                 {% empty %}
                                 <tr>
-                                    <td colspan="4" class="text-center py-5 text-muted">
+                                    <td colspan="3" class="text-center py-5 text-muted">
                                         <i class="fas fa-users-slash fs-3 mb-3 d-block text-secondary opacity-50"></i>
                                         Tidak ada karyawan pada departemen ini yang cocok.
                                     </td>
