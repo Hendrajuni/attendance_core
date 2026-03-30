@@ -3521,15 +3521,15 @@ def wa_edit_cell(request, employee_id, date_str, category):
     is_shift_worker = getattr(employee, 'is_shift_worker', False)
     shift_choices = []
     current_roster = None
+    wa_shifts = []
+    finger_shifts = []
     
     if is_shift_worker:
         from attendance.models import DailySchedule, DailyShiftAssignment
         # Fetch all active Daily Schedules (Exclude non-shift items)
         excluded_codes = ['TT', 'HOF', 'KF']
         shifts = DailySchedule.objects.filter(is_active=True).exclude(code__in=excluded_codes).order_by('clock_in')
-        
-        wa_shifts = []
-        finger_shifts = []
+
         
         for s in shifts:
             label = f"{s.name} ({s.clock_in.strftime('%H:%M')} - {s.clock_out.strftime('%H:%M')})"
