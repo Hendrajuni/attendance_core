@@ -33,7 +33,10 @@
     <div class="tab-content px-3 py-3">
         <!-- TAB 1: LOG WA -->
         <div class="tab-pane fade show active" id="wa-log-pane" role="tabpanel">
-            <form hx-post="{% url 'portal:wa_save_cell' %}" hx-target="#{{ cell_id }}" hx-swap="innerHTML">
+            <form hx-post="{% url 'portal:wa_save_cell' %}" 
+                  hx-target="#{{ cell_id }}" 
+                  hx-swap="innerHTML"
+                  hx-on::after-request="if(event.detail.successful) bootstrap.Modal.getInstance(document.getElementById('waEditModal')).hide();">
                 {% csrf_token %}
                 <input type="hidden" name="employee_id" value="{{ employee.id }}">
                 <input type="hidden" name="date_str" value="{{ date_str }}">
