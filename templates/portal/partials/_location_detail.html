@@ -88,24 +88,43 @@
         <!-- Tab Personalia -->
         <div class="tab-pane fade show active" id="employees" role="tabpanel" aria-labelledby="employees-tab">
             <div class="card border-0 shadow-sm">
-                <!-- Page Size Selector -->
-                <div class="card-header bg-white border-0 d-flex justify-content-between align-items-center py-2">
-                    <small class="text-muted">
-                        Menampilkan {{ employees_page.start_index }}-{{ employees_page.end_index }} dari {{ total_employees }} karyawan
-                    </small>
-                    <div class="d-flex align-items-center gap-2">
-                        <small class="text-muted">Tampilkan:</small>
-                        <select class="form-select form-select-sm" style="width: auto;"
-                                hx-get="{% url 'portal:location_detail' location.id %}"
-                                hx-target="#location-content-area"
-                                hx-swap="innerHTML"
-                                hx-include="[name='emp_page_size']"
-                                name="emp_page_size"
-                                onchange="htmx.ajax('GET', '{% url 'portal:location_detail' location.id %}?emp_page_size=' + this.value, {target: '#location-content-area', swap: 'innerHTML'})">
-                            {% for size in page_size_options %}
-                            <option value="{{ size }}" {% if size == emp_page_size %}selected{% endif %}>{{ size }}</option>
-                            {% endfor %}
-                        </select>
+                <!-- Header with Search & Page Size Selector -->
+                <div class="card-header bg-white border-0 py-3">
+                    <div class="row align-items-center g-3">
+                        <div class="col-md-4">
+                            <small class="text-muted d-block mb-1">
+                                Menampilkan {{ employees_page.start_index }}-{{ employees_page.end_index }} dari {{ total_employees }} karyawan
+                            </small>
+                        </div>
+                        <div class="col-md-5">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-light border-end-0" id="search-addon">
+                                    <i class="fas fa-search text-muted"></i>
+                                </span>
+                                <input type="text" class="form-control border-start-0" 
+                                       placeholder="Cari nama atau NIK..." 
+                                       name="emp_search" 
+                                       value="{{ emp_search }}"
+                                       hx-get="{% url 'portal:location_detail' location.id %}"
+                                       hx-target="#location-content-area"
+                                       hx-swap="innerHTML"
+                                       hx-trigger="keyup changed delay:500ms"
+                                       hx-include="[name='emp_page_size']">
+                            </div>
+                        </div>
+                        <div class="col-md-3 d-flex justify-content-end align-items-center gap-2">
+                            <small class="text-muted text-nowrap">Tampilkan:</small>
+                            <select class="form-select form-select-sm" style="width: auto;"
+                                    hx-get="{% url 'portal:location_detail' location.id %}"
+                                    hx-target="#location-content-area"
+                                    hx-swap="innerHTML"
+                                    hx-include="[name='emp_search']"
+                                    name="emp_page_size">
+                                {% for size in page_size_options %}
+                                <option value="{{ size }}" {% if size == emp_page_size %}selected{% endif %}>{{ size }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                     </div>
                 </div>
                 <div class="card-body p-0">
@@ -206,7 +225,7 @@
                             {% if employees_page.has_previous %}
                             <li class="page-item">
                                 <a class="page-link" href="#"
-                                   hx-get="{% url 'portal:location_detail' location.id %}?emp_page={{ employees_page.previous_page_number }}&emp_page_size={{ emp_page_size }}"
+                                   hx-get="{% url 'portal:location_detail' location.id %}?emp_page={{ employees_page.previous_page_number }}&emp_page_size={{ emp_page_size }}&emp_search={{ emp_search }}"
                                    hx-target="#location-content-area"
                                    hx-swap="innerHTML">
                                     <i class="fas fa-chevron-left"></i>
@@ -220,7 +239,7 @@
                                 {% elif num > employees_page.number|add:'-3' and num < employees_page.number|add:'3' %}
                                 <li class="page-item">
                                     <a class="page-link" href="#"
-                                       hx-get="{% url 'portal:location_detail' location.id %}?emp_page={{ num }}&emp_page_size={{ emp_page_size }}"
+                                       hx-get="{% url 'portal:location_detail' location.id %}?emp_page={{ num }}&emp_page_size={{ emp_page_size }}&emp_search={{ emp_search }}"
                                        hx-target="#location-content-area"
                                        hx-swap="innerHTML">{{ num }}</a>
                                 </li>
@@ -230,7 +249,7 @@
                             {% if employees_page.has_next %}
                             <li class="page-item">
                                 <a class="page-link" href="#"
-                                   hx-get="{% url 'portal:location_detail' location.id %}?emp_page={{ employees_page.next_page_number }}&emp_page_size={{ emp_page_size }}"
+                                   hx-get="{% url 'portal:location_detail' location.id %}?emp_page={{ employees_page.next_page_number }}&emp_page_size={{ emp_page_size }}&emp_search={{ emp_search }}"
                                    hx-target="#location-content-area"
                                    hx-swap="innerHTML">
                                     <i class="fas fa-chevron-right"></i>

@@ -525,11 +525,23 @@ def location_detail_view(request, location_id):
     # Gunakan get_descendants(include_self=True) dari MPTT
     sub_locations = location.get_descendants(include_self=True)
     
+    # Search logic for employees
+    emp_search = request.GET.get('emp_search', '').strip()
+    
     # Filter Karyawan: Home Base is within these locations
+    from django.db.models import Q
     employees_qs = Employee.objects.filter(
         home_base__in=sub_locations,
         is_verified=True
-    ).select_related('department', 'home_base').order_by('full_name')
+    )
+    
+    if emp_search:
+        employees_qs = employees_qs.filter(
+            Q(full_name__icontains=emp_search) | 
+            Q(nik__icontains=emp_search)
+        )
+        
+    employees_qs = employees_qs.select_related('department', 'home_base').order_by('full_name')
     
     total_employees = employees_qs.count()
     active_employees = employees_qs.filter(is_active=True).count()
@@ -563,10 +575,11 @@ def location_detail_view(request, location_id):
         'present_today': logs_today,
         'recent_logs': logs_page,
         'logs_page': logs_page,
-        # Pagination state
+        # Pagination & Search state
         'emp_page_size': emp_page_size,
         'log_page_size': log_page_size,
         'page_size_options': PAGE_SIZE_OPTIONS,
+        'emp_search': emp_search,
     }
     
     # If HTMX request, render partial (for tree explorer panel)
