@@ -25,9 +25,16 @@ def get_gspread_client():
 def get_sheet_dataframe(spreadsheet_id, sheet_name):
     import pandas as pd
     client = get_gspread_client()
-    sheet = client.open_by_key(spreadsheet_id).worksheet(sheet_name)
-    data = sheet.get_all_records()
-    return pd.DataFrame(data)
+    try:
+        # Prevent hidden whitespaces/newlines from causing Max Retries Exceeded URL malformation
+        clean_id = str(spreadsheet_id).strip()
+        clean_name = str(sheet_name).strip()
+        
+        sheet = client.open_by_key(clean_id).worksheet(clean_name)
+        data = sheet.get_all_records()
+        return pd.DataFrame(data)
+    except Exception as e:
+        raise ValueError(f"Gagal mengambil data dari Google Sheets. Pastikan Spreadsheet ID valid dan tidak terlalu besar. Detail error: {e}")
 
 
 def time_to_minutes(t):
