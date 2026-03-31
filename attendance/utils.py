@@ -14,21 +14,14 @@ import json
 def get_gspread_client():
     """Get authenticated gspread client using Env Var or File fallback."""
     import gspread
-    from gspread.http_client import BackoffHTTPClient
     
-    # Perbesar batas timeout dari standar 60s menjadi 180s (3 menit) untuk mengatasi sheet raksasa
-    class CustomHTTPClient(BackoffHTTPClient):
-        def __init__(self, auth):
-            super().__init__(auth)
-            self.timeout = 180
-            
     creds_json = os.environ.get('GOOGLE_SHEETS_CREDENTIALS')
     if creds_json:
         creds_dict = json.loads(creds_json)
-        return gspread.service_account_from_dict(creds_dict, client_factory=CustomHTTPClient)
+        return gspread.service_account_from_dict(creds_dict)
     else:
         # Fallback to local file
-        return gspread.service_account(filename='credentials.json', client_factory=CustomHTTPClient)
+        return gspread.service_account(filename='credentials.json')
 
 def get_sheet_dataframe(spreadsheet_id, sheet_name):
     import pandas as pd
