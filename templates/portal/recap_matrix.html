@@ -357,7 +357,7 @@
             <div class="card shadow-sm border-0 rounded-4 mb-4">
                 <div class="card-header bg-dark text-white py-3">
                     <div class="row align-items-center">
-                        <div class="col-md-6">
+                        <div class="col-12 d-flex justify-content-between align-items-center mb-3">
                             <div class="d-flex align-items-center">
                                 <div class="bg-white text-dark rounded-circle d-flex align-items-center justify-content-center shadow-sm" style="width: 48px; height: 48px; font-size: 1.1rem; font-weight: 700;">
                                     {{ personal_employee.full_name|slice:":1" }}
@@ -368,22 +368,26 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-6 text-end">
-                            <div class="d-flex align-items-center gap-3 justify-content-end">
-            <!-- HTASI Badges -->
-            <span class="badge bg-success" title="Hadir"><i class="fas fa-check-circle me-1"></i>H: {{ summary_stats.hadir }}</span>
-            <span class="badge bg-warning text-dark" title="Telat (Count)"><i class="fas fa-clock me-1"></i>T: {{ summary_stats.late_count }}</span>
-            <span class="badge bg-danger" title="Alpha"><i class="fas fa-times-circle me-1"></i>A: {{ summary_stats.alpha }}</span>
-            <span class="badge bg-info text-dark" title="Sakit"><i class="fas fa-notes-medical me-1"></i>S: {{ summary_stats.sick }}</span>
-            <span class="badge bg-info text-dark" title="Izin"><i class="fas fa-user-clock me-1"></i>I: {{ summary_stats.permit }}</span>
-            
-            <div class="vr mx-2"></div>
-            
-            <!-- Existing Stats -->
-            <span class="badge bg-primary"><i class="fas fa-clock me-1"></i>Telat: {{ summary_stats.late }}m</span>
-            <span class="badge bg-success"><i class="fas fa-hourglass-half me-1"></i>Lembur: {{ summary_stats.overtime }}m</span>
-            <span class="badge bg-danger"><i class="fas fa-times-circle me-1"></i>Alpha: {{ summary_stats.alpha }}</span>
-        </div>                    
+                        <!-- Stats Area: 2 Rows Full Width -->
+                        <div class="col-12">
+                            <div class="d-flex flex-column gap-2 w-100" style="font-size: 0.85rem;">
+                                <!-- Baris Pertama: Kehadiran Utama & Lembur -->
+                                <div class="d-flex justify-content-between align-items-center bg-dark bg-opacity-25 rounded px-3 py-2 border border-secondary border-opacity-25 w-100">
+                                    <span><i class="fas fa-check-circle text-success me-2"></i>Hadir: <strong class="fs-6 text-white">{{ summary_stats.hadir }}</strong></span>
+                                    <span><i class="fas fa-clock text-warning me-2"></i>Telat: <strong class="fs-6 text-white">{{ summary_stats.late_count }}</strong></span>
+                                    <span><i class="fas fa-notes-medical text-info me-2"></i>Sakit: <strong class="fs-6 text-white">{{ summary_stats.sick }}</strong></span>
+                                    <span><i class="fas fa-times-circle text-danger me-2"></i>Alpha: <strong class="fs-6 text-white">{{ summary_stats.alpha }}</strong></span>
+                                    <span class="border-start border-secondary ps-3"><i class="fas fa-hourglass-half text-primary me-2"></i>Total Lembur: <strong class="fs-6 text-white">{{ summary_stats.overtime_hours }}j {% if summary_stats.overtime_remaining_mins %}{{ summary_stats.overtime_remaining_mins }}m{% endif %}</strong></span>
+                                </div>
+                                
+                                <!-- Baris Kedua: Izin Khusus -->
+                                <div class="d-flex justify-content-center gap-5 align-items-center px-3 py-2 text-light opacity-75">
+                                    <span><i class="fas fa-user-clock me-1"></i>Izin Telat: <strong>{{ summary_stats.excuses_telat }}</strong></span>
+                                    <span><i class="fas fa-running me-1"></i>Izin Pulang Cepat: <strong>{{ summary_stats.excuses_pulang }}</strong></span>
+                                    <span><i class="fas fa-question-circle me-1"></i>Lupa Absen: <strong>{{ summary_stats.excuses_lupa }}</strong></span>
+                                    <span><i class="fas fa-ellipsis-h me-1"></i>Izin Lainnya: <strong>{{ summary_stats.excuses_other }}</strong></span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -396,6 +400,7 @@
                                     <th style="width: 50px; padding: 8px;">Hari</th>
                                     <th style="width: 80px; padding: 8px;">Masuk</th>
                                     <th style="width: 80px; padding: 8px;">Pulang</th>
+                                    <th style="width: 90px; padding: 8px;">Aktual Jam</th>
                                     <th style="width: 60px; padding: 8px;">Telat</th>
                                     <th style="width: 70px; padding: 8px;">Lembur</th>
                                     <th style="width: 100px; padding: 8px;">Ket</th>
@@ -420,6 +425,15 @@
                                     <td class="text-center py-1">
                                         {% if day.cp_pulang %}
                                             <span class="fw-bold">{{ day.cp_pulang }}</span>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    
+                                    <!-- Aktual Jam -->
+                                    <td class="text-center py-1">
+                                        {% if day.aktual_jam != '-' %}
+                                            <span class="fw-bold text-success" style="font-size: 0.85rem;">{{ day.aktual_jam }}</span>
                                         {% else %}
                                             <span class="text-muted">-</span>
                                         {% endif %}

@@ -2066,7 +2066,10 @@ def recap_matrix_view(request):
     wa_employee_search = request.GET.get('wa_employee_search', '').strip()
     mode = 'matrix'
     personal_logs = []
-    summary_stats = {'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0, 'hadir': 0, 'late_count': 0}
+    summary_stats = {
+        'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0, 'hadir': 0, 'late_count': 0,
+        'excuses_telat': 0, 'excuses_pulang': 0, 'excuses_lupa': 0, 'excuses_other': 0
+    }
     personal_employee = None  # Will hold target employee in personal mode
     
     # Standard Schedule (Hardcoded for now, can be moved to model later)
@@ -2117,6 +2120,7 @@ def recap_matrix_view(request):
                     'schedule_out': '17:00',
                     'clock_in': '-',
                     'clock_out': '-',
+                    'aktual_jam': '-',
                     'late_minutes': 0,
                     'overtime_minutes': 0,
                     'status': '',
@@ -2176,6 +2180,17 @@ def recap_matrix_view(request):
                     day_stat['is_excused'] = getattr(first_log, 'is_excused', False)
                     day_stat['excuse_reason'] = getattr(first_log, 'excuse_reason', '')
                     
+                    if day_stat['is_excused'] and day_stat['excuse_reason']:
+                        reason_lower = str(day_stat['excuse_reason']).lower()
+                        if "telat" in reason_lower:
+                            summary_stats['excuses_telat'] += 1
+                        elif "pulang" in reason_lower:
+                            summary_stats['excuses_pulang'] += 1
+                        elif "lupa" in reason_lower:
+                            summary_stats['excuses_lupa'] += 1
+                        else:
+                            summary_stats['excuses_other'] += 1
+                    
                     # If cp_masuk not set from category, use first log
                     if not day_stat['cp_masuk']:
                         day_stat['cp_masuk'] = day_stat['clock_in']
@@ -2223,6 +2238,13 @@ def recap_matrix_view(request):
                         local_out = last_record['local_dt']
                         day_stat['clock_out'] = local_out.strftime('%H:%M')
                         
+                        # Actual Hours calculation
+                        diff_time = local_out - local_in
+                        diff_mins = int(diff_time.total_seconds() / 60)
+                        if diff_mins > 0:
+                            h, m = divmod(diff_mins, 60)
+                            day_stat['aktual_jam'] = f"{h}j {m}m"
+                        
                         # If cp_pulang not set from category, use last log
                         if not day_stat['cp_pulang']:
                             day_stat['cp_pulang'] = day_stat['clock_out']
@@ -2245,8 +2267,9 @@ def recap_matrix_view(request):
                         # Overtime only counts if employee leaves AFTER the threshold
                         if cout_time > dt_ot_threshold.time():
                             dt_out = datetime.combine(dummy_date, cout_time)
-                            # Overtime calculated from threshold time, not clock_out
-                            diff = (dt_out - dt_ot_threshold).total_seconds() / 60
+                            # Actual overtime should be calculated from Scheduled Out, not threshold (or threshold depending on rules)
+                            # Existing rule calculated from threshold, but let's change to schedule out exactly. 
+                            diff = (dt_out - dt_sch_out).total_seconds() / 60
                             day_stat['overtime_minutes'] = int(diff)
                             summary_stats['overtime'] += int(diff)
                     
@@ -2306,6 +2329,15 @@ def recap_matrix_view(request):
                         day_stat['status'] = '-'
                 
                 personal_logs.append(day_stat)
+                
+            # Convert total overtime to hours and mins
+            if summary_stats['overtime'] > 0:
+                h, m = divmod(summary_stats['overtime'], 60)
+                summary_stats['overtime_hours'] = h
+                summary_stats['overtime_remaining_mins'] = m
+            else:
+                summary_stats['overtime_hours'] = 0
+                summary_stats['overtime_remaining_mins'] = 0
                 
         except Employee.DoesNotExist:
             mode = 'matrix'
@@ -2470,7 +2502,14 @@ def recap_matrix_view(request):
 
             for emp in employees:
                 emp_matrix = {}
-                emp_stats = {'H': 0, 'A': 0, 'T': 0, 'S': 0, 'I': 0, 'O': 0}
+                emp_stats = {
+                    'H': 0, 'A': 0, 'T': 0, 'S': 0, 'I': 0, 'O': 0,
+                    'total_lembur_minutes': 0,
+                    'excuses_telat': 0,
+                    'excuses_pulang': 0,
+                    'excuses_lupa': 0,
+                    'excuses_other': 0
+                }
                 
                 # Get employee's assignments from memory
                 emp_assignments = assignment_map.get(emp.id, [])
@@ -2480,10 +2519,11 @@ def recap_matrix_view(request):
                     is_holiday = d in id_holidays
                     
                     # Target dictionary for this day
-                    day_data = {'status': '', 'in': '-', 'out': '-', 'late': False, 'overtime': 0}
+                    day_data = {'status': '', 'in': '-', 'out': '-', 'aktual_jam': '-', 'late': False, 'overtime': 0, 'lembur_str': '-', 'excuse_reason': ''}
                     
                     if day_logs:
                         # Check specific status from log
+                        day_logs.sort(key=lambda x: x.timestamp)
                         first_log = day_logs[0]
                         status_map = {
                             'CHECKIN': 'H', 'SICK': 'S', 
@@ -2492,15 +2532,34 @@ def recap_matrix_view(request):
                         st = status_map.get(first_log.status, 'H')
                         day_data['status'] = st
                         
+                        # Process Manual Excuses 
+                        if hasattr(first_log, 'is_excused') and first_log.is_excused:
+                            day_data['excuse_reason'] = first_log.excuse_reason
+                            reason_lower = str(first_log.excuse_reason).lower()
+                            if "telat" in reason_lower:
+                                emp_stats['excuses_telat'] += 1
+                            elif "pulang" in reason_lower:
+                                emp_stats['excuses_pulang'] += 1
+                            elif "lupa" in reason_lower:
+                                emp_stats['excuses_lupa'] += 1
+                            else:
+                                emp_stats['excuses_other'] += 1
+                        
                         # Set clock in/out if Hadir
                         if st == 'H':
-                            day_logs.sort(key=lambda x: x.timestamp)
                             local_in = timezone.localtime(day_logs[0].timestamp)
                             day_data['in'] = local_in.strftime('%H:%M')
                             
                             if len(day_logs) > 1:
                                 local_out = timezone.localtime(day_logs[-1].timestamp)
                                 day_data['out'] = local_out.strftime('%H:%M')
+                                
+                                # Calculate Actual Hours
+                                diff = local_out - local_in
+                                diff_mins = int(diff.total_seconds() / 60)
+                                if diff_mins > 0:
+                                    h, m = divmod(diff_mins, 60)
+                                    day_data['aktual_jam'] = f"{h}j {m}m"
                                 
                         # Stats Calculation
                         if st == 'H':
@@ -2550,6 +2609,13 @@ def recap_matrix_view(request):
                                 clock_out_rounded = local_out.time().replace(second=0, microsecond=0)
                                 if clock_out_rounded > dt_ot_threshold.time():
                                     emp_stats['O'] += 1
+                                    # Calculate Exact Overtime Minutes
+                                    dt_out_full = datetime.combine(dummy_date, clock_out_rounded)
+                                    ot_diff = (dt_out_full - dt_sch_out).total_seconds() / 60
+                                    ot_mins = int(ot_diff)
+                                    if ot_mins > 0:
+                                        day_data['lembur_str'] = f"+{ot_mins}m"
+                                        emp_stats['total_lembur_minutes'] += ot_mins
                                     
                         elif st == 'S':
                             emp_stats['S'] += 1
@@ -5825,7 +5891,11 @@ def export_employee_pdf(request, employee_id):
             curr += timedelta(days=1)
             
     # Stats Init
-    stats = {'H': 0, 'I': 0, 'S': 0, 'A': 0, 'L': 0}
+    stats = {
+        'H': 0, 'I': 0, 'S': 0, 'A': 0, 'L': 0,
+        'LemburMins': 0, 'excuses_telat': 0, 'excuses_pulang': 0,
+        'excuses_lupa': 0, 'excuses_other': 0
+    }
     
     # --- PREPARE TABLE DATA (With Calculation Logic) ---
     # Determine Columns
@@ -5835,8 +5905,8 @@ def export_employee_pdf(request, employee_id):
         headers = ['Tgl', 'Hari', 'Pagi', 'CP1', 'Isoma', 'CP2', 'Pulang', 'Status']
         col_widths = [1.8*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 3*cm] 
     else:
-        headers = ['Tanggal', 'Hari', 'Masuk', 'Pulang', 'Telat', 'Lembur', 'Status']
-        col_widths = [2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2*cm, 2*cm, 4*cm]
+        headers = ['Tanggal', 'Hari', 'Masuk', 'Pulang', 'Aktual Jam', 'Telat', 'Lembur', 'Status']
+        col_widths = [2.2*cm, 2.0*cm, 2.2*cm, 2.2*cm, 2.5*cm, 1.8*cm, 2.0*cm, 4*cm]
 
     rows_buffer = []
     wa_missing = {'Pagi': 0, 'CP1': 0, 'Istirahat': 0, 'CP2': 0, 'Pulang': 0}
@@ -5916,24 +5986,44 @@ def export_employee_pdf(request, employee_id):
                 t_in = timezone.localtime(l_in.timestamp).strftime("%H:%M") if l_in else "-"
                 t_out = timezone.localtime(l_out.timestamp).strftime("%H:%M") if l_out else "-"
                 
+                aktual_jam_str = "-"
+                if l_in and l_out and l_in != l_out:
+                    diff_secs = (l_out.timestamp - l_in.timestamp).total_seconds()
+                    diff_mins = int(diff_secs / 60)
+                    if diff_mins > 0:
+                        h, m = divmod(diff_mins, 60)
+                        aktual_jam_str = f"{h}j {m}m"
+                        
                 # Telat Calculation
                 telat_str = "-"
                 
                 # --- FIXED DYNAMIC LOGIC START ---
                 daily_sch, _ = get_employee_schedule(employee, day_date)
                 sch_in = time(8, 0)
+                sch_out = time(17, 0)
                 tol = 0
+                ot_tol = 0
                 if daily_sch:
                     sch_in = daily_sch.clock_in
+                    sch_out = daily_sch.clock_out
                     tol = daily_sch.late_tolerance
+                    ot_tol = daily_sch.overtime_tolerance
                 
                 dt_sch = datetime.combine(date(2000,1,1), sch_in)
                 dt_threshold = dt_sch + timedelta(minutes=tol)
                 
                 if l_in:
                     if l_in.is_excused:
-                        status = l_in.excuse_reason if l_in.excuse_reason else "Dimaklumi"
+                        reason = l_in.excuse_reason if l_in.excuse_reason else "Dimaklumi"
+                        status = reason
                         status_color = corpo_blue # Same color as leave for distinction
+                        
+                        r_lower = str(reason).lower()
+                        if "telat" in r_lower: stats['excuses_telat'] += 1
+                        elif "pulang" in r_lower: stats['excuses_pulang'] += 1
+                        elif "lupa" in r_lower: stats['excuses_lupa'] += 1
+                        else: stats['excuses_other'] += 1
+
                     else:
                         tm = timezone.localtime(l_in.timestamp).time()
                         if tm > dt_threshold.time():
@@ -5947,16 +6037,20 @@ def export_employee_pdf(request, employee_id):
                                 status_color = corpo_orange
                 # --- FIXED DYNAMIC LOGIC END ---
                 
-                # Lembur Logic (simplified)
+                # Lembur Logic
                 lembur_str = "-"
-                work_end_hour = 12 if day_date.weekday() == 5 else 17
-                if l_out and timezone.localtime(l_out.timestamp).time() > time(work_end_hour, 0):
+                dt_sch_out = datetime.combine(date(2000,1,1), sch_out)
+                dt_ot_threshold = dt_sch_out + timedelta(minutes=ot_tol)
+                
+                if l_out and timezone.localtime(l_out.timestamp).time() > dt_ot_threshold.time():
                      tm = timezone.localtime(l_out.timestamp).time()
-                     mins_over = (tm.hour * 60 + tm.minute) - (work_end_hour * 60)
+                     dt_out = datetime.combine(date(2000,1,1), tm)
+                     mins_over = int((dt_out - dt_sch_out).total_seconds() / 60)
                      if mins_over > 0:
                          lembur_str = f"+{mins_over}m"
+                         stats['LemburMins'] += mins_over
                 
-                row_vals = [t_in, t_out, telat_str, lembur_str]
+                row_vals = [t_in, t_out, aktual_jam_str, telat_str, lembur_str]
             
         else:
             if day_date.weekday() == 6:
@@ -6015,39 +6109,56 @@ def export_employee_pdf(request, employee_id):
         ('LEFTPADDING', (0,0), (-1,-1), 0),
     ]))
     
-    # Cards Table
-    # Helper to make a colored card
-    def make_card(number, label, bg_color):
-        s_card = ParagraphStyle(name='CardVal', parent=styles['Normal'], fontSize=16, textColor=colors.white, alignment=TA_CENTER, fontName='Helvetica-Bold')
-        s_lbl = ParagraphStyle(name='CardLbl', parent=styles['Normal'], fontSize=8, textColor=colors.white, alignment=TA_CENTER)
-        return Table([
-            [Paragraph(str(number), s_card)],
-            [Paragraph(label, s_lbl)]
-        ], colWidths=[2.2*cm], rowHeights=[1*cm, 0.5*cm], style=TableStyle([
-            ('BACKGROUND', (0,0), (-1,-1), bg_color),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('ROUNDEDCORNERS', [5,5,5,5]), # Not supported in all reportlab versions, but ignored if not
-            ('TOPPADDING', (0,0), (-1,-1), 2),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-        ]))
-
-    card_hadir = make_card(stats['H'], "HADIR", corpo_green)
-    card_telat = make_card(stats['L'], "TELAT", corpo_orange)
-    card_izin  = make_card(stats['S'] + stats['I'], "IZIN/SKT", corpo_blue)
-    card_alpha = make_card(stats['A'], "ALPHA", corpo_red)
+    # Stats Grid Table
+    overtime_hours, overtime_mins = divmod(stats.get('LemburMins', 0), 60)
     
-    t_cards = Table([
-        [card_hadir, card_telat, card_izin, card_alpha]
-    ], colWidths=[2.4*cm]*4)
-    t_cards.setStyle(TableStyle([
-        ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
+    stat_items = [
+        ["Hadir", "Telat", "Sakit", "Alpha", "Lembur"],
+        [str(stats['H']), str(stats['L']), str(stats['S']), str(stats['A']), f"{overtime_hours}j {overtime_mins}m"],
+        ["Izin Telat", "Plg Cepat", "Lupa Absen", "Izin Lain", ""],
+        [str(stats.get('excuses_telat', 0)), str(stats.get('excuses_pulang', 0)), str(stats.get('excuses_lupa', 0)), str(stats.get('excuses_other', 0)), ""]
+    ]
+    t_stats = Table(stat_items, colWidths=[2.1*cm, 2*cm, 2*cm, 1.8*cm, 3.1*cm])
+    t_stats.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        # Row 1 (Header 1)
+        ('BACKGROUND', (0,0), (-1,0), corpo_blue),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 8),
+        # Row 2 (Values 1)
+        ('FONTNAME', (0,1), (-1,1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,1), (-1,1), 11),
+        ('TEXTCOLOR', (0,1), (0,1), corpo_green), # Hadir
+        ('TEXTCOLOR', (1,1), (1,1), corpo_orange), # Telat
+        ('TEXTCOLOR', (2,1), (2,1), corpo_blue), # Sakit
+        ('TEXTCOLOR', (3,1), (3,1), corpo_red), # Alpha
+        ('TOPPADDING', (0,1), (-1,1), 6),
+        ('BOTTOMPADDING', (0,1), (-1,1), 8),
+        # Row 3 (Header 2)
+        ('BACKGROUND', (0,2), (-2,2), corpo_grey),
+        ('TEXTCOLOR', (0,2), (-2,2), colors.black),
+        ('FONTNAME', (0,2), (-2,2), 'Helvetica-Bold'),
+        ('TOPPADDING', (0,2), (-1,2), 4),
+        ('BOTTOMPADDING', (0,2), (-1,2), 4),
+        # Row 4 (Values 2)
+        ('FONTNAME', (0,3), (-2,3), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,3), (-2,3), 10),
+        ('TOPPADDING', (0,3), (-1,3), 6),
+        ('BOTTOMPADDING', (0,3), (-1,3), 8),
+        # Borders
+        ('INNERGRID', (0,0), (-1,1), 0.25, colors.lightgrey),
+        ('INNERGRID', (0,2), (-2,3), 0.25, colors.lightgrey),
+        ('BOX', (0,0), (-1,1), 0.25, colors.grey),
+        ('BOX', (0,2), (-2,3), 0.25, colors.grey),
+        ('SPAN', (4,2), (4,3)),  # Empty space merged below Lembur
     ]))
     
-    # Master Layout Table (Bio | Cards)
+    # Master Layout Table (Bio | Stats)
     t_master = Table([
-        [t_bio, t_cards]
-    ], colWidths=[8*cm, 10*cm])
+        [t_bio, t_stats]
+    ], colWidths=[7.5*cm, 11*cm])
     t_master.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
     ]))
@@ -6234,14 +6345,18 @@ def export_batch_personal_pdf(request):
     for idx, emp in enumerate(employees):
         emp_elements = []
         is_wa = (emp.attendance_method == 'WHATSAPP')
-        stats = {'H': 0, 'I': 0, 'S': 0, 'A': 0, 'L': 0}
+        stats = {
+            'H': 0, 'I': 0, 'S': 0, 'A': 0, 'L': 0,
+            'LemburMins': 0, 'excuses_telat': 0, 'excuses_pulang': 0,
+            'excuses_lupa': 0, 'excuses_other': 0
+        }
         
         if is_wa:
             headers = ['Tgl', 'Hari', 'Pagi', 'CP1', 'Isoma', 'CP2', 'Pulang', 'Status']
             col_widths = [1.8*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 3*cm] 
         else:
-            headers = ['Tanggal', 'Hari', 'Masuk', 'Pulang', 'Telat', 'Lembur', 'Status']
-            col_widths = [2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2*cm, 2*cm, 4*cm]
+            headers = ['Tanggal', 'Hari', 'Masuk', 'Pulang', 'Aktual Jam', 'Telat', 'Lembur', 'Status']
+            col_widths = [2.2*cm, 2.0*cm, 2.2*cm, 2.2*cm, 2.5*cm, 1.8*cm, 2.0*cm, 4*cm]
 
         rows_buffer = []
 
@@ -6298,11 +6413,22 @@ def export_batch_personal_pdf(request):
                     
                     t_in = timezone.localtime(l_in.timestamp).strftime("%H:%M") if l_in else "-"
                     t_out = timezone.localtime(l_out.timestamp).strftime("%H:%M") if l_out else "-"
+                    
+                    aktual_jam_str = "-"
+                    if l_in and l_out and l_in != l_out:
+                        diff_secs = (l_out.timestamp - l_in.timestamp).total_seconds()
+                        diff_mins = int(diff_secs / 60)
+                        if diff_mins > 0:
+                            h, m = divmod(diff_mins, 60)
+                            aktual_jam_str = f"{h}j {m}m"
+                            
                     telat_str = "-"
                     
                     daily_sch, _ = get_employee_schedule(emp, day_date)
                     sch_in = daily_sch.clock_in if daily_sch else time(8, 0)
+                    sch_out = daily_sch.clock_out if daily_sch else time(17, 0)
                     tol = daily_sch.late_tolerance if daily_sch else 0
+                    ot_tol = daily_sch.overtime_tolerance if daily_sch else 0
                     dt_threshold = datetime.combine(date(2000,1,1), sch_in) + timedelta(minutes=tol)
                     
                     if l_in:
@@ -6310,6 +6436,12 @@ def export_batch_personal_pdf(request):
                             reason = getattr(l_in, 'excuse_reason', '')
                             status = reason if reason else "Dimaklumi"
                             status_color = corpo_blue
+                            
+                            r_lower = str(reason).lower()
+                            if "telat" in r_lower: stats['excuses_telat'] += 1
+                            elif "pulang" in r_lower: stats['excuses_pulang'] += 1
+                            elif "lupa" in r_lower: stats['excuses_lupa'] += 1
+                            else: stats['excuses_other'] += 1
                         else:
                             tm = timezone.localtime(l_in.timestamp).time()
                             if tm > dt_threshold.time():
@@ -6322,13 +6454,17 @@ def export_batch_personal_pdf(request):
                                     status_color = corpo_orange
                                     
                     lembur_str = "-"
-                    work_end_hour = 12 if day_date.weekday() == 5 else 17
-                    if l_out and timezone.localtime(l_out.timestamp).time() > time(work_end_hour, 0):
+                    dt_sch_out = datetime.combine(date(2000,1,1), sch_out)
+                    dt_ot_threshold = dt_sch_out + timedelta(minutes=ot_tol)
+                    
+                    if l_out and timezone.localtime(l_out.timestamp).time() > dt_ot_threshold.time():
                          tm = timezone.localtime(l_out.timestamp).time()
-                         mins_over = (tm.hour * 60 + tm.minute) - (work_end_hour * 60)
+                         dt_out = datetime.combine(date(2000,1,1), tm)
+                         mins_over = int((dt_out - dt_sch_out).total_seconds() / 60)
                          if mins_over > 0:
                              lembur_str = f"+{mins_over}m"
-                    row_vals = [t_in, t_out, telat_str, lembur_str]
+                             stats['LemburMins'] += mins_over
+                    row_vals = [t_in, t_out, aktual_jam_str, telat_str, lembur_str]
             else:
                 if day_date.weekday() == 6:
                     status = "LIBUR"; status_color = colors.grey
@@ -6356,21 +6492,52 @@ def export_batch_personal_pdf(request):
         t_bio = Table(bio_data, colWidths=[2.5*cm, 5*cm])
         t_bio.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('LEFTPADDING', (0,0), (-1,-1), 0)]))
         
-        def make_card(number, label, bg_color):
-            s_card = ParagraphStyle(name='CardVal', parent=styles['Normal'], fontSize=16, textColor=colors.white, alignment=TA_CENTER, fontName='Helvetica-Bold')
-            s_lbl = ParagraphStyle(name='CardLbl', parent=styles['Normal'], fontSize=8, textColor=colors.white, alignment=TA_CENTER)
-            return Table([[Paragraph(str(number), s_card)], [Paragraph(label, s_lbl)]], colWidths=[2.2*cm], rowHeights=[1*cm, 0.5*cm], style=TableStyle([
-                ('BACKGROUND', (0,0), (-1,-1), bg_color), ('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('TOPPADDING', (0,0), (-1,-1), 2), ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-            ]))
-            
-        t_cards = Table([[
-            make_card(stats['H'], "HADIR", corpo_green), make_card(stats['L'], "TELAT", corpo_orange),
-            make_card(stats['S'] + stats['I'], "IZIN/SKT", corpo_blue), make_card(stats['A'], "ALPHA", corpo_red)
-        ]], colWidths=[2.4*cm]*4)
-        t_cards.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'RIGHT')]))
+        overtime_hours, overtime_mins = divmod(stats.get('LemburMins', 0), 60)
         
-        t_master = Table([[t_bio, t_cards]], colWidths=[8*cm, 10*cm])
+        stat_items = [
+            ["Hadir", "Telat", "Sakit", "Alpha", "Lembur"],
+            [str(stats['H']), str(stats['L']), str(stats['S']), str(stats['A']), f"{overtime_hours}j {overtime_mins}m"],
+            ["Izin Telat", "Plg Cepat", "Lupa Absen", "Izin Lain", ""],
+            [str(stats.get('excuses_telat', 0)), str(stats.get('excuses_pulang', 0)), str(stats.get('excuses_lupa', 0)), str(stats.get('excuses_other', 0)), ""]
+        ]
+        t_stats = Table(stat_items, colWidths=[2.1*cm, 2*cm, 2*cm, 1.8*cm, 3.1*cm])
+        t_stats.setStyle(TableStyle([
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            # Row 1 (Header 1)
+            ('BACKGROUND', (0,0), (-1,0), corpo_blue),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,-1), 8),
+            # Row 2 (Values 1)
+            ('FONTNAME', (0,1), (-1,1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,1), (-1,1), 11),
+            ('TEXTCOLOR', (0,1), (0,1), corpo_green), # Hadir
+            ('TEXTCOLOR', (1,1), (1,1), corpo_orange), # Telat
+            ('TEXTCOLOR', (2,1), (2,1), corpo_blue), # Sakit
+            ('TEXTCOLOR', (3,1), (3,1), corpo_red), # Alpha
+            ('TOPPADDING', (0,1), (-1,1), 6),
+            ('BOTTOMPADDING', (0,1), (-1,1), 8),
+            # Row 3 (Header 2)
+            ('BACKGROUND', (0,2), (-2,2), corpo_grey),
+            ('TEXTCOLOR', (0,2), (-2,2), colors.black),
+            ('FONTNAME', (0,2), (-2,2), 'Helvetica-Bold'),
+            ('TOPPADDING', (0,2), (-1,2), 4),
+            ('BOTTOMPADDING', (0,2), (-1,2), 4),
+            # Row 4 (Values 2)
+            ('FONTNAME', (0,3), (-2,3), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,3), (-2,3), 10),
+            ('TOPPADDING', (0,3), (-1,3), 6),
+            ('BOTTOMPADDING', (0,3), (-1,3), 8),
+            # Borders
+            ('INNERGRID', (0,0), (-1,1), 0.25, colors.lightgrey),
+            ('INNERGRID', (0,2), (-2,3), 0.25, colors.lightgrey),
+            ('BOX', (0,0), (-1,1), 0.25, colors.grey),
+            ('BOX', (0,2), (-2,3), 0.25, colors.grey),
+            ('SPAN', (4,2), (4,3)),  # Empty space merged below Lembur
+        ]))
+        
+        t_master = Table([[t_bio, t_stats]], colWidths=[7.5*cm, 11*cm])
         t_master.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
         emp_elements.append(t_master)
         emp_elements.append(Spacer(1, 0.3*cm))
