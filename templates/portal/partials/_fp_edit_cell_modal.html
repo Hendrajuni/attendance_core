@@ -39,25 +39,59 @@
                 </div>
                 {% endif %}
                 
-                <!-- Action Buttons -->
-                <div class="d-flex flex-column gap-2 align-items-center">
-                    {% if user.employee_profile.role != 'KERANI' and user.employee_profile.role != 'DEPT_ADMIN' %}
-                    <button type="submit" name="action" value="hadir" class="btn btn-primary btn-sm px-5">
-                        <i class="fas fa-check-circle"></i> Set Hadir (Manual)
-                    </button>
-                    {% endif %}
-                    
-                    <div class="d-flex gap-2 justify-content-center w-100">
-                        <button type="submit" name="action" value="izin" class="btn btn-warning btn-sm px-5">
-                            <i class="fas fa-calendar-times"></i> Izin
+                <!-- Manual Adjustment Form (Kerani Friendly) -->
+                <div class="card bg-light border-0 mb-3">
+                    <div class="card-body p-3">
+                        <h6 class="card-title fw-bold text-primary small mb-2"><i class="fas fa-edit me-1"></i> Penyesuaian Absensi / Lupa Absen</h6>
+                        <div class="row g-2 mb-2">
+                            <div class="col-6">
+                                <label class="small fw-semibold text-muted mb-1">Jam Masuk</label>
+                                <input type="time" name="time_in" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-6">
+                                <label class="small fw-semibold text-muted mb-1">Jam Pulang</label>
+                                <input type="time" name="time_out" class="form-control form-control-sm">
+                            </div>
+                        </div>
+                        
+                        <div class="form-check form-switch mb-2 pt-1 border-top">
+                            <input class="form-check-input" type="checkbox" name="is_excused" value="true" id="is_excused_check">
+                            <label class="form-check-label small fw-medium" for="is_excused_check">
+                                Maklumi Keterlambatan / Pulang Cepat
+                            </label>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <select name="excuse_reason" class="form-select form-select-sm" id="excuse_reason_select">
+                                <option value="">-- Kosongkan Jika Hadir Normal --</option>
+                                <option value="Izin Telat Masuk">Izin Telat Masuk</option>
+                                <option value="Izin Pulang Cepat">Izin Pulang Cepat</option>
+                                <option value="Lupa Absen">Lupa Absen</option>
+                                <option value="Mati Listrik">Mati Listrik / Bencana</option>
+                                <option value="Mesin Rusak">Mesin Finger Rusak</option>
+                                <option value="Lain-lain">Lain-lain / Khusus</option>
+                            </select>
+                        </div>
+                        
+                        <button type="submit" name="action" value="hadir_manual" class="btn btn-primary btn-sm w-100 fw-bold">
+                            <i class="fas fa-save me-1"></i> Simpan Penyesuaian Absen
                         </button>
-                        <button type="submit" name="action" value="sakit" class="btn btn-danger btn-sm px-5">
-                            <i class="fas fa-user-injured"></i> Sakit
+                    </div>
+                </div>
+                
+                <!-- Action Buttons: Full Day Overrides -->
+                <div class="d-flex flex-column gap-2 align-items-center">
+                    <div class="d-flex gap-2 justify-content-center w-100">
+                        <button type="submit" name="action" value="izin" class="btn btn-warning btn-sm flex-fill">
+                            <i class="fas fa-calendar-times"></i> Izin (Full)
+                        </button>
+                        <button type="submit" name="action" value="sakit" class="btn btn-danger btn-sm flex-fill">
+                            <i class="fas fa-user-injured"></i> Sakit (Full)
                         </button>
                     </div>
                     
                     {% if user.employee_profile.role != 'KERANI' and user.employee_profile.role != 'DEPT_ADMIN' %}
-                    <button type="submit" name="action" value="alpha" class="btn btn-dark btn-sm px-5">
+                    <button type="submit" name="action" value="alpha" class="btn btn-dark btn-sm w-100">
                         <i class="fas fa-times-circle"></i> Set Alpha
                     </button>
                     {% endif %}

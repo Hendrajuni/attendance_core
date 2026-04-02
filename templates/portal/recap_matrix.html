@@ -384,7 +384,7 @@
                                     <th style="width: 80px; padding: 8px;">Pulang</th>
                                     <th style="width: 60px; padding: 8px;">Telat</th>
                                     <th style="width: 70px; padding: 8px;">Lembur</th>
-                                    <th style="width: 100px; padding: 8px;">Status</th>
+                                    <th style="width: 100px; padding: 8px;">Ket</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -443,8 +443,12 @@
                                         {% elif day.is_weekend %}
                                             <span class="badge bg-secondary">Minggu</span>
                                         {% elif day.raw_status == 'CHECKIN' or day.clock_in != '-' %}
-                                            <i class="fas fa-check-circle text-success"></i>
-                                            {% if day.late_minutes > 0 %}<small class="text-danger ms-1">+{{ day.late_minutes }}m</small>{% endif %}
+                                            {% if day.is_excused %}
+                                                <span class="badge bg-primary" title="Dimaklumi / Manual">{{ day.excuse_reason|default:"Manual" }}</span>
+                                            {% else %}
+                                                <i class="fas fa-check-circle text-success"></i>
+                                                {% if day.late_minutes > 0 %}<small class="text-danger ms-1">+{{ day.late_minutes }}m</small>{% endif %}
+                                            {% endif %}
                                         {% elif 'ALPHA' in day.status|upper %}
                                             <span class="badge bg-danger">Alpha</span>
                                         {% else %}

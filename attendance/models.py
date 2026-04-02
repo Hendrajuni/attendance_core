@@ -352,6 +352,10 @@ class AttendanceLog(models.Model):
     longitude = models.FloatField(null=True, blank=True)
     notes = models.TextField(null=True, blank=True, help_text="Alasan izin/sakit atau catatan lain")
     
+    # Override / Pemakluman Keterlambatan oleh Kerani
+    is_excused = models.BooleanField(default=False, help_text="Keterlambatan/pulang cepat dimaklumi")
+    excuse_reason = models.CharField(max_length=100, null=True, blank=True, help_text="Alasan pemakluman spesifik")
+    
     verification_time = models.DateTimeField(null=True, blank=True, help_text="Waktu verifikasi manual/sinkronisasi")    
     created_at = models.DateTimeField(auto_now_add=True)
     

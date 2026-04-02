@@ -2130,6 +2130,8 @@ def recap_matrix_view(request):
                     'cp_pulang': None,
                     # Count filled checkpoints
                     'checkpoints_filled': 0,
+                    'is_excused': False,
+                    'excuse_reason': '',
                 }
                 
                 if day_records:
@@ -2171,6 +2173,8 @@ def recap_matrix_view(request):
                     day_stat['clock_in'] = local_in.strftime('%H:%M')
                     day_stat['status'] = first_log.get_status_display() if hasattr(first_log, 'get_status_display') else ''
                     day_stat['raw_status'] = getattr(first_log, 'status', '')
+                    day_stat['is_excused'] = getattr(first_log, 'is_excused', False)
+                    day_stat['excuse_reason'] = getattr(first_log, 'excuse_reason', '')
                     
                     # If cp_masuk not set from category, use first log
                     if not day_stat['cp_masuk']:
@@ -2197,7 +2201,7 @@ def recap_matrix_view(request):
                     dt_threshold = dt_sch + timedelta(minutes=tol)
                     
                     # Check if Late (Actual Time > Threshold)
-                    if cin_time > dt_threshold.time() and not day_stat['is_holiday'] and not day_stat['is_weekend']:
+                    if cin_time > dt_threshold.time() and not day_stat['is_holiday'] and not day_stat['is_weekend'] and not day_stat['is_excused']:
                         dt_in = datetime.combine(dummy_date, cin_time)
                         # Late calculated from Threshold Time (tolerance not counted as late)
                         diff = (dt_in - dt_threshold).total_seconds() / 60
@@ -2534,8 +2538,10 @@ def recap_matrix_view(request):
                             threshold_time_rounded = dt_threshold.time().replace(second=0, microsecond=0)
                             
                             if clock_in_rounded > threshold_time_rounded and not is_holiday and not is_weekend:
-                                emp_stats['T'] += 1
-                                day_data['late'] = True
+                                # Skip late limit if manually excused
+                                if not hasattr(first_log, 'is_excused') or not first_log.is_excused:
+                                    emp_stats['T'] += 1
+                                    day_data['late'] = True
                                 
                             # Check Overtime if Out exists
                             if day_data['out'] != '-':
@@ -4106,7 +4112,9 @@ def get_employee_monthly_stats(employee, year, month):
                     threshold_time = dt_threshold.time().replace(second=0, microsecond=0)
                     
                     if clock_time > threshold_time and not is_holiday and not is_weekend:
-                        stats['T'] += 1
+                        # Skip late if the kerani manually excused it
+                        if not hasattr(first_log, 'is_excused') or not first_log.is_excused:
+                            stats['T'] += 1
             elif st == 'S': stats['S'] += 1
             elif st == 'I': stats['I'] += 1
             elif st == 'A': stats['A'] += 1
@@ -4243,12 +4251,12 @@ def fp_save_cell(request):
             )
         
         # 1. CLEAR EXISTING STATUS (Delete relevant logs/leaves for this day)
-        # Delete Manual Logs
+        # Delete Manual Logs created by previously clicking Set Hadir or Manual Penyesuaian
         AttendanceLog.objects.filter(
             employee=employee,
             timestamp__date=target_date,
             source_type='FINGERPRINT',
-            notes='Manual Entry'
+            verification_method='MANUAL'
         ).delete()
         
         # Check for Leave covering this date
@@ -4267,18 +4275,66 @@ def fp_save_cell(request):
              cell_content = "+"
              css_class = "cell-empty"
             
-        elif action == 'hadir':
-            # Create Dummy Log (Checkin 08:00, Checkout 17:00)
-            log_in = timezone.make_aware(datetime.combine(target_date, datetime.strptime('08:00', '%H:%M').time()))
-            log_out = timezone.make_aware(datetime.combine(target_date, datetime.strptime('17:00', '%H:%M').time()))
+        elif action in ['hadir', 'hadir_manual']:
+            # Fallback times for old UI or empty inputs
+            t_in = request.POST.get('time_in')
+            t_out = request.POST.get('time_out')
+            is_exc = request.POST.get('is_excused') == 'true'
+            exc_rsn = request.POST.get('excuse_reason') or ''
             
-            AttendanceLog.objects.create(
-                employee=employee, timestamp=log_in, source_type='FINGERPRINT', device_id='MANUAL', notes='Manual Entry'
-            )
-            AttendanceLog.objects.create(
-                employee=employee, timestamp=log_out, source_type='FINGERPRINT', device_id='MANUAL', notes='Manual Entry'
-            )
-            cell_content = "H"
+            reason_text = exc_rsn if is_exc else 'Manual Entry'
+            
+            # Scenario A: Kerani inputted specific times to artificially punch in/out
+            if t_in or t_out or action == 'hadir':
+                # Default to 08:00 - 17:00 if Kerani skips one of the inputs
+                time_in_obj = datetime.strptime(t_in if t_in else '08:00', '%H:%M').time()
+                time_out_obj = datetime.strptime(t_out if t_out else '17:00', '%H:%M').time()
+                
+                log_in = timezone.make_aware(datetime.combine(target_date, time_in_obj))
+                log_out = timezone.make_aware(datetime.combine(target_date, time_out_obj))
+                
+                if t_in or action == 'hadir':
+                    AttendanceLog.objects.create(
+                        employee=employee, timestamp=log_in, source_type='FINGERPRINT', verification_method='MANUAL', 
+                        notes=reason_text, is_excused=is_exc, excuse_reason=exc_rsn
+                    )
+                if t_out or action == 'hadir':
+                    AttendanceLog.objects.create(
+                        employee=employee, timestamp=log_out, source_type='FINGERPRINT', verification_method='MANUAL', 
+                        notes=reason_text, is_excused=is_exc, excuse_reason=exc_rsn
+                    )
+            
+            # Scenario B: Apply excuse to ALL logs for this day if provided
+            # We do this unconditionally so that first_log readings in matrix views pick up the excuse!
+            if is_exc or exc_rsn:
+                AttendanceLog.objects.filter(
+                    employee=employee,
+                    timestamp__date=target_date,
+                    source_type='FINGERPRINT'
+                ).update(
+                    is_excused=is_exc, 
+                    excuse_reason=exc_rsn,
+                    # Fallback to notes in case UI doesn't visually support reason badge natively
+                    notes=reason_text
+                )
+                
+            # Render the updated punches into the matrix cell
+            updated_logs = AttendanceLog.objects.filter(
+                employee=employee,
+                timestamp__date=target_date,
+                source_type='FINGERPRINT'
+            ).order_by('timestamp')
+            
+            if updated_logs:
+                local_in = timezone.localtime(updated_logs[0].timestamp).strftime('%H:%M')
+                local_out = timezone.localtime(updated_logs[-1].timestamp).strftime('%H:%M') if len(updated_logs) > 1 else '-'
+                
+                # Check lateness dynamically if we want red text, but for instant UI response simply returning the times is enough
+                cell_content = f'<div style="font-size: 0.65rem; line-height: 1.1; font-weight: normal;">{local_in}</div>'
+                cell_content += f'<div style="font-size: 0.65rem; line-height: 1.1; color: #6c757d; font-weight: normal;">{local_out}</div>'
+            else:
+                cell_content = "H"
+                
             css_class = "cell-hadir"
             
         elif action in ['izin', 'sakit', 'cuti']:
@@ -5849,9 +5905,13 @@ def export_employee_pdf(request, employee_id):
                 row_vals = times
 
             else:
-                # FINGERPRINT LOGIC (With Dynamic Schedule Fix)
-                l_in = day_logs.filter(log_category='MASUK').first()
-                l_out = day_logs.filter(log_category='PULANG').last()
+                # FINGERPRINT LOGIC (With Dynamic Schedule Fix & Manual Overrides)
+                dl_ordered = day_logs.order_by('timestamp')
+                l_in = dl_ordered.filter(log_category='MASUK').first() or dl_ordered.first()
+                l_out = dl_ordered.filter(log_category='PULANG').last()
+                
+                if not l_out and dl_ordered.count() > 1:
+                     l_out = dl_ordered.last()
                 
                 t_in = timezone.localtime(l_in.timestamp).strftime("%H:%M") if l_in else "-"
                 t_out = timezone.localtime(l_out.timestamp).strftime("%H:%M") if l_out else "-"
@@ -5871,16 +5931,20 @@ def export_employee_pdf(request, employee_id):
                 dt_threshold = dt_sch + timedelta(minutes=tol)
                 
                 if l_in:
-                    tm = timezone.localtime(l_in.timestamp).time()
-                    if tm > dt_threshold.time():
-                        dt_in = datetime.combine(date(2000,1,1), tm)
-                        diff = (dt_in - dt_threshold).total_seconds() / 60
-                        mins_late = int(diff)
-                        if mins_late > 0:
-                            telat_str = f"{mins_late}m"
-                            stats['L'] += 1
-                            status += " (TRL)"
-                            status_color = corpo_orange
+                    if l_in.is_excused:
+                        status = l_in.excuse_reason if l_in.excuse_reason else "Dimaklumi"
+                        status_color = corpo_blue # Same color as leave for distinction
+                    else:
+                        tm = timezone.localtime(l_in.timestamp).time()
+                        if tm > dt_threshold.time():
+                            dt_in = datetime.combine(date(2000,1,1), tm)
+                            diff = (dt_in - dt_threshold).total_seconds() / 60
+                            mins_late = int(diff)
+                            if mins_late > 0:
+                                telat_str = f"{mins_late}m"
+                                stats['L'] += 1
+                                status += " (TRL)"
+                                status_color = corpo_orange
                 # --- FIXED DYNAMIC LOGIC END ---
                 
                 # Lembur Logic (simplified)
