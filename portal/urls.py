@@ -101,5 +101,6 @@ urlpatterns = [
     # Personal Print
     path('employee/<uuid:employee_id>/print-modal/', views.print_employee_modal, name='print_employee_modal'),
     path('employee/<uuid:employee_id>/export-pdf/', views.export_employee_pdf, name='export_employee_pdf'),
+    path('reports/export-batch-personal-pdf/', views.export_batch_personal_pdf, name='export_batch_personal_pdf'),
 
 ]

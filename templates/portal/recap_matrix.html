@@ -312,9 +312,23 @@
                 {% if mode == 'matrix' %}
                 <div class="col-md-2 ms-auto">
                     <label class="form-label small fw-bold text-white d-block d-none d-md-block">&nbsp;</label>
-                    <a href="{% url 'portal:export_matrix_pdf' %}?location_id={{ selected_location.id }}&department_id={{ selected_department_id|default:'' }}&month={{ selected_month }}&year={{ selected_year }}" target="_blank" class="btn btn-danger btn-sm w-100 fw-bold shadow-sm" title="Print PDF per Departemen">
-                        <i class="fas fa-file-pdf me-1"></i> Print PDF
-                    </a>
+                    <div class="dropdown">
+                        <button class="btn btn-danger btn-sm w-100 fw-bold shadow-sm dropdown-toggle" type="button" id="printDropdownMenu" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-print me-1"></i> Cetak Laporan
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0" aria-labelledby="printDropdownMenu">
+                            <li>
+                                <a class="dropdown-item py-2 fw-medium text-dark hover-bg-light" href="{% url 'portal:export_matrix_pdf' %}?location_id={{ selected_location.id }}&department_id={{ selected_department_id|default:'' }}&month={{ selected_month }}&year={{ selected_year }}&active_tab={{ active_tab|default:'fingerprint' }}" target="_blank">
+                                    <i class="fas fa-table text-primary me-2"></i> Rekap Matrix (Grid)
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item py-2 fw-medium text-dark hover-bg-light" href="{% url 'portal:export_batch_personal_pdf' %}?location_id={{ selected_location.id }}&department_id={{ selected_department_id|default:'' }}&month={{ selected_month }}&year={{ selected_year }}&active_tab={{ active_tab|default:'fingerprint' }}" target="_blank">
+                                    <i class="fas fa-users text-success me-2"></i> Personal Kolektif (Batch)
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
                 </div>
                 {% endif %}
                 {% if mode == 'personal' %}

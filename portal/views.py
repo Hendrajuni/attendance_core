@@ -6132,6 +6132,305 @@ def export_employee_pdf(request, employee_id):
     return response
 
 @login_required
+def export_batch_personal_pdf(request):
+    from attendance.models import Employee, AttendanceLog, EmployeeLeave, WorkLocation, Department
+    from django.utils import timezone
+    from datetime import date, timedelta, time, datetime
+    import calendar
+    from io import BytesIO
+    from reportlab.lib.pagesizes import portrait, LEGAL
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, KeepTogether, PageBreak
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    from attendance.utils import get_employee_schedule
+    import holidays
+
+    # Read Filters
+    location_id = request.GET.get('location_id')
+    department_id = request.GET.get('department_id')
+    active_tab = request.GET.get('active_tab', 'fingerprint')
+    
+    try:
+        month = int(request.GET.get('month'))
+        year = int(request.GET.get('year'))
+    except (TypeError, ValueError):
+        now = timezone.now()
+        month = now.month
+        year = now.year
+
+    # Query Employees
+    employees = Employee.objects.filter(is_active=True).select_related('home_base', 'department')
+    if location_id:
+        employees = employees.filter(home_base_id=location_id)
+    if department_id:
+        employees = employees.filter(department_id=department_id)
+        
+    if active_tab == 'whatsapp':
+        employees = employees.filter(attendance_method='WHATSAPP')
+    else:
+        employees = employees.filter(attendance_method='FINGERPRINT')
+        
+    employees = employees.order_by('full_name')
+
+    if not employees.exists():
+        from django.contrib import messages
+        from django.shortcuts import redirect
+        messages.warning(request, "Tidak ada karyawan yang sesuai dengan filter pencarian untuk dicetak.")
+        return redirect('portal:recap_matrix')
+
+    start_date = date(year, month, 1)
+    _, days_in_month = calendar.monthrange(year, month)
+    end_date = date(year, month, days_in_month)
+    id_holidays = holidays.Indonesia(years=year)
+
+    # Output Setup
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=portrait(LEGAL),
+        rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=1*cm, bottomMargin=1*cm
+    )
+    elements = []
+    
+    corpo_blue = colors.Color(31/255, 58/255, 147/255)
+    corpo_grey = colors.Color(240/255, 240/255, 240/255)
+    corpo_red = colors.Color(231/255, 76/255, 60/255)
+    corpo_green = colors.Color(46/255, 204/255, 113/255)
+    corpo_orange = colors.Color(243/255, 156/255, 18/255)
+    
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(name='Title', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=14, textColor=corpo_blue, spaceAfter=2, alignment=TA_CENTER)
+    subtitle_style = ParagraphStyle(name='SubTitle', parent=styles['Normal'], alignment=TA_CENTER)
+    sig_style = ParagraphStyle(name='Sig', parent=styles['Normal'], alignment=TA_CENTER, fontSize=9)
+
+    import locale
+    try: locale.setlocale(locale.LC_TIME, 'id_ID')
+    except: pass
+
+    # Batch Fetch Logs & Leaves for Performance
+    all_logs = AttendanceLog.objects.filter(
+        employee__in=employees, timestamp__date__range=[start_date, end_date]
+    ).order_by('employee', 'timestamp')
+    
+    all_leaves = EmployeeLeave.objects.filter(
+        employee__in=employees, start_date__lte=end_date, end_date__gte=start_date
+    )
+    
+    from collections import defaultdict
+    logs_map = defaultdict(lambda: defaultdict(list))
+    for log in all_logs:
+        local_date = timezone.localtime(log.timestamp).date()
+        logs_map[log.employee_id][local_date].append(log)
+
+    leave_map = defaultdict(lambda: defaultdict(str))
+    for l in all_leaves:
+        curr = max(l.start_date, start_date)
+        end = min(l.end_date, end_date)
+        while curr <= end:
+            leave_map[l.employee_id][curr] = l.leave_type
+            curr += timedelta(days=1)
+
+    for idx, emp in enumerate(employees):
+        emp_elements = []
+        is_wa = (emp.attendance_method == 'WHATSAPP')
+        stats = {'H': 0, 'I': 0, 'S': 0, 'A': 0, 'L': 0}
+        
+        if is_wa:
+            headers = ['Tgl', 'Hari', 'Pagi', 'CP1', 'Isoma', 'CP2', 'Pulang', 'Status']
+            col_widths = [1.8*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 3*cm] 
+        else:
+            headers = ['Tanggal', 'Hari', 'Masuk', 'Pulang', 'Telat', 'Lembur', 'Status']
+            col_widths = [2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2*cm, 2*cm, 4*cm]
+
+        rows_buffer = []
+
+        for d in range(1, days_in_month + 1):
+            day_date = date(year, month, d)
+            day_name = day_date.strftime("%a")
+            day_logs = logs_map[emp.id].get(day_date, [])
+            l_type = leave_map[emp.id].get(day_date)
+            
+            status = "-"
+            status_color = colors.black
+            row_vals = []
+            
+            if l_type:
+                status = l_type
+                stats[l_type[0]] += 1
+                if l_type.startswith('C'): stats['I'] += 1
+                row_vals = ["-"] * (len(headers) - 3)
+                status_color = corpo_blue
+            elif day_logs:
+                status = "HADIR"
+                stats['H'] += 1
+                if is_wa:
+                    dl = day_logs
+                    l_pagi = next((x for x in dl if x.log_category == 'MASUK'), None)
+                    l_cp1  = next((x for x in dl if x.log_category == 'CHECK1'), None)
+                    l_isti = next((x for x in dl if x.log_category == 'ISTIRAHAT'), None)
+                    l_cp2  = next((x for x in dl if x.log_category == 'CHECK2'), None)
+                    l_plg  = [x for x in dl if x.log_category == 'PULANG']
+                    l_plg  = l_plg[-1] if l_plg else None
+                    
+                    times = []
+                    if l_pagi: 
+                        t_str = timezone.localtime(l_pagi.timestamp).strftime("%H:%M")
+                        times.append(t_str)
+                        if timezone.localtime(l_pagi.timestamp).time() > time(8, 5):
+                            status += " (TRL)"
+                            stats['L'] += 1
+                            status_color = corpo_orange
+                    else: 
+                        times.append("-")
+                        
+                    for l_chk in [l_cp1, l_isti, l_cp2, l_plg]:
+                        times.append(timezone.localtime(l_chk.timestamp).strftime("%H:%M") if l_chk else "-")
+                    row_vals = times
+                else:
+                    dl_ordered = sorted(day_logs, key=lambda x: x.timestamp)
+                    in_logs = [x for x in dl_ordered if x.log_category == 'MASUK']
+                    l_in = in_logs[0] if in_logs else dl_ordered[0]
+                    out_logs = [x for x in dl_ordered if x.log_category == 'PULANG']
+                    l_out = out_logs[-1] if out_logs else None
+                    if not l_out and len(dl_ordered) > 1:
+                         l_out = dl_ordered[-1]
+                    
+                    t_in = timezone.localtime(l_in.timestamp).strftime("%H:%M") if l_in else "-"
+                    t_out = timezone.localtime(l_out.timestamp).strftime("%H:%M") if l_out else "-"
+                    telat_str = "-"
+                    
+                    daily_sch, _ = get_employee_schedule(emp, day_date)
+                    sch_in = daily_sch.clock_in if daily_sch else time(8, 0)
+                    tol = daily_sch.late_tolerance if daily_sch else 0
+                    dt_threshold = datetime.combine(date(2000,1,1), sch_in) + timedelta(minutes=tol)
+                    
+                    if l_in:
+                        if getattr(l_in, 'is_excused', False):
+                            reason = getattr(l_in, 'excuse_reason', '')
+                            status = reason if reason else "Dimaklumi"
+                            status_color = corpo_blue
+                        else:
+                            tm = timezone.localtime(l_in.timestamp).time()
+                            if tm > dt_threshold.time():
+                                dt_in = datetime.combine(date(2000,1,1), tm)
+                                mins_late = int((dt_in - dt_threshold).total_seconds() / 60)
+                                if mins_late > 0:
+                                    telat_str = f"{mins_late}m"
+                                    stats['L'] += 1
+                                    status += " (TRL)"
+                                    status_color = corpo_orange
+                                    
+                    lembur_str = "-"
+                    work_end_hour = 12 if day_date.weekday() == 5 else 17
+                    if l_out and timezone.localtime(l_out.timestamp).time() > time(work_end_hour, 0):
+                         tm = timezone.localtime(l_out.timestamp).time()
+                         mins_over = (tm.hour * 60 + tm.minute) - (work_end_hour * 60)
+                         if mins_over > 0:
+                             lembur_str = f"+{mins_over}m"
+                    row_vals = [t_in, t_out, telat_str, lembur_str]
+            else:
+                if day_date.weekday() == 6:
+                    status = "LIBUR"; status_color = colors.grey
+                elif day_date in id_holidays:
+                    status = "LIBUR"; status_color = corpo_red
+                else:
+                    status = "ALPHA"; stats['A'] += 1; status_color = corpo_red
+                row_vals = ["-"] * (len(headers) - 3)
+                
+            row = [f"{day_date.strftime('%d')}-{day_date.strftime('%m')}", day_name] + row_vals + [status]
+            rows_buffer.append((row, status_color))
+            
+        # Draw Output Elements for this employee
+        emp_elements.append(Spacer(1, 1*cm))
+        emp_elements.append(Paragraph("LAPORAN ABSENSI PERSONAL", title_style))
+        emp_elements.append(Paragraph(f"Periode: {calendar.month_name[month]} {year}", subtitle_style))
+        emp_elements.append(Spacer(1, 0.4*cm))
+        
+        bio_data = [
+            [Paragraph("<b>Nama</b>", styles['Normal']), Paragraph(f": {emp.full_name}", styles['Normal'])],
+            [Paragraph("<b>NIK</b>", styles['Normal']), Paragraph(f": {emp.nik}", styles['Normal'])],
+            [Paragraph("<b>Jabatan</b>", styles['Normal']), Paragraph(f": {emp.get_employee_type_display()}", styles['Normal'])],
+            [Paragraph("<b>Lokasi</b>", styles['Normal']), Paragraph(f": {emp.home_base.name if emp.home_base else '-'}", styles['Normal'])],
+        ]
+        t_bio = Table(bio_data, colWidths=[2.5*cm, 5*cm])
+        t_bio.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('LEFTPADDING', (0,0), (-1,-1), 0)]))
+        
+        def make_card(number, label, bg_color):
+            s_card = ParagraphStyle(name='CardVal', parent=styles['Normal'], fontSize=16, textColor=colors.white, alignment=TA_CENTER, fontName='Helvetica-Bold')
+            s_lbl = ParagraphStyle(name='CardLbl', parent=styles['Normal'], fontSize=8, textColor=colors.white, alignment=TA_CENTER)
+            return Table([[Paragraph(str(number), s_card)], [Paragraph(label, s_lbl)]], colWidths=[2.2*cm], rowHeights=[1*cm, 0.5*cm], style=TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), bg_color), ('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('TOPPADDING', (0,0), (-1,-1), 2), ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+            ]))
+            
+        t_cards = Table([[
+            make_card(stats['H'], "HADIR", corpo_green), make_card(stats['L'], "TELAT", corpo_orange),
+            make_card(stats['S'] + stats['I'], "IZIN/SKT", corpo_blue), make_card(stats['A'], "ALPHA", corpo_red)
+        ]], colWidths=[2.4*cm]*4)
+        t_cards.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'RIGHT')]))
+        
+        t_master = Table([[t_bio, t_cards]], colWidths=[8*cm, 10*cm])
+        t_master.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
+        emp_elements.append(t_master)
+        emp_elements.append(Spacer(1, 0.3*cm))
+        
+        final_rows = [headers] + [x[0] for x in rows_buffer]
+        t_logs = Table(final_rows, colWidths=col_widths)
+        tbl_style = [
+            ('BACKGROUND', (0,0), (-1,0), corpo_blue), ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'), ('FONTSIZE', (0,0), (-1,0), 9),
+            ('BOTTOMPADDING', (0,0), (-1,0), 8), ('TOPPADDING', (0,0), (-1,0), 8),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('FONTSIZE', (0,1), (-1,-1), 8), ('LINEBELOW', (0,0), (-1,0), 0, corpo_blue),
+            ('LINEBELOW', (0,1), (-1,-1), 0.5, colors.lightgrey),
+        ]
+        for i, (row_data, text_color) in enumerate(rows_buffer):
+            row_idx = i + 1
+            if i % 2 == 1: tbl_style.append(('BACKGROUND', (0, row_idx), (-1, row_idx), corpo_grey))
+            tbl_style.append(('TEXTCOLOR', (-1, row_idx), (-1, row_idx), text_color))
+            if text_color in [corpo_red, corpo_orange]: tbl_style.append(('FONTNAME', (-1, row_idx), (-1, row_idx), 'Helvetica-Bold'))
+        t_logs.setStyle(TableStyle(tbl_style))
+        emp_elements.append(t_logs)
+        
+        # Signatures
+        ts = timezone.now().strftime("%d %B %Y")
+        sig_table = Table([
+            [Paragraph(f"Jambi, {ts}", sig_style), ""],
+            [Paragraph("Dibuat Oleh,", sig_style), Paragraph("Mengetahui,", sig_style)],
+            ["", ""], ["", ""], ["", ""],
+            [Paragraph("( Admin )", sig_style), Paragraph(f"( HRD Manager )", sig_style)]
+        ], colWidths=[9*cm, 9*cm])
+        
+        emp_elements.append(Spacer(1, 0.5*cm))
+        emp_elements.append(KeepTogether([sig_table]))
+        
+        # Merge individual pages
+        elements.extend(emp_elements)
+        if idx < len(employees) - 1:
+            elements.append(PageBreak())
+
+    def draw_footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFillColor(colors.grey)
+        canvas.setFont("Helvetica", 8)
+        ts = timezone.now().strftime("%d-%m-%Y %H:%M")
+        canvas.drawRightString(19.5*cm, 1*cm, f"Dicetak pada: {ts} | Hal {doc.page}")
+        canvas.restoreState()
+
+    doc.build(elements, onFirstPage=draw_footer, onLaterPages=draw_footer)
+    
+    pdf = buffer.getvalue()
+    buffer.close()
+    
+    dept_name = employees[0].department.name if department_id and employees.exists() and employees[0].department else "All_Depts"
+    response = HttpResponse(content_type='application/pdf')
+    filename = f"Batch_Personal_{dept_name}_{calendar.month_name[month]}_{year}.pdf"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response.write(pdf)
+    return response
+
+@login_required
 def admin_notification_list(request):
     """
     List all notifications for Admin monitoring.
