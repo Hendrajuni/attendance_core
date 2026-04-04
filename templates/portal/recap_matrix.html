@@ -741,7 +741,7 @@
             <div class="card shadow border-0 rounded-4 mb-4">
                 <div class="card-header bg-success text-white py-3">
                     <div class="row align-items-center">
-                        <div class="col-md-6">
+                        <div class="col-12 d-flex justify-content-between align-items-center mb-3">
                             <div class="d-flex align-items-center">
                                 <div class="bg-white text-dark rounded-circle d-flex align-items-center justify-content-center shadow-sm" style="width: 48px; height: 48px; font-size: 1.1rem; font-weight: 700;">
                                     {{ wa_personal_employee.full_name|slice:":1" }}
@@ -752,22 +752,28 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-6 text-end">
-                            <span class="badge bg-light text-dark border me-1" title="Missing Absen Pagi">Pagi: {{ wa_summary_stats.missing_pagi }}</span>
-                            <span class="badge bg-light text-dark border me-1" title="Missing Checkpoint 1">Check-1: {{ wa_summary_stats.missing_cp1 }}</span>
-                            <span class="badge bg-light text-dark border me-1" title="Missing Istirahat">Istirahat: {{ wa_summary_stats.missing_istirahat }}</span>
-                            <span class="badge bg-light text-dark border me-1" title="Missing Checkpoint 2">Check-2: {{ wa_summary_stats.missing_cp2 }}</span>
-                            <span class="badge bg-light text-dark border me-1" title="Missing Pulang">Pulang: {{ wa_summary_stats.missing_pulang }}</span>
-                            <span class="badge bg-info text-dark me-1" title="Izin / Sakit">Iz: {{ wa_summary_stats.sick|add:wa_summary_stats.permit }}</span>
-                            <span class="badge bg-primary fs-6 ms-2">
-                                <i class="fas fa-clock me-1"></i> Telat: {{ wa_summary_stats.late }}m
-                            </span>
-                            <span class="badge bg-success fs-6 me-2">
-                                <i class="fas fa-hourglass-half me-1"></i> Lembur: {{ wa_summary_stats.overtime }}m
-                            </span>
-                            <span class="badge bg-danger fs-6">
-                                <i class="fas fa-times-circle me-1"></i> Alpha: {{ wa_summary_stats.alpha }}
-                            </span>
+                        
+                        <!-- Stats Area: 2 Rows Full Width (WhatsApp Format) -->
+                        <div class="col-12">
+                            <div class="d-flex flex-column gap-2 w-100" style="font-size: 0.85rem;">
+                                <!-- Baris Pertama: Kehadiran Utama & Lembur -->
+                                <div class="d-flex justify-content-between align-items-center bg-dark bg-opacity-25 rounded px-3 py-2 border border-secondary border-opacity-25 w-100">
+                                    <span><i class="fas fa-check-circle text-success me-2"></i>Hadir: <strong class="fs-6 text-white">{{ wa_summary_stats.hadir|default:"0" }}</strong></span>
+                                    <span><i class="fas fa-clock text-warning me-2"></i>Telat: <strong class="fs-6 text-white">{{ wa_summary_stats.late_count|default:"0" }}</strong></span>
+                                    <span><i class="fas fa-notes-medical text-info me-2"></i>Sakit: <strong class="fs-6 text-white">{{ wa_summary_stats.sick|default:"0" }}</strong></span>
+                                    <span><i class="fas fa-times-circle text-danger me-2"></i>Alpha: <strong class="fs-6 text-white">{{ wa_summary_stats.alpha|default:"0" }}</strong></span>
+                                    <span class="border-start border-secondary ps-3"><i class="fas fa-hourglass-half text-primary me-2"></i>Total Lembur: <strong class="fs-6 text-white">{{ wa_summary_stats.overtime_hours|default:"0" }}j {% if wa_summary_stats.overtime_remaining_mins %}{{ wa_summary_stats.overtime_remaining_mins }}m{% endif %}</strong></span>
+                                </div>
+                                
+                                <!-- Baris Kedua: Izin Khusus & Missing Checkpoints -->
+                                <div class="d-flex justify-content-center gap-4 align-items-center px-3 py-2 text-light opacity-75">
+                                    <span><i class="fas fa-exclamation-triangle text-warning me-1"></i>Tidak Absen (CP): <strong class="text-white">{{ wa_summary_stats.total_missing }}</strong> kali</span>
+                                    <span class="border-start border-secondary ps-3"><i class="fas fa-user-clock me-1"></i>Izin Telat: <strong>{{ wa_summary_stats.excuses_telat }}</strong></span>
+                                    <span><i class="fas fa-running me-1"></i>Pulang Cepat: <strong>{{ wa_summary_stats.excuses_pulang }}</strong></span>
+                                    <span><i class="fas fa-question-circle me-1"></i>Lupa Absen: <strong>{{ wa_summary_stats.excuses_lupa }}</strong></span>
+                                    <span><i class="fas fa-ellipsis-h me-1"></i>Izin Lainnya: <strong>{{ wa_summary_stats.excuses_other }}</strong></span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -783,28 +789,33 @@
                                     <th>Istirahat</th>
                                     <th>CP2</th>
                                     <th>Pulang</th>
-                                    <th style="width: 100px;">Status</th>
+                                    <th style="width: 90px;">Aktual Jam</th>
+                                    <th style="width: 90px;">Lembur</th>
+                                    <th style="min-width: 180px;">Status</th>
                                 </tr>
                             </thead>
                             <tbody>
                             {% for day in wa_personal_logs %}
                             <tr class="{% if day.is_holiday %}table-secondary{% elif day.is_weekend %}table-secondary{% endif %}">
-                                <td class="text-center fw-bold">{{ day.date|date:"d M" }}</td>
-                                <td class="text-center text-muted small">{{ day.date|date:"D" }}</td>
+                                <td class="text-center fw-bold text-nowrap">{{ day.date|date:"d M" }}</td>
+                                <td class="text-center text-muted small text-nowrap">{{ day.date|date:"D" }}</td>
                                 {% for cat in wa_categories %}
                                     {% with cp=day.checkpoints|dict_get:cat %}
-                                        <td class="text-center {% if cp and cp.time %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
-                                            {% if cp %}{{ cp.time }}{% else %}-{% endif %}
+                                        <td class="text-center text-nowrap {% if cp and cp.time %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
+                                            {% if cp %}{% if cp.log.is_excused %}<span class="text-primary fw-bold">- </span>{% endif %}{{ cp.time }}{% else %}-{% endif %}
                                         </td>
                                     {% endwith %}
                                 {% endfor %}
-                                <td class="text-center">
-                                    {% if day.status == 'Hadir' or day.checkpoints.MASUK %}
-                                        <i class="fas fa-check-circle text-success"></i>
+                                <td class="text-center fw-medium text-success text-nowrap">{{ day.aktual_jam|default:"-" }}</td>
+                                <td class="text-center fw-medium text-primary text-nowrap">{{ day.lembur_jam|default:"-" }}</td>
+                                <td class="text-center text-nowrap">
+                                    {% if 'Hadir' in day.status or day.checkpoints.MASUK %}
+                                        <i class="fas fa-check-circle text-success"></i> 
+                                        {% if day.status != 'Hadir' %}<small class="text-success fw-bold">{{ day.status|slice:"6:" }}</small>{% endif %}
                                         {% if day.late_minutes > 0 %}<small class="text-danger ms-1">+{{ day.late_minutes }}m</small>{% endif %}
-                                    {% elif day.status == 'Sakit' or 'Sakit' in day.status %}
+                                    {% elif 'Sakit' in day.status %}
                                         <span class="badge bg-warning text-dark">Sakit</span>
-                                    {% elif day.status == 'Izin' or 'Izin' in day.status %}
+                                    {% elif 'Izin' in day.status %}
                                         <span class="badge bg-info text-dark">Izin</span>
                                     {% elif 'Cuti' in day.status %}
                                         <span class="badge bg-success text-white">{{ day.status }}</span>
@@ -998,9 +1009,9 @@
                                                 {% with cell_data=emp_day_data|dict_get:'MASUK' %}
                                                     {% if cell_data %}
                                                         {% if cell_data.is_late %}
-                                                            <span class="text-danger fw-bold" style="font-size: 0.6rem;" title="Telat (Shift: {{ cell_data.shift_name }})">{{ cell_data.value }}</span>
+                                                            <span class="text-danger fw-bold" style="font-size: 0.6rem;" title="Telat (Shift: {{ cell_data.shift_name }})">{% if cell_data.is_excused %}- {% endif %}{{ cell_data.value }}</span>
                                                         {% else %}
-                                                            <span class="text-success" style="font-size: 0.6rem;">{{ cell_data.value }}</span>
+                                                            <span class="text-success" style="font-size: 0.6rem;">{% if cell_data.is_excused %}- {% endif %}{{ cell_data.value }}</span>
                                                         {% endif %}
                                                     {% else %}
                                                         <span class="text-muted opacity-25">-</span>
@@ -1015,7 +1026,7 @@
                                                 {% endif %}>
                                                 {% with cell_data=emp_day_data|dict_get:'CHECKPOINT_1' %}
                                                     {% if cell_data %}
-                                                        <span class="text-primary" style="font-size: 0.6rem;">{{ cell_data.value }}</span>
+                                                        <span class="text-primary" style="font-size: 0.6rem;">{% if cell_data.is_excused %}- {% endif %}{{ cell_data.value }}</span>
                                                     {% else %}
                                                         <span class="text-muted opacity-25">-</span>
                                                     {% endif %}
@@ -1029,7 +1040,7 @@
                                                 {% endif %}>
                                                 {% with cell_data=emp_day_data|dict_get:'ISTIRAHAT' %}
                                                     {% if cell_data %}
-                                                        <span class="text-secondary" style="font-size: 0.6rem;">{{ cell_data.value }}</span>
+                                                        <span class="text-secondary" style="font-size: 0.6rem;">{% if cell_data.is_excused %}- {% endif %}{{ cell_data.value }}</span>
                                                     {% else %}
                                                         <span class="text-muted opacity-25">-</span>
                                                     {% endif %}
@@ -1043,7 +1054,7 @@
                                                 {% endif %}>
                                                 {% with cell_data=emp_day_data|dict_get:'CHECKPOINT_2' %}
                                                     {% if cell_data %}
-                                                        <span class="text-info" style="font-size: 0.6rem;">{{ cell_data.value }}</span>
+                                                        <span class="text-info" style="font-size: 0.6rem;">{% if cell_data.is_excused %}- {% endif %}{{ cell_data.value }}</span>
                                                     {% else %}
                                                         <span class="text-muted opacity-25">-</span>
                                                     {% endif %}
@@ -1057,7 +1068,7 @@
                                                 {% endif %}>
                                                 {% with cell_data=emp_day_data|dict_get:'PULANG' %}
                                                     {% if cell_data %}
-                                                        <span class="text-dark fw-bold" style="font-size: 0.6rem;">{{ cell_data.value }}</span>
+                                                        <span class="text-dark fw-bold" style="font-size: 0.6rem;">{% if cell_data.is_excused %}- {% endif %}{{ cell_data.value }}</span>
                                                     {% else %}
                                                         <span class="text-muted opacity-25">-</span>
                                                     {% endif %}

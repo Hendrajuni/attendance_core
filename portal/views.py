@@ -2875,7 +2875,8 @@ def recap_matrix_view(request):
                         day_data[category_to_fill] = {
                             'value': time_str,
                             'is_late': is_late,
-                            'shift_name': daily_shift.name if category_to_fill == 'MASUK' and daily_shift else ''
+                            'shift_name': daily_shift.name if category_to_fill == 'MASUK' and daily_shift else '',
+                            'is_excused': getattr(log, 'is_excused', False)
                         }
 
                     # Check Notes for IZIN
@@ -3063,7 +3064,8 @@ def recap_matrix_view(request):
             wa_summary_stats = {
                 'late': 0, 'overtime': 0, 'alpha': 0, 'permit': 0, 'sick': 0,
                 'missing_pagi': 0, 'missing_cp1': 0, 'missing_istirahat': 0,
-                'missing_cp2': 0, 'missing_pulang': 0, 'total_missing': 0
+                'missing_cp2': 0, 'missing_pulang': 0, 'total_missing': 0,
+                'excuses_telat': 0, 'excuses_pulang': 0, 'excuses_lupa': 0, 'excuses_other': 0
             }
             
             # Schedule Constants (Reuse standard or define here)
@@ -3215,27 +3217,41 @@ def recap_matrix_view(request):
                             status = '-' # Future date
 
                 elif day_data.get('MASUK'):
+                    wa_summary_stats['hadir'] = wa_summary_stats.get('hadir', 0) + 1
                     status = 'Hadir'
                     status_class = 'text-success fw-bold'
+                    
+                    dt_in = None
+                    dt_out = None
+                    aktual_jam_str = '-'
                     
                     # Calculate Late
                     try:
                         check_in_time = datetime.strptime(day_data['MASUK']['time'], '%H:%M').time()
+                        dt_in = timezone.datetime.combine(dummy_date, check_in_time)
                         if check_in_time > SCHEDULE_IN and not is_holiday and not is_weekend:
-                            dt_in = timezone.datetime.combine(dummy_date, check_in_time)
                             dt_sch = timezone.datetime.combine(dummy_date, SCHEDULE_IN)
                             diff = (dt_in - dt_sch).total_seconds() / 60
                             late_minutes = int(diff)
+                            wa_summary_stats['late_count'] = wa_summary_stats.get('late_count', 0) + 1
                             wa_summary_stats['late'] += late_minutes
                     except (ValueError, TypeError):
                         pass
                         
-                    # Calculate Overtime (if PULANG exists)
+                    # Calculate Overtime & Aktual Jam (if PULANG exists)
                     if day_data.get('PULANG'):
                         try:
                             check_out_time = datetime.strptime(day_data['PULANG']['time'], '%H:%M').time()
+                            dt_out = timezone.datetime.combine(dummy_date, check_out_time)
+                            
+                            if dt_in and dt_out:
+                                diff_time = dt_out - dt_in
+                                diff_mins = int(diff_time.total_seconds() / 60)
+                                if diff_mins > 0:
+                                    h, m = divmod(diff_mins, 60)
+                                    aktual_jam_str = f"{h}j {m}m"
+
                             if check_out_time > SCHEDULE_OUT:
-                                dt_out = timezone.datetime.combine(dummy_date, check_out_time)
                                 dt_sch_out = timezone.datetime.combine(dummy_date, SCHEDULE_OUT)
                                 diff = (dt_out - dt_sch_out).total_seconds() / 60
                                 wa_summary_stats['overtime'] += int(diff)
@@ -3245,6 +3261,40 @@ def recap_matrix_view(request):
                     if is_holiday:
                          status += ' (Hari Libur)'
                 
+                # DYNAMIC OVERRIDE: Check manual excuses
+                day_excuse_reasons = []
+                for cat in WA_CATEGORIES:
+                    cat_data = day_data.get(cat)
+                    if cat_data and cat_data.get('log') and getattr(cat_data['log'], 'is_excused', False):
+                        reason = getattr(cat_data['log'], 'excuse_reason', 'Maklum')
+                        
+                        # Accumulate correct counter
+                        if reason == 'Izin Telat': 
+                            wa_summary_stats['excuses_telat'] += 1
+                        elif reason == 'Izin Pulang Cepat': 
+                            wa_summary_stats['excuses_pulang'] += 1
+                        elif reason == 'Lupa Absen': 
+                            wa_summary_stats['excuses_lupa'] += 1
+                        else: 
+                            wa_summary_stats['excuses_other'] += 1
+                        
+                        cat_label = {
+                            'MASUK': 'Pagi', 
+                            'CHECKPOINT_1': 'CP1', 
+                            'ISTIRAHAT': 'Isoma', 
+                            'CHECKPOINT_2': 'CP2', 
+                            'PULANG': 'Pulang'
+                        }.get(cat, cat)
+                        reason_str = f"{cat_label}: {reason}"
+                            
+                        if reason_str not in day_excuse_reasons:
+                            day_excuse_reasons.append(reason_str)
+                
+                if day_excuse_reasons:
+                    if status == '-' or 'Alpha' in status:
+                        status = 'Hadir'
+                    status += f" ({', '.join(day_excuse_reasons)})"
+                
                 # Check for missing checkpoints (skip future, holidays, weekends)
                 if not (d > now.date() or is_holiday or is_weekend):
                     if not day_data.get('MASUK'): wa_summary_stats['missing_pagi'] += 1
@@ -3252,6 +3302,18 @@ def recap_matrix_view(request):
                     if not day_data.get('ISTIRAHAT'): wa_summary_stats['missing_istirahat'] += 1
                     if not day_data.get('CHECKPOINT_2'): wa_summary_stats['missing_cp2'] += 1
                     if not day_data.get('PULANG'): wa_summary_stats['missing_pulang'] += 1
+
+                # Daily Overtime string
+                overtime_str = '-'
+                try:
+                    if 'overtime' in locals() and dt_out and check_out_time > SCHEDULE_OUT:
+                        # Re-calculate just for string printing
+                        diff = (dt_out - timezone.datetime.combine(dummy_date, SCHEDULE_OUT)).total_seconds() / 60
+                        daily_ot = int(diff)
+                        if daily_ot > 0:
+                            h_ot, m_ot = divmod(daily_ot, 60)
+                            overtime_str = f"{h_ot}j {m_ot}m" if h_ot > 0 else f"{m_ot}m"
+                except: pass
 
                 wa_personal_logs.append({
                     'date': d,
@@ -3264,9 +3326,11 @@ def recap_matrix_view(request):
                     'status': status,
                     'status_class': status_class,
                     'late_minutes': late_minutes,
+                    'aktual_jam': aktual_jam_str if day_data.get('MASUK') else '-',
+                    'lembur_jam': overtime_str
                 })
             
-            # Calculate Total Missing
+            # Calculate Total Missing & Overtime Conversions
             wa_summary_stats['total_missing'] = (
                 wa_summary_stats['missing_pagi'] +
                 wa_summary_stats['missing_cp1'] +
@@ -3274,6 +3338,21 @@ def recap_matrix_view(request):
                 wa_summary_stats['missing_cp2'] +
                 wa_summary_stats['missing_pulang']
             )
+            
+            h, m = divmod(wa_summary_stats['overtime'], 60)
+            wa_summary_stats['overtime_hours'] = h
+            if m > 0:
+                wa_summary_stats['overtime_remaining_mins'] = m
+            
+            # Additional placeholders for manual excuses (used by template parity)
+            wa_summary_stats['excuses_telat'] = wa_summary_stats.get('excuses_telat', 0)
+            wa_summary_stats['excuses_pulang'] = wa_summary_stats.get('excuses_pulang', 0)
+            wa_summary_stats['excuses_lupa'] = wa_summary_stats.get('excuses_lupa', 0)
+            wa_summary_stats['excuses_other'] = wa_summary_stats.get('excuses_other', 0)
+            
+            wa_sum_ov = divmod(wa_summary_stats.get('overtime', 0), 60)
+            wa_summary_stats['overtime_hours'] = wa_sum_ov[0]
+            wa_summary_stats['overtime_remaining_mins'] = wa_sum_ov[1]
         except Employee.DoesNotExist:
             wa_mode = 'daily'
 
@@ -3806,7 +3885,54 @@ def wa_save_cell(request):
             
         return HttpResponse(f'<span class="text-warning fw-bold" style="font-size: 0.6rem;">{action.upper()[:2]}</span>')
 
-    # 3. Handle SET TIME (Admin Only)
+    # 3. Handle PARTIAL EXCUSE (Specific Checkpoint)
+    elif action == 'partial_excuse':
+        excuse_reason = request.POST.get('excuse_reason', 'Maklum').strip()
+        if not excuse_reason:
+            excuse_reason = 'Maklum'
+            
+        # Determine logical time for this checkpoint so it slots correctly
+        category_time_map = {
+            'MASUK': '08:00',
+            'CHECKPOINT_1': '10:00',
+            'ISTIRAHAT': '12:00',
+            'CHECKPOINT_2': '14:00',
+            'PULANG': '17:00'
+        }
+        log_time = category_time_map.get(category, '12:00')
+        log_datetime = timezone.make_aware(
+            datetime.combine(target_date, datetime.strptime(log_time, '%H:%M').time())
+        )
+        
+        # Look for existing log to mark as excused or create new
+        existing_log = AttendanceLog.objects.filter(
+            employee=employee,
+            timestamp__date=target_date,
+            log_category=category,
+            source_type='TELEGRAM'
+        ).first()
+        
+        if existing_log:
+            existing_log.is_excused = True
+            existing_log.excuse_reason = excuse_reason
+            existing_log.save()
+        else:
+            AttendanceLog.objects.create(
+                employee=employee,
+                timestamp=log_datetime,
+                status='CHECKIN',
+                source_type='TELEGRAM',
+                log_category=category,
+                notes=f'Partial Excuse: {excuse_reason}',
+                is_excused=True,
+                excuse_reason=excuse_reason
+            )
+            
+        # Return the time string formatted just like the full page load
+        time_str = log_datetime.time().strftime('%H:%M')
+        cell_html = f'<span class="text-primary" style="font-size: 0.6rem;" title="{excuse_reason}">- {time_str}</span>'
+
+    # 4. Handle SET TIME (Admin Only)
     elif action == 'set_time':
         if user_role not in ['ADMIN', 'HRD']:
             return HttpResponse('<span class="text-danger">Tidak diizinkan</span>')
@@ -5817,7 +5943,7 @@ def export_employee_pdf(request, employee_id):
     from django.utils import timezone
     from datetime import date, timedelta, time, datetime
     import calendar
-    from reportlab.lib.pagesizes import portrait, A4, LEGAL
+    from reportlab.lib.pagesizes import portrait, landscape, A4, LEGAL
     from reportlab.lib.units import cm, mm
     from reportlab.lib import colors
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, KeepTogether
@@ -5826,6 +5952,7 @@ def export_employee_pdf(request, employee_id):
     from attendance.utils import get_employee_schedule
     
     employee = get_object_or_404(Employee, id=employee_id)
+    is_wa = (employee.attendance_method == 'WHATSAPP')
     
     try:
         month = int(request.GET.get('month'))
@@ -5902,8 +6029,8 @@ def export_employee_pdf(request, employee_id):
     is_wa = (employee.attendance_method == 'WHATSAPP')
     
     if is_wa:
-        headers = ['Tgl', 'Hari', 'Pagi', 'CP1', 'Isoma', 'CP2', 'Pulang', 'Status']
-        col_widths = [1.8*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 3*cm] 
+        headers = ['Tgl', 'Hari', 'Pagi', 'CP1', 'Isoma', 'CP2', 'Pulang', 'Akt. Jam', 'Lembur', 'Status']
+        col_widths = [1.1*cm, 0.9*cm, 1.2*cm, 1.2*cm, 1.2*cm, 1.2*cm, 1.2*cm, 1.4*cm, 1.4*cm, 7.7*cm] 
     else:
         headers = ['Tanggal', 'Hari', 'Masuk', 'Pulang', 'Aktual Jam', 'Telat', 'Lembur', 'Status']
         col_widths = [2.2*cm, 2.0*cm, 2.2*cm, 2.2*cm, 2.5*cm, 1.8*cm, 2.0*cm, 4*cm]
@@ -5933,11 +6060,16 @@ def export_employee_pdf(request, employee_id):
         leave_type = leave_map.get(day_date)
         row_vals = []
         
+        # Schedule Check for Overtime/Late Calculation
+        daily_sch, _ = get_employee_schedule(employee, day_date)
+        sch_in = daily_sch.clock_in if daily_sch else time(8, 0)
+        sch_out = daily_sch.clock_out if daily_sch else time(17, 0)
+        
         if leave_type:
             status = leave_type
             stats[leave_type[0]] += 1
             if leave_type.startswith('C'): stats['I'] += 1 # Cuti -> Izin category
-            row_vals = ["-"] * (len(headers) - 3)
+            row_vals = ["-"] * (len(headers) - 2)
             status_color = corpo_blue # Blue for Leave
             
         elif day_logs.exists():
@@ -5946,33 +6078,73 @@ def export_employee_pdf(request, employee_id):
             
             if is_wa:
                 # WA LOGIC
+                # Note: Match the log_category strings with the DB definitions
                 l_pagi = day_logs.filter(log_category='MASUK').first()
-                l_cp1  = day_logs.filter(log_category='CHECK1').first()
+                l_cp1  = day_logs.filter(log_category='CHECKPOINT_1').first()
                 l_isti = day_logs.filter(log_category='ISTIRAHAT').first()
-                l_cp2  = day_logs.filter(log_category='CHECK2').first()
+                l_cp2  = day_logs.filter(log_category='CHECKPOINT_2').first()
                 l_plg  = day_logs.filter(log_category='PULANG').last()
                 
                 times = []
-                # Pagi Check
-                if l_pagi: 
-                    t_str = timezone.localtime(l_pagi.timestamp).strftime("%H:%M")
-                    times.append(t_str)
-                    # Late Check (Hardcoded > 08:05 for WA as requested/legacy)
-                    if timezone.localtime(l_pagi.timestamp).time() > time(8, 5):
-                         status += " (TRL)"
-                         stats['L'] += 1
-                         status_color = corpo_orange
-                else: 
-                    times.append("-")
-                    wa_missing['Pagi'] += 1
+                day_excuses = []
                 
-                # Other Checkpoints
+                def fmt_cp(l_obj, col_name):
+                    if not l_obj: return "-"
+                    t_str = timezone.localtime(l_obj.timestamp).strftime("%H:%M")
+                    if getattr(l_obj, 'is_excused', False):
+                        reason = getattr(l_obj, 'excuse_reason', 'Maklum')
+                        if reason == 'Izin Telat': stats['excuses_telat'] += 1
+                        elif reason == 'Izin Pulang Cepat': stats['excuses_pulang'] += 1
+                        elif reason == 'Lupa Absen': stats['excuses_lupa'] += 1
+                        else: stats['excuses_other'] += 1
+                        reason_str = f"{col_name}: {reason}"
+                        if reason_str not in day_excuses: day_excuses.append(reason_str)
+                        t_str = "- " + t_str
+                    return t_str
+                
+                # Checkpoints format
+                t_pagi = fmt_cp(l_pagi, 'Pagi')
+                times.append(t_pagi)
+                if not l_pagi: wa_missing['Pagi'] += 1
+                
                 for l_chk, k in [(l_cp1, 'CP1'), (l_isti, 'Istirahat'), (l_cp2, 'CP2'), (l_plg, 'Pulang')]:
-                    if l_chk: times.append(timezone.localtime(l_chk.timestamp).strftime("%H:%M"))
-                    else: 
-                        times.append("-")
-                        wa_missing[k] += 1
-                row_vals = times
+                    times.append(fmt_cp(l_chk, k))
+                    if not l_chk: wa_missing[k] += 1
+                
+                aktual_jam_str = "-"
+                lembur_str = "-"
+                
+                # Metrics logic for WA
+                if l_pagi:
+                    check_in_time = timezone.localtime(l_pagi.timestamp).time()
+                    if check_in_time > sch_in:
+                        # Late Check
+                        diff_m = int((datetime.combine(day_date, check_in_time) - datetime.combine(day_date, sch_in)).total_seconds() / 60)
+                        if diff_m > 0:
+                            status += f" (TRL +{diff_m}m)"
+                            stats['L'] += 1
+                            status_color = corpo_orange
+                
+                if l_pagi and l_plg:
+                    dt_in = timezone.localtime(l_pagi.timestamp)
+                    dt_out = timezone.localtime(l_plg.timestamp)
+                    diff_mins = int((dt_out - dt_in).total_seconds() / 60)
+                    if diff_mins > 0:
+                        h, m = divmod(diff_mins, 60)
+                        aktual_jam_str = f"{h}j {m}m"
+                        
+                    # Calculate Lembur
+                    if dt_out.time() > sch_out:
+                        ot_mins = int((dt_out - timezone.make_aware(datetime.combine(day_date, sch_out))).total_seconds() / 60)
+                        if ot_mins > 0:
+                            stats['LemburMins'] += ot_mins
+                            h_ot, m_ot = divmod(ot_mins, 60)
+                            lembur_str = f"{h_ot}j {m_ot}m" if h_ot > 0 else f"{m_ot}m"
+                
+                if day_excuses:
+                    status += f" ({', '.join(day_excuses)})"
+                    
+                row_vals = times + [aktual_jam_str, lembur_str]
 
             else:
                 # FINGERPRINT LOGIC (With Dynamic Schedule Fix & Manual Overrides)
@@ -6111,14 +6283,14 @@ def export_employee_pdf(request, employee_id):
     
     # Stats Grid Table
     overtime_hours, overtime_mins = divmod(stats.get('LemburMins', 0), 60)
-    
+    tot_missing_cp = sum(wa_missing.values()) if 'wa_missing' in locals() else ""
     stat_items = [
         ["Hadir", "Telat", "Sakit", "Alpha", "Lembur"],
         [str(stats['H']), str(stats['L']), str(stats['S']), str(stats['A']), f"{overtime_hours}j {overtime_mins}m"],
-        ["Izin Telat", "Plg Cepat", "Lupa Absen", "Izin Lain", ""],
-        [str(stats.get('excuses_telat', 0)), str(stats.get('excuses_pulang', 0)), str(stats.get('excuses_lupa', 0)), str(stats.get('excuses_other', 0)), ""]
+        ["Izin Telat", "Plg Cepat", "Lupa Absen", "Izin Lain", "Tak Absen CP" if is_wa else ""],
+        [str(stats.get('excuses_telat', 0)), str(stats.get('excuses_pulang', 0)), str(stats.get('excuses_lupa', 0)), str(stats.get('excuses_other', 0)), str(tot_missing_cp) if is_wa else ""]
     ]
-    t_stats = Table(stat_items, colWidths=[2.1*cm, 2*cm, 2*cm, 1.8*cm, 3.1*cm])
+    t_stats = Table(stat_items, colWidths=[2.1*cm, 2*cm, 2*cm, 2*cm, 2.9*cm])
     t_stats.setStyle(TableStyle([
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -6178,12 +6350,12 @@ def export_employee_pdf(request, employee_id):
         ('BACKGROUND', (0,0), (-1,0), corpo_blue), # Header BG
         ('TEXTCOLOR', (0,0), (-1,0), colors.white), # Header Text
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,0), 9),
+        ('FONTSIZE', (0,0), (-1,0), 7 if is_wa else 9),
         ('BOTTOMPADDING', (0,0), (-1,0), 8),
         ('TOPPADDING', (0,0), (-1,0), 8),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('FONTSIZE', (0,1), (-1,-1), 8),
+        ('FONTSIZE', (0,1), (-1,-1), 6.5 if is_wa else 8),
         ('LINEBELOW', (0,0), (-1,0), 0, corpo_blue), # Header Line
         ('LINEBELOW', (0,1), (-1,-1), 0.5, colors.lightgrey), # Horizontal Lines
     ]
@@ -6296,6 +6468,7 @@ def export_batch_personal_pdf(request):
     end_date = date(year, month, days_in_month)
     id_holidays = holidays.Indonesia(years=year)
 
+    from reportlab.lib.pagesizes import portrait, landscape, LEGAL
     # Output Setup
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -6348,12 +6521,11 @@ def export_batch_personal_pdf(request):
         stats = {
             'H': 0, 'I': 0, 'S': 0, 'A': 0, 'L': 0,
             'LemburMins': 0, 'excuses_telat': 0, 'excuses_pulang': 0,
-            'excuses_lupa': 0, 'excuses_other': 0
+            'excuses_lupa': 0, 'excuses_other': 0, 'missing_cps': 0
         }
-        
         if is_wa:
-            headers = ['Tgl', 'Hari', 'Pagi', 'CP1', 'Isoma', 'CP2', 'Pulang', 'Status']
-            col_widths = [1.8*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 1.5*cm, 3*cm] 
+            headers = ['Tgl', 'Hari', 'Pagi', 'CP1', 'Isoma', 'CP2', 'Pulang', 'Akt. Jam', 'Lembur', 'Status']
+            col_widths = [1.1*cm, 0.9*cm, 1.2*cm, 1.2*cm, 1.2*cm, 1.2*cm, 1.2*cm, 1.4*cm, 1.4*cm, 7.7*cm]  
         else:
             headers = ['Tanggal', 'Hari', 'Masuk', 'Pulang', 'Aktual Jam', 'Telat', 'Lembur', 'Status']
             col_widths = [2.2*cm, 2.0*cm, 2.2*cm, 2.2*cm, 2.5*cm, 1.8*cm, 2.0*cm, 4*cm]
@@ -6363,8 +6535,14 @@ def export_batch_personal_pdf(request):
         for d in range(1, days_in_month + 1):
             day_date = date(year, month, d)
             day_name = day_date.strftime("%a")
-            day_logs = logs_map[emp.id].get(day_date, [])
+            # For Batch PDF WA
+            day_logs = [log for log in logs_map[emp.id][day_date]]
             l_type = leave_map[emp.id].get(day_date)
+            
+            # Schedule Check for Overtime/Late Calculation
+            daily_sch, _ = get_employee_schedule(emp, day_date)
+            sch_in = daily_sch.clock_in if daily_sch else time(8, 0)
+            sch_out = daily_sch.clock_out if daily_sch else time(17, 0)
             
             status = "-"
             status_color = colors.black
@@ -6374,7 +6552,7 @@ def export_batch_personal_pdf(request):
                 status = l_type
                 stats[l_type[0]] += 1
                 if l_type.startswith('C'): stats['I'] += 1
-                row_vals = ["-"] * (len(headers) - 3)
+                row_vals = ["-"] * (len(headers) - 2)
                 status_color = corpo_blue
             elif day_logs:
                 status = "HADIR"
@@ -6382,26 +6560,70 @@ def export_batch_personal_pdf(request):
                 if is_wa:
                     dl = day_logs
                     l_pagi = next((x for x in dl if x.log_category == 'MASUK'), None)
-                    l_cp1  = next((x for x in dl if x.log_category == 'CHECK1'), None)
+                    l_cp1  = next((x for x in dl if x.log_category == 'CHECKPOINT_1'), None)
                     l_isti = next((x for x in dl if x.log_category == 'ISTIRAHAT'), None)
-                    l_cp2  = next((x for x in dl if x.log_category == 'CHECK2'), None)
+                    l_cp2  = next((x for x in dl if x.log_category == 'CHECKPOINT_2'), None)
                     l_plg  = [x for x in dl if x.log_category == 'PULANG']
                     l_plg  = l_plg[-1] if l_plg else None
                     
                     times = []
-                    if l_pagi: 
-                        t_str = timezone.localtime(l_pagi.timestamp).strftime("%H:%M")
-                        times.append(t_str)
-                        if timezone.localtime(l_pagi.timestamp).time() > time(8, 5):
-                            status += " (TRL)"
-                            stats['L'] += 1
-                            status_color = corpo_orange
-                    else: 
-                        times.append("-")
+                    day_excuses = []
+                    
+                    def fmt_cp(l_obj, col_name):
+                        if not l_obj: return "-"
+                        t_str = timezone.localtime(l_obj.timestamp).strftime("%H:%M")
+                        if getattr(l_obj, 'is_excused', False):
+                            reason = getattr(l_obj, 'excuse_reason', 'Maklum')
+                            if reason == 'Izin Telat': stats['excuses_telat'] += 1
+                            elif reason == 'Izin Pulang Cepat': stats['excuses_pulang'] += 1
+                            elif reason == 'Lupa Absen': stats['excuses_lupa'] += 1
+                            else: stats['excuses_other'] += 1
+                            reason_str = f"{col_name}: {reason}"
+                            if reason_str not in day_excuses: day_excuses.append(reason_str)
+                            t_str = "- " + t_str
+                        return t_str
+                    
+                    # Pagi Check
+                    if not l_pagi: stats['missing_cps'] += 1
+                    times.append(fmt_cp(l_pagi, 'Pagi'))
+                    
+                    for l_chk, k in [(l_cp1, 'CP1'), (l_isti, 'Istirahat'), (l_cp2, 'CP2'), (l_plg, 'Pulang')]:
+                        if not l_chk: stats['missing_cps'] += 1
+                        times.append(fmt_cp(l_chk, k))
                         
-                    for l_chk in [l_cp1, l_isti, l_cp2, l_plg]:
-                        times.append(timezone.localtime(l_chk.timestamp).strftime("%H:%M") if l_chk else "-")
-                    row_vals = times
+                    aktual_jam_str = "-"
+                    lembur_str = "-"
+                    
+                    # Metrics logic for WA
+                    if l_pagi:
+                        check_in_time = timezone.localtime(l_pagi.timestamp).time()
+                        if check_in_time > sch_in:
+                            diff_m = int((datetime.combine(day_date, check_in_time) - datetime.combine(day_date, sch_in)).total_seconds() / 60)
+                            if diff_m > 0:
+                                status += f" (TRL +{diff_m}m)"
+                                stats['L'] += 1
+                                status_color = corpo_orange
+                                
+                    if l_pagi and l_plg:
+                        dt_in = timezone.localtime(l_pagi.timestamp)
+                        dt_out = timezone.localtime(l_plg.timestamp)
+                        diff_mins = int((dt_out - dt_in).total_seconds() / 60)
+                        if diff_mins > 0:
+                            h, m = divmod(diff_mins, 60)
+                            aktual_jam_str = f"{h}j {m}m"
+                            
+                        # Calculate Lembur
+                        if dt_out.time() > sch_out:
+                            ot_mins = int((dt_out - timezone.make_aware(datetime.combine(day_date, sch_out))).total_seconds() / 60)
+                            if ot_mins > 0:
+                                stats['LemburMins'] += ot_mins
+                                h_ot, m_ot = divmod(ot_mins, 60)
+                                lembur_str = f"{h_ot}j {m_ot}m" if h_ot > 0 else f"{m_ot}m"
+
+                    if day_excuses:
+                        status += f" ({', '.join(day_excuses)})"
+                        
+                    row_vals = times + [aktual_jam_str, lembur_str]
                 else:
                     dl_ordered = sorted(day_logs, key=lambda x: x.timestamp)
                     in_logs = [x for x in dl_ordered if x.log_category == 'MASUK']
@@ -6497,10 +6719,10 @@ def export_batch_personal_pdf(request):
         stat_items = [
             ["Hadir", "Telat", "Sakit", "Alpha", "Lembur"],
             [str(stats['H']), str(stats['L']), str(stats['S']), str(stats['A']), f"{overtime_hours}j {overtime_mins}m"],
-            ["Izin Telat", "Plg Cepat", "Lupa Absen", "Izin Lain", ""],
-            [str(stats.get('excuses_telat', 0)), str(stats.get('excuses_pulang', 0)), str(stats.get('excuses_lupa', 0)), str(stats.get('excuses_other', 0)), ""]
+            ["Izin Telat", "Plg Cepat", "Lupa Absen", "Izin Lain", "Tak Absen CP" if is_wa else ""],
+            [str(stats.get('excuses_telat', 0)), str(stats.get('excuses_pulang', 0)), str(stats.get('excuses_lupa', 0)), str(stats.get('excuses_other', 0)), str(stats.get('missing_cps', 0)) if is_wa else ""]
         ]
-        t_stats = Table(stat_items, colWidths=[2.1*cm, 2*cm, 2*cm, 1.8*cm, 3.1*cm])
+        t_stats = Table(stat_items, colWidths=[2.1*cm, 2*cm, 2*cm, 2*cm, 2.9*cm])
         t_stats.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -6546,10 +6768,10 @@ def export_batch_personal_pdf(request):
         t_logs = Table(final_rows, colWidths=col_widths)
         tbl_style = [
             ('BACKGROUND', (0,0), (-1,0), corpo_blue), ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'), ('FONTSIZE', (0,0), (-1,0), 9),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'), ('FONTSIZE', (0,0), (-1,0), 7 if is_wa else 9),
             ('BOTTOMPADDING', (0,0), (-1,0), 8), ('TOPPADDING', (0,0), (-1,0), 8),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('FONTSIZE', (0,1), (-1,-1), 8), ('LINEBELOW', (0,0), (-1,0), 0, corpo_blue),
+            ('FONTSIZE', (0,1), (-1,-1), 6.5 if is_wa else 8), ('LINEBELOW', (0,0), (-1,0), 0, corpo_blue),
             ('LINEBELOW', (0,1), (-1,-1), 0.5, colors.lightgrey),
         ]
         for i, (row_data, text_color) in enumerate(rows_buffer):
