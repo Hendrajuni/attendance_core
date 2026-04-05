@@ -18,9 +18,15 @@
             
             <!-- NIK (readonly) -->
             <div class="mb-3">
-                <label class="form-label fw-medium">NIK</label>
+                <label class="form-label fw-medium">NIK Sistem</label>
                 <input type="text" class="form-control bg-light" value="{{ emp.nik }}" readonly disabled>
-                <small class="text-muted">NIK tidak dapat diubah</small>
+                <small class="text-muted">NIK bawaan sistem tidak dapat diubah</small>
+            </div>
+            
+            <!-- NIK Perusahaan (Editable) -->
+            <div class="mb-3">
+                <label for="company_nik" class="form-label fw-medium">NIK Perusahaan</label>
+                <input type="text" class="form-control" id="company_nik" name="company_nik" value="{{ emp.company_nik|default:'' }}" placeholder="NIK resmi">
             </div>
             
             <!-- Nama Lengkap (Always Editable) -->
@@ -49,6 +55,12 @@
                     <option value="{{ dept.id }}" {% if emp.department_id == dept.id %}selected{% endif %}>{{ dept.name }}</option>
                     {% endfor %}
                 </select>
+            </div>
+            
+            <!-- Jabatan -->
+            <div class="mb-3">
+                <label for="position" class="form-label fw-medium">Jabatan Saat Ini</label>
+                <input type="text" class="form-control" id="position" name="position" value="{{ emp.position|default:'' }}" placeholder="Contoh: SPV, Admin">
             </div>
             
             <!-- Tanggal Bergabung -->

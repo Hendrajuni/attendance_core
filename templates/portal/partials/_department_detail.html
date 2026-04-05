@@ -134,6 +134,7 @@
                             <thead class="bg-light">
                                 <tr>
                                     <th class="ps-4">Nama Karyawan</th>
+                                    <th>Jabatan</th>
                                     <th>Metode</th>
                                     <th>Status</th>
                                 </tr>
@@ -148,9 +149,12 @@
                                             </div>
                                             <div>
                                                 <div class="fw-medium text-dark">{{ emp.full_name }}</div>
-                                                <div class="small text-muted">{{ emp.nik }}</div>
+                                                <div class="small text-muted">{{ emp.company_nik|default:emp.nik }}</div>
                                             </div>
                                         </div>
+                                    </td>
+                                    <td>
+                                        <div class="text-dark">{{ emp.position|default:"-" }}</div>
                                     </td>
                                     <td>
                                         {% if emp.attendance_method == 'FINGERPRINT' %}

@@ -47,6 +47,13 @@
                             </div>
                         </div>
                         <div class="d-flex align-items-center mb-2">
+                            <i class="fas fa-briefcase text-muted me-3" style="width: 16px;"></i>
+                            <div>
+                                <small class="text-muted d-block">Jabatan</small>
+                                <span class="fw-medium">{{ emp.position|default:"-" }}</span>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center mb-2">
                             <i class="fas fa-user-tag text-muted me-3" style="width: 16px;"></i>
                             <div>
                                 <small class="text-muted d-block">Tipe</small>
@@ -130,6 +137,11 @@
                                 <i class="fas fa-history me-1"></i> Riwayat Mutasi
                             </button>
                         </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link fw-medium" id="leave-tab" data-bs-toggle="tab" data-bs-target="#leave" type="button">
+                                <i class="fas fa-calendar-minus me-1"></i> Izin & Cuti
+                            </button>
+                        </li>
                     </ul>
                 </div>
                 <div class="card-body">
@@ -145,8 +157,8 @@
                                     <div class="row g-2">
                                         <div class="col-md-6">
                                             <div class="bg-light rounded p-3">
-                                                <small class="text-muted">NIK</small>
-                                                <div class="fw-medium">{{ emp.nik }}</div>
+                                                <small class="text-muted">NIK Perusahaan</small>
+                                                <div class="fw-medium">{{ emp.company_nik|default:"-" }} <small class="text-muted">(Sys: {{ emp.nik }})</small></div>
                                             </div>
                                         </div>
                                         <div class="col-md-6">
@@ -337,6 +349,63 @@
                             </div>
                             {% endif %}
                         </div>
+                        
+                        <!-- TAB 4: Izin & Cuti -->
+                        <div class="tab-pane fade" id="leave" role="tabpanel">
+                            <h6 class="fw-bold text-primary mb-3">
+                                <i class="fas fa-calendar-minus me-2"></i>Riwayat Izin & Cuti
+                            </h6>
+                            
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover align-middle">
+                                    <thead class="bg-light">
+                                        <tr>
+                                            <th>Tanggal</th>
+                                            <th>Durasi</th>
+                                            <th>Tipe</th>
+                                            <th>Keterangan</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for leave in leaves %}
+                                        <tr>
+                                            <td>
+                                                <div class="fw-medium">{{ leave.start_date|date:"d M Y" }}</div>
+                                                {% if leave.start_date != leave.end_date %}
+                                                <small class="text-muted">s/d {{ leave.end_date|date:"d M Y" }}</small>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-light text-dark border">{{ leave.duration_days }} Hari</span>
+                                            </td>
+                                            <td>
+                                                {% if leave.leave_type == 'CUTI' or leave.leave_type == 'CUTI_KHUSUS' %}
+                                                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle px-2 py-1"><i class="fas fa-plane-departure me-1"></i> Cuti</span>
+                                                {% elif leave.leave_type == 'IZIN' %}
+                                                    <span class="badge bg-warning bg-opacity-10 text-warning border border-warning-subtle px-2 py-1"><i class="fas fa-envelope-open-text me-1"></i> Izin</span>
+                                                {% elif leave.leave_type == 'SAKIT' %}
+                                                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger-subtle px-2 py-1"><i class="fas fa-briefcase-medical me-1"></i> Sakit</span>
+                                                {% else %}
+                                                    <span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary-subtle px-2 py-1">{{ leave.get_leave_type_display }}</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <small class="text-muted d-block text-truncate" style="max-width: 250px;" title="{{ leave.notes }}">{{ leave.notes|default:"-" }}</small>
+                                            </td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr>
+                                            <td colspan="4" class="text-center py-5 text-muted">
+                                                <i class="fas fa-folder-open fs-2 mb-3 opacity-25 d-block"></i>
+                                                Belum ada data riwayat cuti atau izin.
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
             </div>

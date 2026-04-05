@@ -1638,6 +1638,10 @@ def employee_detail_view(request, employee_id):
     
     attendance_dates = {str(log['timestamp__date']): log['count'] for log in heatmap_logs}
     
+    # === EMPLOYEE LEAVES (Cuti/Izin) ===
+    from attendance.models import EmployeeLeave
+    leaves = EmployeeLeave.objects.filter(employee=employee).order_by('-start_date')
+    
     context = {
         'emp': employee,
         'stats': {
@@ -1653,6 +1657,7 @@ def employee_detail_view(request, employee_id):
         'shift_assignment': shift_assignment,
         'attendance_dates': attendance_dates,
         'current_month': now.strftime('%B %Y'),
+        'leaves': leaves,
     }
     
     return render(request, 'portal/partials/_employee_detail.html', context)
@@ -1721,6 +1726,9 @@ def employee_edit_view(request, employee_id):
                     employee.phone_number = phone_number if phone_number else None
                     employee.telegram_user_id = telegram_user_id if telegram_user_id else None
                     employee.attendance_method = attendance_method
+                    
+                    employee.company_nik = request.POST.get('company_nik', '').strip() or None
+                    employee.position = request.POST.get('position', '').strip() or None
                     
                     # Device User ID
                     if device_user_id:
@@ -6316,7 +6324,8 @@ def export_employee_pdf(request, employee_id):
     elements.append(Paragraph("LAPORAN ABSENSI PERSONAL", title_style))
     
     # Check current locale for Month Name
-    elements.append(Paragraph(f"Periode: {calendar.month_name[month]} {year}", ParagraphStyle(name='SubTitle', parent=styles['Normal'], alignment=TA_CENTER)))
+    loc_name = employee.home_base.name if employee.home_base else '-'
+    elements.append(Paragraph(f"Lokasi: {loc_name} | Periode: {calendar.month_name[month]} {year}", ParagraphStyle(name='SubTitle', parent=styles['Normal'], alignment=TA_CENTER)))
     
     # REDUCED SPACER (Previously 0.8cm)
     elements.append(Spacer(1, 0.4*cm))
@@ -6328,9 +6337,9 @@ def export_employee_pdf(request, employee_id):
     # Bio Table
     bio_data = [
         [Paragraph("<b>Nama</b>", styles['Normal']), Paragraph(f": {employee.full_name}", styles['Normal'])],
-        [Paragraph("<b>NIK</b>", styles['Normal']), Paragraph(f": {employee.nik}", styles['Normal'])],
-        [Paragraph("<b>Jabatan</b>", styles['Normal']), Paragraph(f": {employee.get_employee_type_display()}", styles['Normal'])],
-        [Paragraph("<b>Lokasi</b>", styles['Normal']), Paragraph(f": {employee.home_base.name if employee.home_base else '-'}", styles['Normal'])],
+        [Paragraph("<b>NIK</b>", styles['Normal']), Paragraph(f": {employee.company_nik or employee.nik}", styles['Normal'])],
+        [Paragraph("<b>Jabatan</b>", styles['Normal']), Paragraph(f": {employee.position or '-'}", styles['Normal'])],
+        [Paragraph("<b>Departemen</b>", styles['Normal']), Paragraph(f": {employee.department.name if employee.department else '-'}", styles['Normal'])],
     ]
     t_bio = Table(bio_data, colWidths=[2.5*cm, 5*cm])
     t_bio.setStyle(TableStyle([
@@ -6852,14 +6861,15 @@ def export_batch_personal_pdf(request):
         # Draw Output Elements for this employee
         emp_elements.append(Spacer(1, 1*cm))
         emp_elements.append(Paragraph("LAPORAN ABSENSI PERSONAL", title_style))
-        emp_elements.append(Paragraph(f"Periode: {calendar.month_name[month]} {year}", subtitle_style))
+        loc_name = emp.home_base.name if emp.home_base else '-'
+        emp_elements.append(Paragraph(f"Lokasi: {loc_name} | Periode: {calendar.month_name[month]} {year}", subtitle_style))
         emp_elements.append(Spacer(1, 0.4*cm))
         
         bio_data = [
             [Paragraph("<b>Nama</b>", styles['Normal']), Paragraph(f": {emp.full_name}", styles['Normal'])],
-            [Paragraph("<b>NIK</b>", styles['Normal']), Paragraph(f": {emp.nik}", styles['Normal'])],
-            [Paragraph("<b>Jabatan</b>", styles['Normal']), Paragraph(f": {emp.get_employee_type_display()}", styles['Normal'])],
-            [Paragraph("<b>Lokasi</b>", styles['Normal']), Paragraph(f": {emp.home_base.name if emp.home_base else '-'}", styles['Normal'])],
+            [Paragraph("<b>NIK</b>", styles['Normal']), Paragraph(f": {emp.company_nik or emp.nik}", styles['Normal'])],
+            [Paragraph("<b>Jabatan</b>", styles['Normal']), Paragraph(f": {emp.position or '-'}", styles['Normal'])],
+            [Paragraph("<b>Departemen</b>", styles['Normal']), Paragraph(f": {emp.department.name if emp.department else '-'}", styles['Normal'])],
         ]
         t_bio = Table(bio_data, colWidths=[2.5*cm, 5*cm])
         t_bio.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('LEFTPADDING', (0,0), (-1,-1), 0)]))

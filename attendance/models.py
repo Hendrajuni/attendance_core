@@ -204,6 +204,10 @@ class Employee(models.Model):
     employee_type = models.CharField(max_length=10, choices=TYPE_CHOICES, default='HARIAN')
     department = models.ForeignKey(Department, on_delete=models.SET_NULL, null=True, blank=True, related_name="employees")
     
+    # Tambahan: NIK Perusahaan & Jabatan
+    company_nik = models.CharField(max_length=50, null=True, blank=True, verbose_name="NIK Perusahaan", help_text="NIK resmi dari perusahaan")
+    position = models.CharField(max_length=100, null=True, blank=True, verbose_name="Jabatan", help_text="Jabatan saat ini. Contoh: Admin")
+    
     # Attendance Method (New Request)
     METHOD_CHOICES = [
         ('FINGERPRINT', 'Mesin Fingerprint'),
@@ -703,6 +707,12 @@ class EmployeeLeave(models.Model):
         ordering = ['-start_date']
         verbose_name = "Employee Leave"
         verbose_name_plural = "Employee Leaves"
+    
+    @property
+    def duration_days(self):
+        if self.start_date and self.end_date:
+            return (self.end_date - self.start_date).days + 1
+        return 0
     
     def __str__(self):
         return f"{self.employee.full_name} - {self.get_leave_type_display()} ({self.start_date} - {self.end_date})"

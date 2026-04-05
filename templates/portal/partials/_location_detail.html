@@ -149,13 +149,13 @@
                                             </div>
                                             <div>
                                                 <div class="fw-bold text-dark">{{ emp.full_name }}</div>
-                                                <small class="text-muted">{{ emp.nik }}</small>
+                                                <small class="text-muted">{{ emp.company_nik|default:emp.nik }}</small>
                                             </div>
                                         </div>
                                     </td>
                                     <td>
-                                        <div class="text-dark">{{ emp.department.name|default:"-" }}</div>
-                                        <small class="text-muted">{{ emp.home_base.code }}</small>
+                                        <div class="text-dark">{{ emp.position|default:"-" }}</div>
+                                        <small class="text-muted">{{ emp.department.name|default:"-" }}</small>
                                     </td>
                                     <td>
                                         {% if emp.attendance_method == 'WHATSAPP' %}
