@@ -2178,10 +2178,21 @@ def recap_matrix_view(request):
                     day_stat['status'] = first_log.get_status_display() if hasattr(first_log, 'get_status_display') else ''
                     day_stat['raw_status'] = getattr(first_log, 'status', '')
                     day_stat['is_excused'] = getattr(first_log, 'is_excused', False)
-                    day_stat['excuse_reason'] = getattr(first_log, 'excuse_reason', '')
+                    reason = getattr(first_log, 'excuse_reason', '')
+                    notes = getattr(first_log, 'notes', '')
                     
-                    if day_stat['is_excused'] and day_stat['excuse_reason']:
-                        reason_lower = str(day_stat['excuse_reason']).lower()
+                    if notes:
+                        if reason.lower() in notes.lower():
+                            day_stat['excuse_reason'] = notes
+                        elif notes.lower() in reason.lower():
+                            day_stat['excuse_reason'] = reason
+                        else:
+                            day_stat['excuse_reason'] = f"{reason} - {notes}"
+                    else:
+                        day_stat['excuse_reason'] = reason
+                    
+                    if day_stat['is_excused'] and reason:
+                        reason_lower = str(reason).lower() # Use original reason, not merged notes
                         if "telat" in reason_lower:
                             summary_stats['excuses_telat'] += 1
                         elif "pulang" in reason_lower:
@@ -2300,13 +2311,14 @@ def recap_matrix_view(request):
                     
                     if leave:
                         day_stat['status'] = leave.get_leave_type_display()
+                        day_stat['excuse_reason'] = leave.notes
                         if leave.leave_type == 'SAKIT':
                             day_stat['status_class'] = 'text-warning fw-bold'
                             summary_stats['sick'] += 1
                         elif leave.leave_type == 'IZIN':
                             day_stat['status_class'] = 'text-info fw-bold'
                             summary_stats['permit'] += 1
-                        elif leave.leave_type == 'CUTI':
+                        elif leave.leave_type == 'CUTI' or leave.leave_type == 'CUTI_KHUSUS':
                             day_stat['status_class'] = 'text-success fw-bold'
                             # summary_stats['leave'] += 1 
                         else:
@@ -2521,7 +2533,15 @@ def recap_matrix_view(request):
                     # Target dictionary for this day
                     day_data = {'status': '', 'in': '-', 'out': '-', 'aktual_jam': '-', 'late': False, 'overtime': 0, 'lembur_str': '-', 'excuse_reason': ''}
                     
-                    if day_logs:
+                    l_type = employee_leaves_map[emp.id].get(d)
+                    if l_type:
+                        code_map = {'IZIN': 'I', 'SAKIT': 'S', 'CUTI': 'C', 'CUTI_KHUSUS': 'C'}
+                        st = code_map.get(l_type, 'I')
+                        day_data['status'] = st
+                        stat_key = 'I' if st == 'C' else st
+                        if stat_key in emp_stats:
+                            emp_stats[stat_key] += 1
+                    elif day_logs:
                         # Check specific status from log
                         day_logs.sort(key=lambda x: x.timestamp)
                         first_log = day_logs[0]
@@ -2625,18 +2645,7 @@ def recap_matrix_view(request):
                             emp_stats['A'] += 1
                             
                     else:
-                        # No logs - Check LEAVE first
-                        l_type = employee_leaves_map[emp.id].get(d)
-                        
-                        if l_type:
-                            code_map = {'IZIN': 'I', 'SAKIT': 'S', 'CUTI': 'C', 'CUTI_KHUSUS': 'C'}
-                            st = code_map.get(l_type, 'I')
-                            day_data['status'] = st
-                            stat_key = 'I' if st == 'C' else st
-                            if stat_key in emp_stats:
-                                emp_stats[stat_key] += 1
-                                
-                        elif is_holiday:
+                        if is_holiday:
                             day_data['status'] = 'L' # Libur Nasional
                         elif d.weekday() == 6: # Sunday Only
                             day_data['status'] = 'L' # Libur Weekend
@@ -3888,6 +3897,8 @@ def wa_save_cell(request):
     # 3. Handle PARTIAL EXCUSE (Specific Checkpoint)
     elif action == 'partial_excuse':
         excuse_reason = request.POST.get('excuse_reason', 'Maklum').strip()
+        custom_notes = request.POST.get('notes', '').strip()
+        
         if not excuse_reason:
             excuse_reason = 'Maklum'
             
@@ -3912,9 +3923,12 @@ def wa_save_cell(request):
             source_type='TELEGRAM'
         ).first()
         
+        notes_val = custom_notes if custom_notes else f'Partial Excuse: {excuse_reason}'
+        
         if existing_log:
             existing_log.is_excused = True
             existing_log.excuse_reason = excuse_reason
+            existing_log.notes = notes_val
             existing_log.save()
         else:
             AttendanceLog.objects.create(
@@ -3923,15 +3937,15 @@ def wa_save_cell(request):
                 status='CHECKIN',
                 source_type='TELEGRAM',
                 log_category=category,
-                notes=f'Partial Excuse: {excuse_reason}',
+                notes=notes_val,
                 is_excused=True,
                 excuse_reason=excuse_reason
             )
             
         # Return the time string formatted just like the full page load
         time_str = log_datetime.time().strftime('%H:%M')
-        cell_html = f'<span class="text-primary" style="font-size: 0.6rem;" title="{excuse_reason}">- {time_str}</span>'
-
+        display_title = f"{excuse_reason} - {custom_notes}" if custom_notes else excuse_reason
+        cell_html = f'<span class="text-primary" style="font-size: 0.6rem;" title="{display_title}">- {time_str}</span>'
     # 4. Handle SET TIME (Admin Only)
     elif action == 'set_time':
         if user_role not in ['ADMIN', 'HRD']:
@@ -4473,8 +4487,12 @@ def fp_save_cell(request):
             t_out = request.POST.get('time_out')
             is_exc = request.POST.get('is_excused') == 'true'
             exc_rsn = request.POST.get('excuse_reason') or ''
+            custom_notes = request.POST.get('notes')
             
-            reason_text = exc_rsn if is_exc else 'Manual Entry'
+            if custom_notes:
+                reason_text = custom_notes
+            else:
+                reason_text = exc_rsn if is_exc else 'Manual Entry'
             
             # Scenario A: Kerani inputted specific times to artificially punch in/out
             if t_in or t_out or action == 'hadir':
@@ -6014,7 +6032,7 @@ def export_employee_pdf(request, employee_id):
         curr = max(l.start_date, start_date)
         end = min(l.end_date, end_date)
         while curr <= end:
-            leave_map[curr] = l.leave_type
+            leave_map[curr] = l
             curr += timedelta(days=1)
             
     # Stats Init
@@ -6050,14 +6068,15 @@ def export_employee_pdf(request, employee_id):
     for d in range(1, days_in_month + 1):
         day_date = date(year, month, d)
         day_str = day_date.strftime("%d")
-        day_name = day_date.strftime("%a") # Short day name
+        _day_map = {0: 'Sen', 1: 'Sel', 2: 'Rab', 3: 'Kam', 4: 'Jum', 5: 'Sab', 6: 'Min'}
+        day_name = _day_map[day_date.weekday()]
         
         day_logs = logs.filter(timestamp__date=day_date)
         
         status = "-"
         status_color = colors.black
         
-        leave_type = leave_map.get(day_date)
+        leave_obj = leave_map.get(day_date)
         row_vals = []
         
         # Schedule Check for Overtime/Late Calculation
@@ -6065,11 +6084,15 @@ def export_employee_pdf(request, employee_id):
         sch_in = daily_sch.clock_in if daily_sch else time(8, 0)
         sch_out = daily_sch.clock_out if daily_sch else time(17, 0)
         
-        if leave_type:
-            status = leave_type
-            stats[leave_type[0]] += 1
-            if leave_type.startswith('C'): stats['I'] += 1 # Cuti -> Izin category
-            row_vals = ["-"] * (len(headers) - 2)
+        if leave_obj:
+            status = leave_obj.get_leave_type_display()
+            if leave_obj.notes:
+                status += f" - {leave_obj.notes}"
+            if leave_obj.leave_type.startswith('C'): 
+                stats['I'] += 1 # Cuti -> Izin category
+            else:
+                stats[leave_obj.leave_type[0]] += 1
+            row_vals = ["-"] * (len(headers) - 3)
             status_color = corpo_blue # Blue for Leave
             
         elif day_logs.exists():
@@ -6097,7 +6120,18 @@ def export_employee_pdf(request, employee_id):
                         elif reason == 'Izin Pulang Cepat': stats['excuses_pulang'] += 1
                         elif reason == 'Lupa Absen': stats['excuses_lupa'] += 1
                         else: stats['excuses_other'] += 1
-                        reason_str = f"{col_name}: {reason}"
+                        
+                        notes = getattr(l_obj, 'notes', '')
+                        if notes:
+                            if reason.lower() in notes.lower():
+                                display_reason = notes
+                            elif notes.lower() in reason.lower():
+                                display_reason = reason
+                            else:
+                                display_reason = f"{reason} - {notes}"
+                        else:
+                            display_reason = reason
+                        reason_str = f"{col_name}: {display_reason}"
                         if reason_str not in day_excuses: day_excuses.append(reason_str)
                         t_str = "- " + t_str
                     return t_str
@@ -6187,7 +6221,17 @@ def export_employee_pdf(request, employee_id):
                 if l_in:
                     if l_in.is_excused:
                         reason = l_in.excuse_reason if l_in.excuse_reason else "Dimaklumi"
-                        status = reason
+                        notes = getattr(l_in, 'notes', '')
+                        if notes:
+                            if reason.lower() in notes.lower():
+                                status = notes
+                            elif notes.lower() in reason.lower():
+                                status = reason
+                            else:
+                                status = f"{reason} - {notes}"
+                        else:
+                            status = reason
+                            
                         status_color = corpo_blue # Same color as leave for distinction
                         
                         r_lower = str(reason).lower()
@@ -6240,7 +6284,18 @@ def export_employee_pdf(request, employee_id):
             
         # Build Table Row
         # Tgl, Hari, ...data..., Status
-        row = [f"{day_date.strftime('%d')}-{day_date.strftime('%m')}", day_name] + row_vals + [status]
+        status_style = ParagraphStyle(
+            name='StatusStyle',
+            parent=getSampleStyleSheet()['Normal'],
+            fontName='Helvetica-Bold' if status_color in [corpo_red, corpo_orange] else 'Helvetica',
+            fontSize=6.5 if is_wa else 8,
+            leading=7.5 if is_wa else 9,
+            textColor=status_color,
+            alignment=TA_CENTER
+        )
+        status_p = Paragraph(status, status_style)
+        
+        row = [f"{day_date.strftime('%d')}-{day_date.strftime('%m')}", day_name] + row_vals + [status_p]
         
         # Add Style for this specific row later? No, usually by index.
         # We'll store row data and styles separately or use conditional formatting in TableStyle
@@ -6283,48 +6338,98 @@ def export_employee_pdf(request, employee_id):
     
     # Stats Grid Table
     overtime_hours, overtime_mins = divmod(stats.get('LemburMins', 0), 60)
-    tot_missing_cp = sum(wa_missing.values()) if 'wa_missing' in locals() else ""
-    stat_items = [
-        ["Hadir", "Telat", "Sakit", "Alpha", "Lembur"],
-        [str(stats['H']), str(stats['L']), str(stats['S']), str(stats['A']), f"{overtime_hours}j {overtime_mins}m"],
-        ["Izin Telat", "Plg Cepat", "Lupa Absen", "Izin Lain", "Tak Absen CP" if is_wa else ""],
-        [str(stats.get('excuses_telat', 0)), str(stats.get('excuses_pulang', 0)), str(stats.get('excuses_lupa', 0)), str(stats.get('excuses_other', 0)), str(tot_missing_cp) if is_wa else ""]
+    missing_box = ""
+    if is_wa and 'wa_missing' in locals():
+        t_miss = Table([
+            ['P', '1', 'I', '2', 'O'],
+            [str(wa_missing['Pagi']), str(wa_missing['CP1']), str(wa_missing['Istirahat']), str(wa_missing['CP2']), str(wa_missing['Pulang'])]
+        ], colWidths=[0.58*cm]*5)
+        t_miss.setStyle(TableStyle([
+            ('FONTSIZE', (0,0), (-1,-1), 7),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('BACKGROUND', (0,0), (-1,0), corpo_orange),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('GRID', (0,0), (-1,-1), 0.25, colors.lightgrey),
+            ('TOPPADDING', (0,0), (-1,-1), 1),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ]))
+        missing_box = t_miss
+
+    # Stats Top Table
+    stat_top_data = [
+        ["Hadir", "Telat", "Izin/Cuti", "Sakit", "Alpha", "Lembur"],
+        [str(stats['H']), str(stats['L']), str(stats['I']), str(stats['S']), str(stats['A']), f"{overtime_hours}j {overtime_mins}m"]
     ]
-    t_stats = Table(stat_items, colWidths=[2.1*cm, 2*cm, 2*cm, 2*cm, 2.9*cm])
-    t_stats.setStyle(TableStyle([
+    t_stats_top = Table(stat_top_data, colWidths=[1.8*cm, 1.6*cm, 2.0*cm, 1.6*cm, 1.6*cm, 2.4*cm])
+    t_stats_top.setStyle(TableStyle([
         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        # Row 1 (Header 1)
         ('BACKGROUND', (0,0), (-1,0), corpo_blue),
         ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('FONTSIZE', (0,0), (-1,-1), 8),
-        # Row 2 (Values 1)
         ('FONTNAME', (0,1), (-1,1), 'Helvetica-Bold'),
         ('FONTSIZE', (0,1), (-1,1), 11),
         ('TEXTCOLOR', (0,1), (0,1), corpo_green), # Hadir
         ('TEXTCOLOR', (1,1), (1,1), corpo_orange), # Telat
-        ('TEXTCOLOR', (2,1), (2,1), corpo_blue), # Sakit
-        ('TEXTCOLOR', (3,1), (3,1), corpo_red), # Alpha
+        ('TEXTCOLOR', (2,1), (2,1), corpo_blue), # Izin
+        ('TEXTCOLOR', (3,1), (3,1), corpo_blue), # Sakit
+        ('TEXTCOLOR', (4,1), (4,1), corpo_red), # Alpha
         ('TOPPADDING', (0,1), (-1,1), 6),
         ('BOTTOMPADDING', (0,1), (-1,1), 8),
-        # Row 3 (Header 2)
-        ('BACKGROUND', (0,2), (-2,2), corpo_grey),
-        ('TEXTCOLOR', (0,2), (-2,2), colors.black),
-        ('FONTNAME', (0,2), (-2,2), 'Helvetica-Bold'),
-        ('TOPPADDING', (0,2), (-1,2), 4),
-        ('BOTTOMPADDING', (0,2), (-1,2), 4),
-        # Row 4 (Values 2)
-        ('FONTNAME', (0,3), (-2,3), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,3), (-2,3), 10),
-        ('TOPPADDING', (0,3), (-1,3), 6),
-        ('BOTTOMPADDING', (0,3), (-1,3), 8),
-        # Borders
-        ('INNERGRID', (0,0), (-1,1), 0.25, colors.lightgrey),
-        ('INNERGRID', (0,2), (-2,3), 0.25, colors.lightgrey),
-        ('BOX', (0,0), (-1,1), 0.25, colors.grey),
-        ('BOX', (0,2), (-2,3), 0.25, colors.grey),
-        ('SPAN', (4,2), (4,3)),  # Empty space merged below Lembur
+        ('INNERGRID', (0,0), (-1,-1), 0.25, colors.lightgrey),
+        ('BOX', (0,0), (-1,-1), 0.25, colors.grey),
+    ]))
+    
+    # Stats Bottom Table
+    if is_wa:
+        stat_bot_data = [
+            ["Izin Telat", "Plg Cepat", "Lupa Absen", "Izin Lain", "Σ Tidak Absen"],
+            [str(stats.get('excuses_telat', 0)), str(stats.get('excuses_pulang', 0)), str(stats.get('excuses_lupa', 0)), str(stats.get('excuses_other', 0)), missing_box]
+        ]
+        bot_widths = [2.1*cm, 2.1*cm, 2.1*cm, 2*cm, 2.7*cm]
+    else:
+        stat_bot_data = [
+            ["Izin Telat", "Plg Cepat", "Lupa Absen", "Izin Lain"],
+            [str(stats.get('excuses_telat', 0)), str(stats.get('excuses_pulang', 0)), str(stats.get('excuses_lupa', 0)), str(stats.get('excuses_other', 0))]
+        ]
+        bot_widths = [2.75*cm, 2.75*cm, 2.75*cm, 2.75*cm]
+        
+    t_stats_bot = Table(stat_bot_data, colWidths=bot_widths)
+    t_stats_bot_style = [
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('BACKGROUND', (0,0), (-1,0), corpo_grey),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.black),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 8),
+        ('TOPPADDING', (0,0), (-1,0), 4),
+        ('BOTTOMPADDING', (0,0), (-1,0), 4),
+        ('FONTNAME', (0,1), (-1,1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,1), (-1,1), 10),
+        ('TOPPADDING', (0,1), (-1,1), 6),
+        ('BOTTOMPADDING', (0,1), (-1,1), 8),
+        ('INNERGRID', (0,0), (-1,-1), 0.25, colors.lightgrey),
+        ('BOX', (0,0), (-1,-1), 0.25, colors.grey),
+    ]
+    if is_wa:
+        t_stats_bot_style += [
+            ('TOPPADDING', (4,1), (4,1), 0),
+            ('BOTTOMPADDING', (4,1), (4,1), 0),
+            ('LEFTPADDING', (4,1), (4,1), 0),
+            ('RIGHTPADDING', (4,1), (4,1), 0)
+        ]
+    t_stats_bot.setStyle(TableStyle(t_stats_bot_style))
+    
+    t_stats = Table([[t_stats_top], [t_stats_bot]], colWidths=[11*cm])
+    t_stats.setStyle(TableStyle([
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ('TOPPADDING', (0,0), (-1,-1), 0),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
     ]))
     
     # Master Layout Table (Bio | Stats)
@@ -6507,12 +6612,12 @@ def export_batch_personal_pdf(request):
         local_date = timezone.localtime(log.timestamp).date()
         logs_map[log.employee_id][local_date].append(log)
 
-    leave_map = defaultdict(lambda: defaultdict(str))
+    leave_map = defaultdict(dict)
     for l in all_leaves:
         curr = max(l.start_date, start_date)
         end = min(l.end_date, end_date)
         while curr <= end:
-            leave_map[l.employee_id][curr] = l.leave_type
+            leave_map[l.employee_id][curr] = l
             curr += timedelta(days=1)
 
     for idx, emp in enumerate(employees):
@@ -6521,7 +6626,8 @@ def export_batch_personal_pdf(request):
         stats = {
             'H': 0, 'I': 0, 'S': 0, 'A': 0, 'L': 0,
             'LemburMins': 0, 'excuses_telat': 0, 'excuses_pulang': 0,
-            'excuses_lupa': 0, 'excuses_other': 0, 'missing_cps': 0
+            'excuses_lupa': 0, 'excuses_other': 0, 'missing_cps': 0,
+            'wa_missing': {'Pagi': 0, 'CP1': 0, 'Istirahat': 0, 'CP2': 0, 'Pulang': 0}
         }
         if is_wa:
             headers = ['Tgl', 'Hari', 'Pagi', 'CP1', 'Isoma', 'CP2', 'Pulang', 'Akt. Jam', 'Lembur', 'Status']
@@ -6534,10 +6640,11 @@ def export_batch_personal_pdf(request):
 
         for d in range(1, days_in_month + 1):
             day_date = date(year, month, d)
-            day_name = day_date.strftime("%a")
+            _day_map = {0: 'Sen', 1: 'Sel', 2: 'Rab', 3: 'Kam', 4: 'Jum', 5: 'Sab', 6: 'Min'}
+            day_name = _day_map[day_date.weekday()]
             # For Batch PDF WA
             day_logs = [log for log in logs_map[emp.id][day_date]]
-            l_type = leave_map[emp.id].get(day_date)
+            leave_obj = leave_map[emp.id].get(day_date)
             
             # Schedule Check for Overtime/Late Calculation
             daily_sch, _ = get_employee_schedule(emp, day_date)
@@ -6548,11 +6655,15 @@ def export_batch_personal_pdf(request):
             status_color = colors.black
             row_vals = []
             
-            if l_type:
-                status = l_type
-                stats[l_type[0]] += 1
-                if l_type.startswith('C'): stats['I'] += 1
-                row_vals = ["-"] * (len(headers) - 2)
+            if leave_obj:
+                status = leave_obj.get_leave_type_display()
+                if leave_obj.notes:
+                    status += f" - {leave_obj.notes}"
+                if leave_obj.leave_type.startswith('C'): 
+                    stats['I'] += 1
+                else:
+                    stats[leave_obj.leave_type[0]] += 1
+                row_vals = ["-"] * (len(headers) - 3)
                 status_color = corpo_blue
             elif day_logs:
                 status = "HADIR"
@@ -6578,17 +6689,33 @@ def export_batch_personal_pdf(request):
                             elif reason == 'Izin Pulang Cepat': stats['excuses_pulang'] += 1
                             elif reason == 'Lupa Absen': stats['excuses_lupa'] += 1
                             else: stats['excuses_other'] += 1
-                            reason_str = f"{col_name}: {reason}"
+                            
+                            notes = getattr(l_obj, 'notes', '')
+                            if notes:
+                                if reason.lower() in notes.lower():
+                                    display_reason = notes
+                                elif notes.lower() in reason.lower():
+                                    display_reason = reason
+                                else:
+                                    display_reason = f"{reason} - {notes}"
+                            else:
+                                display_reason = reason
+                            reason_str = f"{col_name}: {display_reason}"
+                            
                             if reason_str not in day_excuses: day_excuses.append(reason_str)
                             t_str = "- " + t_str
                         return t_str
                     
                     # Pagi Check
-                    if not l_pagi: stats['missing_cps'] += 1
+                    if not l_pagi:
+                        stats['missing_cps'] += 1
+                        stats['wa_missing']['Pagi'] += 1
                     times.append(fmt_cp(l_pagi, 'Pagi'))
                     
                     for l_chk, k in [(l_cp1, 'CP1'), (l_isti, 'Istirahat'), (l_cp2, 'CP2'), (l_plg, 'Pulang')]:
-                        if not l_chk: stats['missing_cps'] += 1
+                        if not l_chk:
+                            stats['missing_cps'] += 1
+                            stats['wa_missing'][k] += 1
                         times.append(fmt_cp(l_chk, k))
                         
                     aktual_jam_str = "-"
@@ -6656,7 +6783,17 @@ def export_batch_personal_pdf(request):
                     if l_in:
                         if getattr(l_in, 'is_excused', False):
                             reason = getattr(l_in, 'excuse_reason', '')
-                            status = reason if reason else "Dimaklumi"
+                            reason = reason if reason else "Dimaklumi"
+                            notes = getattr(l_in, 'notes', '')
+                            if notes:
+                                if reason.lower() in notes.lower():
+                                    status = notes
+                                elif notes.lower() in reason.lower():
+                                    status = reason
+                                else:
+                                    status = f"{reason} - {notes}"
+                            else:
+                                status = reason
                             status_color = corpo_blue
                             
                             r_lower = str(reason).lower()
@@ -6696,7 +6833,18 @@ def export_batch_personal_pdf(request):
                     status = "ALPHA"; stats['A'] += 1; status_color = corpo_red
                 row_vals = ["-"] * (len(headers) - 3)
                 
-            row = [f"{day_date.strftime('%d')}-{day_date.strftime('%m')}", day_name] + row_vals + [status]
+            status_style = ParagraphStyle(
+                name='StatusStyle',
+                parent=styles['Normal'],
+                fontName='Helvetica-Bold' if status_color in [corpo_red, corpo_orange] else 'Helvetica',
+                fontSize=6.5 if is_wa else 8,
+                leading=7.5 if is_wa else 9,
+                textColor=status_color,
+                alignment=TA_CENTER
+            )
+            status_p = Paragraph(status, status_style)
+            
+            row = [f"{day_date.strftime('%d')}-{day_date.strftime('%m')}", day_name] + row_vals + [status_p]
             rows_buffer.append((row, status_color))
             
         # Draw Output Elements for this employee
@@ -6716,47 +6864,99 @@ def export_batch_personal_pdf(request):
         
         overtime_hours, overtime_mins = divmod(stats.get('LemburMins', 0), 60)
         
-        stat_items = [
-            ["Hadir", "Telat", "Sakit", "Alpha", "Lembur"],
-            [str(stats['H']), str(stats['L']), str(stats['S']), str(stats['A']), f"{overtime_hours}j {overtime_mins}m"],
-            ["Izin Telat", "Plg Cepat", "Lupa Absen", "Izin Lain", "Tak Absen CP" if is_wa else ""],
-            [str(stats.get('excuses_telat', 0)), str(stats.get('excuses_pulang', 0)), str(stats.get('excuses_lupa', 0)), str(stats.get('excuses_other', 0)), str(stats.get('missing_cps', 0)) if is_wa else ""]
+        missing_box = ""
+        if is_wa and 'wa_missing' in stats:
+            wm = stats['wa_missing']
+            t_miss = Table([
+                ['P', '1', 'I', '2', 'O'],
+                [str(wm['Pagi']), str(wm['CP1']), str(wm['Istirahat']), str(wm['CP2']), str(wm['Pulang'])]
+            ], colWidths=[0.58*cm]*5)
+            t_miss.setStyle(TableStyle([
+                ('FONTSIZE', (0,0), (-1,-1), 7),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('BACKGROUND', (0,0), (-1,0), corpo_orange),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                ('GRID', (0,0), (-1,-1), 0.25, colors.lightgrey),
+                ('TOPPADDING', (0,0), (-1,-1), 1),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+                ('LEFTPADDING', (0,0), (-1,-1), 0),
+                ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ]))
+            missing_box = t_miss
+
+        # Stats Top Table
+        stat_top_data = [
+            ["Hadir", "Telat", "Izin/Cuti", "Sakit", "Alpha", "Lembur"],
+            [str(stats['H']), str(stats['L']), str(stats['I']), str(stats['S']), str(stats['A']), f"{overtime_hours}j {overtime_mins}m"]
         ]
-        t_stats = Table(stat_items, colWidths=[2.1*cm, 2*cm, 2*cm, 2*cm, 2.9*cm])
-        t_stats.setStyle(TableStyle([
+        t_stats_top = Table(stat_top_data, colWidths=[1.8*cm, 1.6*cm, 2.0*cm, 1.6*cm, 1.6*cm, 2.4*cm])
+        t_stats_top.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            # Row 1 (Header 1)
             ('BACKGROUND', (0,0), (-1,0), corpo_blue),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('FONTSIZE', (0,0), (-1,-1), 8),
-            # Row 2 (Values 1)
             ('FONTNAME', (0,1), (-1,1), 'Helvetica-Bold'),
             ('FONTSIZE', (0,1), (-1,1), 11),
             ('TEXTCOLOR', (0,1), (0,1), corpo_green), # Hadir
             ('TEXTCOLOR', (1,1), (1,1), corpo_orange), # Telat
-            ('TEXTCOLOR', (2,1), (2,1), corpo_blue), # Sakit
-            ('TEXTCOLOR', (3,1), (3,1), corpo_red), # Alpha
+            ('TEXTCOLOR', (2,1), (2,1), corpo_blue), # Izin
+            ('TEXTCOLOR', (3,1), (3,1), corpo_blue), # Sakit
+            ('TEXTCOLOR', (4,1), (4,1), corpo_red), # Alpha
             ('TOPPADDING', (0,1), (-1,1), 6),
             ('BOTTOMPADDING', (0,1), (-1,1), 8),
-            # Row 3 (Header 2)
-            ('BACKGROUND', (0,2), (-2,2), corpo_grey),
-            ('TEXTCOLOR', (0,2), (-2,2), colors.black),
-            ('FONTNAME', (0,2), (-2,2), 'Helvetica-Bold'),
-            ('TOPPADDING', (0,2), (-1,2), 4),
-            ('BOTTOMPADDING', (0,2), (-1,2), 4),
-            # Row 4 (Values 2)
-            ('FONTNAME', (0,3), (-2,3), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,3), (-2,3), 10),
-            ('TOPPADDING', (0,3), (-1,3), 6),
-            ('BOTTOMPADDING', (0,3), (-1,3), 8),
-            # Borders
-            ('INNERGRID', (0,0), (-1,1), 0.25, colors.lightgrey),
-            ('INNERGRID', (0,2), (-2,3), 0.25, colors.lightgrey),
-            ('BOX', (0,0), (-1,1), 0.25, colors.grey),
-            ('BOX', (0,2), (-2,3), 0.25, colors.grey),
-            ('SPAN', (4,2), (4,3)),  # Empty space merged below Lembur
+            ('INNERGRID', (0,0), (-1,-1), 0.25, colors.lightgrey),
+            ('BOX', (0,0), (-1,-1), 0.25, colors.grey),
+        ]))
+        
+        # Stats Bottom Table
+        if is_wa:
+            stat_bot_data = [
+                ["Izin Telat", "Plg Cepat", "Lupa Absen", "Izin Lain", "Σ Tidak Absen"],
+                [str(stats.get('excuses_telat', 0)), str(stats.get('excuses_pulang', 0)), str(stats.get('excuses_lupa', 0)), str(stats.get('excuses_other', 0)), missing_box]
+            ]
+            bot_widths = [2.1*cm, 2.1*cm, 2.1*cm, 2*cm, 2.7*cm]
+        else:
+            stat_bot_data = [
+                ["Izin Telat", "Plg Cepat", "Lupa Absen", "Izin Lain"],
+                [str(stats.get('excuses_telat', 0)), str(stats.get('excuses_pulang', 0)), str(stats.get('excuses_lupa', 0)), str(stats.get('excuses_other', 0))]
+            ]
+            bot_widths = [2.75*cm, 2.75*cm, 2.75*cm, 2.75*cm]
+            
+        t_stats_bot = Table(stat_bot_data, colWidths=bot_widths)
+        t_stats_bot_style = [
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('BACKGROUND', (0,0), (-1,0), corpo_grey),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.black),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,0), 8),
+            ('TOPPADDING', (0,0), (-1,0), 4),
+            ('BOTTOMPADDING', (0,0), (-1,0), 4),
+            ('FONTNAME', (0,1), (-1,1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,1), (-1,1), 10),
+            ('TOPPADDING', (0,1), (-1,1), 6),
+            ('BOTTOMPADDING', (0,1), (-1,1), 8),
+            ('INNERGRID', (0,0), (-1,-1), 0.25, colors.lightgrey),
+            ('BOX', (0,0), (-1,-1), 0.25, colors.grey),
+        ]
+        if is_wa:
+            t_stats_bot_style += [
+                ('TOPPADDING', (4,1), (4,1), 0),
+                ('BOTTOMPADDING', (4,1), (4,1), 0),
+                ('LEFTPADDING', (4,1), (4,1), 0),
+                ('RIGHTPADDING', (4,1), (4,1), 0)
+            ]
+        t_stats_bot.setStyle(TableStyle(t_stats_bot_style))
+        
+        t_stats = Table([[t_stats_top], [t_stats_bot]], colWidths=[11*cm])
+        t_stats.setStyle(TableStyle([
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ('TOPPADDING', (0,0), (-1,-1), 0),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 0),
         ]))
         
         t_master = Table([[t_bio, t_stats]], colWidths=[7.5*cm, 11*cm])

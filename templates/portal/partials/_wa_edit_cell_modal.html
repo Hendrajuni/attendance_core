@@ -21,6 +21,11 @@
                 Log WA
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="wa-leave-tab" data-bs-toggle="tab" data-bs-target="#wa-leave-pane" type="button" role="tab">
+                Izin/Cuti
+            </button>
+        </li>
         {% if is_shift_worker %}
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="wa-roster-tab" data-bs-toggle="tab" data-bs-target="#wa-roster-pane" type="button" role="tab">
@@ -66,8 +71,7 @@
                 <!-- SEMUA ROLE: Maklumi Checkpoint & Full-Day Izin -->
                 <div class="mb-3">
                     <label class="form-label small fw-bold text-muted">Maklumi Titik Absen ini (Partial Excuse)</label>
-                    <div class="input-group input-group-sm">
-                        <select name="excuse_reason" class="form-select">
+                        <select name="excuse_reason" class="form-select border-bottom-0" style="border-bottom-left-radius: 0; border-bottom-right-radius: 0;">
                             <option value="">Pilih Alasan...</option>
                             <option value="Lupa Absen">Lupa Absen</option>
                             <option value="Izin Telat">Izin Telat</option>
@@ -75,22 +79,13 @@
                             <option value="HP Drop">HP Drop / Sinyal Hilang</option>
                             <option value="Lainnya">Lainnya...</option>
                         </select>
-                        <button type="submit" name="action" value="partial_excuse" class="btn btn-primary">
+                    </div>
+                    <div class="input-group input-group-sm">
+                        <input type="text" name="notes" class="form-control" placeholder="Ket opsional (misal: Lupa absen pulang...)" style="border-top-left-radius: 0;">
+                        <button type="submit" name="action" value="partial_excuse" class="btn btn-primary" style="border-top-right-radius: 0;">
                             <i class="fas fa-check"></i> Maklumi
                         </button>
                     </div>
-                </div>
-                
-                <hr>
-                
-                <div class="mb-2 text-center small text-muted fw-bold">Atau Set Seluruh Hari (Full-Day)</div>
-                <div class="d-flex gap-2 justify-content-center">
-                    <button type="submit" name="action" value="izin" class="btn btn-warning btn-sm px-4">
-                        <i class="fas fa-calendar-times"></i> Izin Full
-                    </button>
-                    <button type="submit" name="action" value="sakit" class="btn btn-danger btn-sm px-4">
-                        <i class="fas fa-user-injured"></i> Sakit Full
-                    </button>
                 </div>
                 
                 {% if existing_time %}
@@ -184,5 +179,53 @@
             </form>
         </div>
         {% endif %}
+        
+        <!-- TAB 3: IZIN/CUTI -->
+        <div class="tab-pane fade" id="wa-leave-pane" role="tabpanel">
+            <form hx-post="{% url 'portal:employee_leave_add' %}"
+                  hx-encoding="multipart/form-data"
+                  enctype="multipart/form-data"
+                  hx-swap="none"
+                  hx-on::after-request="location.reload();">
+                {% csrf_token %}
+                <input type="hidden" name="employee_id" value="{{ employee.id }}">
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small fw-bold">Dari Tanggal</label>
+                        <input type="date" name="start_date" class="form-control form-control-sm" required value="{{ date_str }}">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-bold">Sampai Tanggal</label>
+                        <input type="date" name="end_date" class="form-control form-control-sm" required value="{{ date_str }}">
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-bold">Tipe</label>
+                    <select name="leave_type" class="form-select form-select-sm" required>
+                        <option value="IZIN">Izin</option>
+                        <option value="SAKIT">Sakit</option>
+                        <option value="CUTI">Cuti Tahunan</option>
+                        <option value="CUTI_KHUSUS">Cuti Khusus</option>
+                    </select>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-bold">Bukti (Foto)</label>
+                    <input type="file" name="attachment" class="form-control form-control-sm" accept="image/*">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Keterangan</label>
+                    <input type="text" name="notes" class="form-control form-control-sm" placeholder="Opsional...">
+                </div>
+                
+                <div class="alert alert-warning py-2 small">
+                    <i class="fas fa-exclamation-triangle me-1"></i> Setelah disimpan, halaman akan dimuat ulang.
+                </div>
+                
+                <div class="d-flex justify-content-end gap-2 pt-2 border-top">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save me-1"></i> Simpan Izin/Cuti</button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>

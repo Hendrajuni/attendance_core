@@ -461,11 +461,14 @@
                                     <!-- Status -->
                                     <td class="text-center py-1">
                                         {% if 'SKT' in day.status|upper or 'SAKIT' in day.status|upper or 'SICK' in day.status|upper %}
-                                             <span class="badge bg-warning text-dark">Sakit</span>
+                                             <span class="badge bg-warning text-dark" {% if day.excuse_reason %}title="{{ day.excuse_reason }}"{% endif %}>Sakit</span>
+                                             {% if day.excuse_reason %}<small class="text-muted d-block" style="font-size: 0.65rem; line-height: 1.1;">{{ day.excuse_reason }}</small>{% endif %}
                                         {% elif 'IZIN' in day.status|upper or 'PERMIT' in day.status|upper %}
-                                             <span class="badge bg-info text-dark">Izin</span>
+                                             <span class="badge bg-info text-dark" {% if day.excuse_reason %}title="{{ day.excuse_reason }}"{% endif %}>Izin</span>
+                                             {% if day.excuse_reason %}<small class="text-muted d-block" style="font-size: 0.65rem; line-height: 1.1;">{{ day.excuse_reason }}</small>{% endif %}
                                         {% elif 'CUTI' in day.status|upper %}
-                                             <span class="badge bg-primary">Cuti</span>
+                                             <span class="badge bg-primary" {% if day.excuse_reason %}title="{{ day.excuse_reason }}"{% endif %}>Cuti</span>
+                                             {% if day.excuse_reason %}<small class="text-muted d-block" style="font-size: 0.65rem; line-height: 1.1;">{{ day.excuse_reason }}</small>{% endif %}
                                         {% elif day.is_holiday %}
                                             <span class="badge bg-secondary">Libur</span>
                                         {% elif day.is_weekend %}
@@ -614,14 +617,14 @@
                                             data-bs-toggle="modal"
                                             data-bs-target="#fpEditModal"
                                             {% endif %}>
-                                            <div class="status-cell {% if status.status == 'H' %}cell-hadir{% elif status.status == 'A' %}cell-alpha{% elif status.status == 'S' or status.status == 'I' or status.status == 'CUTI' %}cell-izin{% elif status.status == 'L' %}cell-libur{% else %}cell-empty{% endif %}">
+                                            <div class="status-cell {% if status.status == 'H' %}cell-hadir{% elif status.status == 'A' %}cell-alpha{% elif status.status == 'S' or status.status == 'I' or status.status == 'C' %}cell-izin{% elif status.status == 'L' %}cell-libur{% else %}cell-empty{% endif %}">
                                                 {% if status.status == 'H' %}
                                                     <div style="font-size: 0.65rem; line-height: 1.1; font-weight: normal; {% if status.late %}color: #dc3545;{% endif %}">{{ status.in }}</div>
                                                     <div style="font-size: 0.65rem; line-height: 1.1; color: {% if status.overtime > 0 %}#198754{% else %}#6c757d{% endif %}; font-weight: normal;">{{ status.out }}</div>
                                                 {% elif status.status == 'A' %}A
                                                 {% elif status.status == 'S' %}S
                                                 {% elif status.status == 'I' %}I
-                                                {% elif status.status == 'CUTI' %}C
+                                                {% elif status.status == 'C' %}C
                                                 {% elif status.status == 'L' %}-
                                                 {% else %}+{% endif %}
                                             </div>
