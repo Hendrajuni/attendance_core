@@ -173,29 +173,45 @@
                                     <span class="visually-hidden">Toggle Dropdown</span>
                                 </button>
                                 <ul class="dropdown-menu">
+                                    <li><h6 class="dropdown-header text-primary fw-bold border-bottom pb-2 mb-2"><i class="fas fa-fingerprint me-2"></i>Laporan Fingerprint</h6></li>
                                     <li>
-                                        <a class="dropdown-item" href="{% url 'portal:export_matrix_excel' month.report.id %}">
-                                            <i class="fas fa-file-excel text-success me-2"></i> Export Excel
-                                            {% if month.report.status == 'DRAFT' %}<span class="badge bg-warning text-dark ms-1">Draft</span>{% endif %}
-                                        </a>
-                                    </li>
-                                    <li><hr class="dropdown-divider"></li>
-                                    <li>
-                                        <a class="dropdown-item" href="{% url 'portal:export_report_pdf' month.report.id %}?type=main" target="_blank">
-                                            <i class="fas fa-file-pdf text-danger me-2"></i> Laporan Utama (Legal)
+                                        <a class="dropdown-item py-2" href="{% url 'portal:export_report_pdf' month.report.id %}?type=main" target="_blank">
+                                            <i class="fas fa-table text-primary me-2"></i> Rekap Matrix Grid
                                         </a>
                                     </li>
                                     <li>
-                                        {% if month.has_wa_data %}
-                                            <a class="dropdown-item" href="{% url 'portal:export_report_pdf' month.report.id %}?type=wa" target="_blank">
-                                                <i class="fas fa-list-alt text-info me-2"></i> Lampiran WA (Detail)
+                                        <a class="dropdown-item py-2" href="{% url 'portal:export_batch_personal_pdf' %}?location_id={{ selected_location.id }}&month={{ month.month_num }}&year={{ year }}&active_tab=fingerprint" target="_blank">
+                                            <i class="fas fa-users text-primary me-2"></i> Personal Kolektif (Batch)
+                                        </a>
+                                    </li>
+                                    
+                                    <li><hr class="dropdown-divider my-2"></li>
+                                    
+                                    <li><h6 class="dropdown-header text-success fw-bold border-bottom pb-2 mb-2"><i class="fab fa-whatsapp me-2"></i>Laporan Telegram/WA</h6></li>
+                                    {% if month.has_wa_data %}
+                                        <li>
+                                            <a class="dropdown-item py-2" href="{% url 'portal:export_matrix_excel' month.report.id %}">
+                                                <i class="fas fa-file-excel text-success me-2"></i> Export Excel
+                                                {% if month.report.status == 'DRAFT' %}<span class="badge bg-warning text-dark ms-1">Draft</span>{% endif %}
                                             </a>
-                                        {% else %}
-                                            <span class="dropdown-item disabled text-muted" title="Tidak ada data absen WA">
-                                                <i class="fas fa-list-alt me-2"></i> Lampiran WA (Kosong)
+                                        </li>
+                                        <li>
+                                            <a class="dropdown-item py-2" href="{% url 'portal:export_batch_personal_pdf' %}?location_id={{ selected_location.id }}&month={{ month.month_num }}&year={{ year }}&active_tab=whatsapp" target="_blank">
+                                                <i class="fas fa-users text-success me-2"></i> Personal Kolektif (Batch)
+                                            </a>
+                                        </li>
+                                    {% else %}
+                                        <li>
+                                            <span class="dropdown-item disabled text-muted py-2" title="Tidak ada data absen WA">
+                                                <i class="fas fa-file-excel me-2"></i> Export Excel (Kosong)
                                             </span>
-                                        {% endif %}
-                                    </li>
+                                        </li>
+                                        <li>
+                                            <span class="dropdown-item disabled text-muted py-2" title="Tidak ada data absen WA">
+                                                <i class="fas fa-users me-2"></i> Personal Kolektif (Kosong)
+                                            </span>
+                                        </li>
+                                    {% endif %}
                                 </ul>
                             </div>
                             
@@ -351,29 +367,45 @@
                                             <span class="visually-hidden">Toggle</span>
                                         </button>
                                         <ul class="dropdown-menu dropdown-menu-end">
+                                            <li><h6 class="dropdown-header text-primary fw-bold border-bottom pb-2 mb-2"><i class="fas fa-fingerprint me-2"></i>Laporan Fingerprint</h6></li>
                                             <li>
-                                                <a class="dropdown-item" href="{% url 'portal:export_matrix_excel' month.report.id %}">
-                                                    <i class="fas fa-file-excel text-success me-2"></i> Export Excel
-                                                    {% if month.report.status == 'DRAFT' %}<span class="badge bg-warning text-dark ms-1">Draft</span>{% endif %}
-                                                </a>
-                                            </li>
-                                            <li><hr class="dropdown-divider"></li>
-                                            <li>
-                                                <a class="dropdown-item" href="{% url 'portal:export_report_pdf' month.report.id %}?type=main" target="_blank">
-                                                    <i class="fas fa-file-pdf text-danger me-2"></i> Laporan Utama (Legal)
+                                                <a class="dropdown-item py-2" href="{% url 'portal:export_report_pdf' month.report.id %}?type=main" target="_blank">
+                                                    <i class="fas fa-table text-primary me-2"></i> Rekap Matrix Grid
                                                 </a>
                                             </li>
                                             <li>
-                                                {% if month.has_wa_data %}
-                                                    <a class="dropdown-item" href="{% url 'portal:export_report_pdf' month.report.id %}?type=wa" target="_blank">
-                                                        <i class="fas fa-list-alt text-info me-2"></i> Lampiran WA (Detail)
+                                                <a class="dropdown-item py-2" href="{% url 'portal:export_batch_personal_pdf' %}?location_id={{ selected_location.id }}&month={{ month.month_num }}&year={{ year }}&active_tab=fingerprint" target="_blank">
+                                                    <i class="fas fa-users text-primary me-2"></i> Personal Kolektif (Batch)
+                                                </a>
+                                            </li>
+                                            
+                                            <li><hr class="dropdown-divider my-2"></li>
+                                            
+                                            <li><h6 class="dropdown-header text-success fw-bold border-bottom pb-2 mb-2"><i class="fab fa-whatsapp me-2"></i>Laporan Telegram/WA</h6></li>
+                                            {% if month.has_wa_data %}
+                                                <li>
+                                                    <a class="dropdown-item py-2" href="{% url 'portal:export_matrix_excel' month.report.id %}">
+                                                        <i class="fas fa-file-excel text-success me-2"></i> Export Excel
+                                                        {% if month.report.status == 'DRAFT' %}<span class="badge bg-warning text-dark ms-1">Draft</span>{% endif %}
                                                     </a>
-                                                {% else %}
-                                                    <span class="dropdown-item disabled text-muted" title="Tidak ada data absen WA">
-                                                        <i class="fas fa-list-alt me-2"></i> Lampiran WA (Kosong)
+                                                </li>
+                                                <li>
+                                                    <a class="dropdown-item py-2" href="{% url 'portal:export_batch_personal_pdf' %}?location_id={{ selected_location.id }}&month={{ month.month_num }}&year={{ year }}&active_tab=whatsapp" target="_blank">
+                                                        <i class="fas fa-users text-success me-2"></i> Personal Kolektif (Batch)
+                                                    </a>
+                                                </li>
+                                            {% else %}
+                                                <li>
+                                                    <span class="dropdown-item disabled text-muted py-2" title="Tidak ada data absen WA">
+                                                        <i class="fas fa-file-excel me-2"></i> Export Excel (Kosong)
                                                     </span>
-                                                {% endif %}
-                                            </li>
+                                                </li>
+                                                <li>
+                                                    <span class="dropdown-item disabled text-muted py-2" title="Tidak ada data absen WA">
+                                                        <i class="fas fa-users me-2"></i> Personal Kolektif (Kosong)
+                                                    </span>
+                                                </li>
+                                            {% endif %}
                                         </ul>
                                     </div>
                                     
