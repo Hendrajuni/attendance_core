@@ -793,6 +793,7 @@
                                     <th>CP2</th>
                                     <th>Pulang</th>
                                     <th style="width: 90px;">Aktual Jam</th>
+                                    <th style="width: 60px;">Telat</th>
                                     <th style="width: 90px;">Lembur</th>
                                     <th style="min-width: 180px;">Status</th>
                                 </tr>
@@ -810,7 +811,16 @@
                                     {% endwith %}
                                 {% endfor %}
                                 <td class="text-center fw-medium text-success text-nowrap">{{ day.aktual_jam|default:"-" }}</td>
-                                <td class="text-center fw-medium text-primary text-nowrap">{{ day.lembur_jam|default:"-" }}</td>
+                                <td class="text-center py-1">
+                                    {% if day.late_minutes > 0 %}
+                                        <span class="badge bg-danger">{{ day.late_minutes }}m</span>
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center fw-medium text-primary text-nowrap">
+                                    {% if day.overtime_minutes > 0 %}<span class="badge bg-success">+{{ day.overtime_minutes }}m</span>{% else %}{{ day.lembur_jam|default:"-" }}{% endif %}
+                                </td>
                                 <td class="text-center text-nowrap">
                                     {% if 'Hadir' in day.status or day.checkpoints.MASUK %}
                                         <i class="fas fa-check-circle text-success"></i> 

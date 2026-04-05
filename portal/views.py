@@ -6047,8 +6047,8 @@ def export_employee_pdf(request, employee_id):
     is_wa = (employee.attendance_method == 'WHATSAPP')
     
     if is_wa:
-        headers = ['Tgl', 'Hari', 'Pagi', 'CP1', 'Isoma', 'CP2', 'Pulang', 'Akt. Jam', 'Lembur', 'Status']
-        col_widths = [1.1*cm, 0.9*cm, 1.2*cm, 1.2*cm, 1.2*cm, 1.2*cm, 1.2*cm, 1.4*cm, 1.4*cm, 7.7*cm] 
+        headers = ['Tgl', 'Hari', 'Pagi', 'CP1', 'Isoma', 'CP2', 'Pulang', 'Akt. Jam', 'Telat', 'Lembur', 'Status']
+        col_widths = [1.0*cm, 0.9*cm, 1.1*cm, 1.1*cm, 1.2*cm, 1.1*cm, 1.2*cm, 1.5*cm, 1.1*cm, 1.3*cm, 7.0*cm] 
     else:
         headers = ['Tanggal', 'Hari', 'Masuk', 'Pulang', 'Aktual Jam', 'Telat', 'Lembur', 'Status']
         col_widths = [2.2*cm, 2.0*cm, 2.2*cm, 2.2*cm, 2.5*cm, 1.8*cm, 2.0*cm, 4*cm]
@@ -6147,6 +6147,7 @@ def export_employee_pdf(request, employee_id):
                 
                 aktual_jam_str = "-"
                 lembur_str = "-"
+                telat_str = "-"
                 
                 # Metrics logic for WA
                 if l_pagi:
@@ -6155,7 +6156,8 @@ def export_employee_pdf(request, employee_id):
                         # Late Check
                         diff_m = int((datetime.combine(day_date, check_in_time) - datetime.combine(day_date, sch_in)).total_seconds() / 60)
                         if diff_m > 0:
-                            status += f" (TRL +{diff_m}m)"
+                            status += f" (TRL)"
+                            telat_str = f"{diff_m}m"
                             stats['L'] += 1
                             status_color = corpo_orange
                 
@@ -6178,7 +6180,7 @@ def export_employee_pdf(request, employee_id):
                 if day_excuses:
                     status += f" ({', '.join(day_excuses)})"
                     
-                row_vals = times + [aktual_jam_str, lembur_str]
+                row_vals = times + [aktual_jam_str, telat_str, lembur_str]
 
             else:
                 # FINGERPRINT LOGIC (With Dynamic Schedule Fix & Manual Overrides)
