@@ -2220,6 +2220,7 @@ def recap_matrix_view(request):
                     dummy_date = date(2000, 1, 1)
                     
                     # Dynamic Schedule & Late Tolerance
+                    from attendance.utils import get_employee_schedule
                     daily_sch, shift_pattern = get_employee_schedule(personal_employee, d)
                     
                     # Default values
