@@ -1,7 +1,7 @@
 import os
 import django
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'petaling_hr.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'attendance_core.settings')
 django.setup()
 
 from attendance.models import AttendanceLog
