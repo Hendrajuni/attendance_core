@@ -189,23 +189,14 @@
                                     
                                     <li><h6 class="dropdown-header text-success fw-bold border-bottom pb-2 mb-2"><i class="fab fa-whatsapp me-2"></i>Laporan Telegram/WA</h6></li>
                                     {% if month.has_wa_data %}
-                                        <li>
-                                            <a class="dropdown-item py-2" href="{% url 'portal:export_matrix_excel' month.report.id %}">
-                                                <i class="fas fa-file-excel text-success me-2"></i> Export Excel
-                                                {% if month.report.status == 'DRAFT' %}<span class="badge bg-warning text-dark ms-1">Draft</span>{% endif %}
-                                            </a>
-                                        </li>
+
                                         <li>
                                             <a class="dropdown-item py-2" href="{% url 'portal:export_batch_personal_pdf' %}?location_id={{ selected_location.id }}&month={{ month.month_num }}&year={{ year }}&active_tab=whatsapp" target="_blank">
                                                 <i class="fas fa-users text-success me-2"></i> Personal Kolektif (Batch)
                                             </a>
                                         </li>
                                     {% else %}
-                                        <li>
-                                            <span class="dropdown-item disabled text-muted py-2" title="Tidak ada data absen WA">
-                                                <i class="fas fa-file-excel me-2"></i> Export Excel (Kosong)
-                                            </span>
-                                        </li>
+
                                         <li>
                                             <span class="dropdown-item disabled text-muted py-2" title="Tidak ada data absen WA">
                                                 <i class="fas fa-users me-2"></i> Personal Kolektif (Kosong)
@@ -383,23 +374,14 @@
                                             
                                             <li><h6 class="dropdown-header text-success fw-bold border-bottom pb-2 mb-2"><i class="fab fa-whatsapp me-2"></i>Laporan Telegram/WA</h6></li>
                                             {% if month.has_wa_data %}
-                                                <li>
-                                                    <a class="dropdown-item py-2" href="{% url 'portal:export_matrix_excel' month.report.id %}">
-                                                        <i class="fas fa-file-excel text-success me-2"></i> Export Excel
-                                                        {% if month.report.status == 'DRAFT' %}<span class="badge bg-warning text-dark ms-1">Draft</span>{% endif %}
-                                                    </a>
-                                                </li>
+
                                                 <li>
                                                     <a class="dropdown-item py-2" href="{% url 'portal:export_batch_personal_pdf' %}?location_id={{ selected_location.id }}&month={{ month.month_num }}&year={{ year }}&active_tab=whatsapp" target="_blank">
                                                         <i class="fas fa-users text-success me-2"></i> Personal Kolektif (Batch)
                                                     </a>
                                                 </li>
                                             {% else %}
-                                                <li>
-                                                    <span class="dropdown-item disabled text-muted py-2" title="Tidak ada data absen WA">
-                                                        <i class="fas fa-file-excel me-2"></i> Export Excel (Kosong)
-                                                    </span>
-                                                </li>
+
                                                 <li>
                                                     <span class="dropdown-item disabled text-muted py-2" title="Tidak ada data absen WA">
                                                         <i class="fas fa-users me-2"></i> Personal Kolektif (Kosong)
