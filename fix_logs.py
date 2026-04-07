@@ -18,9 +18,9 @@ for log in logs:
     old_cat = log.log_category
     new_cat = determine_category(
         employee=log.employee,
-        current_time=timezone.localtime(log.timestamp),
+        log_datetime=log.timestamp,
         source_type=log.source_type
-    )
+    )[0]
     if old_cat != new_cat:
         log.log_category = new_cat
         log.save(update_fields=['log_category'])
