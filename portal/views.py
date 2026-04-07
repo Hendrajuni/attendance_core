@@ -3182,17 +3182,29 @@ def recap_matrix_view(request):
                     category_to_fill = None
                     
                     if has_roster:
-                        diff_in = abs(get_diff_mins_pv(t_val, dt_sch_in))
-                        diff_out = abs(get_diff_mins_pv(t_val, dt_sch_out))
-                        
-                        if diff_in < diff_out and diff_in < 240:
-                            category_to_fill = 'MASUK'
-                        elif diff_out < diff_in and diff_out < 240:
-                            category_to_fill = 'PULANG'
+                        explicit_categories = ['CHECKPOINT_1', 'CHECKPOINT_2', 'ISTIRAHAT']
+                        if log.log_category in explicit_categories:
+                            category_to_fill = log.log_category
                         else:
-                            # Fallback
-                            if log.log_category in WA_CATEGORIES:
-                                category_to_fill = log.log_category
+                            from attendance.utils import is_within_range
+                            is_cp1 = hasattr(daily_shift, 'enable_checkin_1') and daily_shift.enable_checkin_1 and is_within_range(t_val, daily_shift.checkin_1_start, daily_shift.checkin_1_end)
+                            is_cp2 = hasattr(daily_shift, 'enable_checkin_2') and daily_shift.enable_checkin_2 and is_within_range(t_val, daily_shift.checkin_2_start, daily_shift.checkin_2_end)
+                            
+                            if is_cp1 and not day_data.get('CHECKPOINT_1'):
+                                category_to_fill = 'CHECKPOINT_1'
+                            elif is_cp2 and not day_data.get('CHECKPOINT_2'):
+                                category_to_fill = 'CHECKPOINT_2'
+                            else:
+                                diff_in = abs(get_diff_mins_pv(t_val, dt_sch_in))
+                                diff_out = abs(get_diff_mins_pv(t_val, dt_sch_out))
+                                
+                                if diff_in < diff_out and diff_in < 240:
+                                    category_to_fill = 'MASUK'
+                                elif diff_out < diff_in and diff_out < 240:
+                                    category_to_fill = 'PULANG'
+                                else:
+                                    if log.log_category in WA_CATEGORIES:
+                                        category_to_fill = log.log_category
                     else:
                         # Standard
                         if log.log_category in WA_CATEGORIES:
@@ -3370,7 +3382,7 @@ def recap_matrix_view(request):
                 # Daily Overtime string
                 overtime_str = '-'
                 try:
-                    if 'overtime' in locals() and dt_out and check_out_time > SCHEDULE_OUT:
+                    if dt_out and check_out_time > SCHEDULE_OUT:
                         # Re-calculate just for string printing
                         diff = (dt_out - timezone.datetime.combine(dummy_date, SCHEDULE_OUT)).total_seconds() / 60
                         daily_ot = int(diff)
