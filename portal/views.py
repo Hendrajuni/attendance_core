@@ -3141,14 +3141,9 @@ def recap_matrix_view(request):
 
             # Build personal logs list
             for d in wa_date_range:
-                # Dynamic Schedule Lookup
-                daily_shift = wa_roster_map.get((wa_personal_employee.id, d)) if 'wa_roster_map' in locals() else None
-                
-                # If personal mode, we might need to fetch roster map if it wasn't built (e.g. direct access)
-                if not 'wa_roster_map' in locals():
-                     from attendance.models import DailyShiftAssignment
-                     daily_shift_obj = DailyShiftAssignment.objects.filter(employee=wa_personal_employee, date=d).first()
-                     daily_shift = daily_shift_obj.shift if daily_shift_obj else None
+                # Dynamic Schedule Lookup (Unified logic to inherit ShiftPattern)
+                from attendance.utils import get_employee_schedule
+                daily_shift, shift_pattern = get_employee_schedule(wa_personal_employee, d)
 
                 SCHEDULE_IN = daily_shift.clock_in if daily_shift else DEFAULT_SCHEDULE_IN
                 SCHEDULE_OUT = daily_shift.clock_out if daily_shift else DEFAULT_SCHEDULE_OUT
