@@ -772,13 +772,13 @@
                                 <div class="d-flex justify-content-center gap-4 align-items-center px-3 py-2 text-light opacity-75">
                                     <span class="d-flex align-items-center">
                                         <i class="fas fa-exclamation-triangle text-warning me-2"></i>
-                                        Tidak Absen (CP): <strong class="text-white ms-1">{{ wa_summary_stats.total_missing }}</strong>
-                                        <div class="d-flex gap-1 ms-3" style="font-size: 0.7rem; opacity: 0.9;">
-                                            <span class="badge bg-dark bg-opacity-50 border border-warning text-warning" title="Pagi">P: {{ wa_summary_stats.missing_pagi }}</span>
-                                            <span class="badge bg-dark bg-opacity-50 border border-warning text-warning" title="CP1">1: {{ wa_summary_stats.missing_cp1 }}</span>
-                                            <span class="badge bg-dark bg-opacity-50 border border-warning text-warning" title="Istirahat">I: {{ wa_summary_stats.missing_istirahat }}</span>
-                                            <span class="badge bg-dark bg-opacity-50 border border-warning text-warning" title="CP2">2: {{ wa_summary_stats.missing_cp2 }}</span>
-                                            <span class="badge bg-dark bg-opacity-50 border border-warning text-warning" title="Pulang">O: {{ wa_summary_stats.missing_pulang }}</span>
+                                        <span class="text-white opacity-75">Tidak Absen:</span>
+                                        <div class="d-flex gap-2 ms-3" style="font-size: 0.8rem; font-weight: 700;">
+                                            <span class="badge bg-warning text-dark px-2 py-1" title="Pagi">P: {{ wa_summary_stats.missing_pagi }}</span>
+                                            <span class="badge bg-warning text-dark px-2 py-1" title="CP1">1: {{ wa_summary_stats.missing_cp1 }}</span>
+                                            <span class="badge bg-warning text-dark px-2 py-1" title="Istirahat">I: {{ wa_summary_stats.missing_istirahat }}</span>
+                                            <span class="badge bg-warning text-dark px-2 py-1" title="CP2">2: {{ wa_summary_stats.missing_cp2 }}</span>
+                                            <span class="badge bg-warning text-dark px-2 py-1" title="Pulang">O: {{ wa_summary_stats.missing_pulang }}</span>
                                         </div>
                                     </span>
                                     <span class="border-start border-secondary ps-3"><i class="fas fa-user-clock me-1"></i>Izin Telat: <strong>{{ wa_summary_stats.excuses_telat }}</strong></span>
