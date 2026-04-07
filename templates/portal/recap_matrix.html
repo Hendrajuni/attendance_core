@@ -815,9 +815,20 @@
                                 <td class="text-center text-muted small text-nowrap">{{ day.date|date:"D" }}</td>
                                 {% for cat in wa_categories %}
                                     {% with cp=day.checkpoints|dict_get:cat %}
-                                        <td class="text-center text-nowrap {% if cp and cp.time %}checkpoint-filled{% else %}checkpoint-empty{% endif %}">
-                                            {% if cp %}{% if cp.log.is_excused %}<span class="text-primary fw-bold">- </span>{% endif %}{{ cp.time }}{% else %}-{% endif %}
+                                        {% with date_str=day.date|date:"Y-m-d" %}
+                                        <td class="text-center wa-cell text-nowrap {% if cp and cp.time %}checkpoint-filled{% else %}checkpoint-empty{% endif %} {% if not is_locked %}cursor-pointer hover-reveal{% else %}cursor-default{% endif %}"
+                                            {% if not is_locked %}
+                                            hx-get="{% url 'portal:wa_edit_cell' wa_personal_employee.id date_str cat %}"
+                                            hx-target="#wa-edit-modal-content" hx-trigger="click" data-bs-toggle="modal" data-bs-target="#waEditModal"
+                                            {% endif %}>
+                                            {% if cp %}
+                                                {% if cp.log.is_excused %}<span class="text-primary fw-bold">- </span>{% endif %}
+                                                {{ cp.time }}
+                                            {% else %}
+                                                <span class="text-muted opacity-25">-</span>
+                                            {% endif %}
                                         </td>
+                                        {% endwith %}
                                     {% endwith %}
                                 {% endfor %}
                                 <td class="text-center fw-medium text-success text-nowrap">{{ day.aktual_jam|default:"-" }}</td>
