@@ -2774,16 +2774,53 @@ def recap_matrix_view(request):
         holidays_set = set(holidays_map.keys())
 
         # PREFETCH ROSTER ASSIGNMENTS FOR WA EMPLOYEES (Moved Up)
-        from attendance.models import DailyShiftAssignment
+        from attendance.models import DailyShiftAssignment, EmployeeShiftAssignment
         wa_roster_map = {}
         
+        # 1. Fetch Shift Patterns first
+        wa_patterns = EmployeeShiftAssignment.objects.filter(
+            employee__in=wa_employees,
+            effective_from__lte=wa_date_range[-1]
+        ).select_related('shift_pattern').order_by('employee', '-effective_from')
+        
+        wa_pattern_map = defaultdict(list)
+        for pat in wa_patterns:
+            wa_pattern_map[pat.employee_id].append(pat)
+        
+        # 2. Fetch specific Daily overrides
         wa_assignments = DailyShiftAssignment.objects.filter(
             employee__in=wa_employees,
             date__range=[wa_date_range[0], wa_date_range[-1]]
         ).select_related('shift')
         
+        wa_daily_map = {}
         for asm in wa_assignments:
-            wa_roster_map[(asm.employee_id, asm.date)] = asm.shift
+            wa_daily_map[(asm.employee_id, asm.date)] = asm.shift
+            
+        # 3. Compile map
+        for emp in wa_employees:
+            for d in wa_date_range:
+                if (emp.id, d) in wa_daily_map:
+                    wa_roster_map[(emp.id, d)] = wa_daily_map[(emp.id, d)]
+                else:
+                    assigned_shift = None
+                    for pat in wa_pattern_map.get(emp.id, []):
+                        if pat.effective_from <= d:
+                            pattern = pat.shift_pattern
+                            if pattern:
+                                day_idx = d.weekday() # 0=Monday, 6=Sunday
+                                mapping = {
+                                    0: pattern.monday_shift,
+                                    1: pattern.tuesday_shift,
+                                    2: pattern.wednesday_shift,
+                                    3: pattern.thursday_shift,
+                                    4: pattern.friday_shift,
+                                    5: pattern.saturday_shift,
+                                    6: pattern.sunday_shift,
+                                }
+                                assigned_shift = mapping.get(day_idx)
+                            break
+                    wa_roster_map[(emp.id, d)] = assigned_shift
         
         # Initialize matrix for all employees
         for emp in wa_employees:
