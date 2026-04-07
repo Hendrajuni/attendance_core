@@ -2810,13 +2810,13 @@ def recap_matrix_view(request):
                             if pattern:
                                 day_idx = d.weekday() # 0=Monday, 6=Sunday
                                 mapping = {
-                                    0: pattern.monday_shift,
-                                    1: pattern.tuesday_shift,
-                                    2: pattern.wednesday_shift,
-                                    3: pattern.thursday_shift,
-                                    4: pattern.friday_shift,
-                                    5: pattern.saturday_shift,
-                                    6: pattern.sunday_shift,
+                                    0: pattern.monday,
+                                    1: pattern.tuesday,
+                                    2: pattern.wednesday,
+                                    3: pattern.thursday,
+                                    4: pattern.friday,
+                                    5: pattern.saturday,
+                                    6: pattern.sunday,
                                 }
                                 assigned_shift = mapping.get(day_idx)
                             break
