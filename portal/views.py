@@ -1231,7 +1231,7 @@ def sync_wa_source_htmx(request, source_id):
                         continue
                         
                     batch_seen.add(log_key)
-                    category, _ = determine_category(employee, timestamp, prefetched_data=prefetched_data)
+                    category, _ = determine_category(employee, timestamp, source_type='TELEGRAM', prefetched_data=prefetched_data)
                     
                     new_logs.append(AttendanceLog(
                         employee=employee, timestamp=timestamp,
@@ -2854,19 +2854,29 @@ def recap_matrix_view(request):
                         if log.log_category in explicit_categories:
                             category_to_fill = log.log_category
                         else:
-                            # Dynamic Slotting based on proximity for MASUK / PULANG
-                            diff_in = abs(get_diff_mins(t_val, dt_sch_in))
-                            diff_out = abs(get_diff_mins(t_val, dt_sch_out))
+                            # Dynamically evaluate Checkpoints first in case DB log_category was incorrectly set to MASUK
+                            from attendance.utils import is_within_range
+                            is_cp1 = hasattr(daily_shift, 'enable_checkin_1') and daily_shift.enable_checkin_1 and is_within_range(t_val, daily_shift.checkin_1_start, daily_shift.checkin_1_end)
+                            is_cp2 = hasattr(daily_shift, 'enable_checkin_2') and daily_shift.enable_checkin_2 and is_within_range(t_val, daily_shift.checkin_2_start, daily_shift.checkin_2_end)
                             
-                            # Thresholds (e.g. 4 hours)
-                            if diff_in < diff_out and diff_in < 240:
-                                category_to_fill = 'MASUK'
-                            elif diff_out < diff_in and diff_out < 240:
-                                category_to_fill = 'PULANG'
+                            if is_cp1 and not day_data.get('CHECKPOINT_1'):
+                                category_to_fill = 'CHECKPOINT_1'
+                            elif is_cp2 and not day_data.get('CHECKPOINT_2'):
+                                category_to_fill = 'CHECKPOINT_2'
                             else:
-                                # Fallback to stored category if ambiguous
-                                if log.log_category in WA_CATEGORIES:
-                                    category_to_fill = log.log_category
+                                # Dynamic Slotting based on proximity for MASUK / PULANG
+                                diff_in = abs(get_diff_mins(t_val, dt_sch_in))
+                                diff_out = abs(get_diff_mins(t_val, dt_sch_out))
+                                
+                                # Thresholds (e.g. 4 hours)
+                                if diff_in < diff_out and diff_in < 240:
+                                    category_to_fill = 'MASUK'
+                                elif diff_out < diff_in and diff_out < 240:
+                                    category_to_fill = 'PULANG'
+                                else:
+                                    # Fallback to stored category if ambiguous
+                                    if log.log_category in WA_CATEGORIES:
+                                        category_to_fill = log.log_category
                     else:
                         # Standard category behavior
                         if log.log_category in WA_CATEGORIES:

@@ -112,7 +112,7 @@ class Command(BaseCommand):
 
                     # 3. Determine Category using THE BRAIN
                     # New signature: determine_category(employee, log_datetime) -> (category, schedule_name)
-                    category, schedule_name = determine_category(employee, timestamp)
+                    category, schedule_name = determine_category(employee, timestamp, source_type='TELEGRAM')
 
                     # 4. Create Attendance Log
                     log, created = AttendanceLog.objects.get_or_create(

@@ -224,7 +224,7 @@ def sync_wa_source_single(request, source_id):
                         continue
                     
                     # Determine category
-                    category, _ = determine_category(employee, timestamp)
+                    category, _ = determine_category(employee, timestamp, source_type='TELEGRAM')
                     
                     # Create attendance log
                     log, created = AttendanceLog.objects.get_or_create(
