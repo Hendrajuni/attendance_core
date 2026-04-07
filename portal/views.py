@@ -3152,6 +3152,12 @@ def recap_matrix_view(request):
                 is_weekend = d.weekday() == 6  # Only Sunday is weekend
                 holiday_name = id_holidays.get(d)
                 
+                dt_in = None
+                dt_out = None
+                check_in_time = None
+                check_out_time = None
+                aktual_jam_str = '-'
+                
                 # DYNAMIC SLOTTING LOGIC for Personal View
                 # Initialize day_data
                 day_data = {cat: None for cat in WA_CATEGORIES}
