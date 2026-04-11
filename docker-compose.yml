@@ -50,6 +50,17 @@ services:
       - web
     restart: unless-stopped
 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    network_mode: "host"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@admin.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_LISTEN_PORT=5050
+    restart: unless-stopped
+    depends_on:
+      - postgresql
+
 volumes:
   postgres_data:
   static_volume:
