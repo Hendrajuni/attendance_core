@@ -1,5 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.admin.views.decorators import staff_member_required
+from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.utils import timezone
 from .models import Employee, PersonalityTest, TraitDictionary, PersonalityIndicator, WorkLocation
@@ -273,3 +274,48 @@ def talent_manual_form(request):
         'title': 'Inteligensi Cerdas (Test Center)'
     }
     return render(request, 'talent/talent_manual_form.html', context)
+
+
+@login_required
+def talent_print_report(request):
+    """ View khusus untuk mencetak report test psikotes hasil filter (no sidebar/navbar) """
+    if not (request.user.groups.filter(name__in=['HRD', 'Manager']).exists() or request.user.is_superuser):
+        messages.error(request, "Anda tidak memiliki akses (Cetak Laporan).")
+        return redirect('portal:dashboard')
+
+    # Ambil history test untuk table (hanya yang karyawan)
+    test_results = PersonalityTest.objects.select_related('employee', 'evaluator').all().order_by('employee__full_name', '-test_date')
+    
+    # Filter Date
+    filter_year = request.GET.get('year')
+    filter_month = request.GET.get('month')
+    
+    if filter_year:
+        test_results = test_results.filter(test_date__year=filter_year)
+    if filter_month:
+        test_results = test_results.filter(test_date__month=filter_month)
+
+    # Hitung Tipe Karakter Dominan khusus yang sudah difilter
+    traits_count = {
+        'Sanguinis': test_results.filter(primary_trait__icontains='Sanguinis').count(),
+        'Melankolis': test_results.filter(primary_trait__icontains='Melankolis').count(),
+        'Koleris': test_results.filter(primary_trait__icontains='Koleris').count(),
+        'Plegmatis': test_results.filter(primary_trait__icontains='Plegmatis').count(),
+    }
+    
+    # Text helper untuk judul bulan/tahun di kertas
+    import datetime
+    month_name = datetime.date(1900, int(filter_month), 1).strftime('%B') if filter_month else 'Semua Bulan'
+    year_name = filter_year if filter_year else 'Semua Tahun'
+
+    context = {
+        'test_results': test_results,
+        'traits_count': traits_count,
+        'filter_month': filter_month,
+        'filter_year': filter_year,
+        'month_name': month_name,
+        'year_name': year_name,
+        'now': timezone.now()
+    }
+    
+    return render(request, 'talent/talent_print_report.html', context)

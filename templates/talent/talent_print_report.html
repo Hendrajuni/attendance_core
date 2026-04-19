@@ -1,0 +1,219 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Laporan Hasil Psikotes</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* Mengatur halaman keukuran F4/Legal Mendatar */
+        @page {
+            size: 14in 8.5in; /* Legal Landscape */
+            margin: 15mm;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            font-size: 11pt;
+            color: #000;
+            background-color: #fff;
+        }
+
+        .report-header {
+            text-align: center;
+            border-bottom: 2px solid #000;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+
+        .report-header h3 {
+            margin: 0;
+            font-weight: bold;
+            font-size: 16pt;
+        }
+
+        .report-header p {
+            margin: 5px 0 0 0;
+            font-size: 11pt;
+            color: #555;
+        }
+
+        /* Styling Kartu Ringkasan (Cards) */
+        .summary-wrapper {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 25px;
+            gap: 15px;
+        }
+
+        .summary-card {
+            flex: 1;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            background-color: #fcfcfc;
+            /* Paksa cetak warna background */
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }
+
+        .summary-title {
+            font-size: 10pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+
+        .summary-value {
+            font-size: 20pt;
+            font-weight: bold;
+        }
+
+        /* Pewarnaan Khusus di Kartu */
+        .card-sanguinis { border-left: 5px solid #FF9E00; }
+        .card-sanguinis .summary-value { color: #FF9E00; }
+        
+        .card-melankolis { border-left: 5px solid #4318FF; }
+        .card-melankolis .summary-value { color: #4318FF; }
+
+        .card-koleris { border-left: 5px solid #EE5D50; }
+        .card-koleris .summary-value { color: #EE5D50; }
+
+        .card-plegmatis { border-left: 5px solid #05CD99; }
+        .card-plegmatis .summary-value { color: #05CD99; }
+
+        /* Styling Tabel Laporan */
+        table.report-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10pt;
+        }
+
+        table.report-table th, table.report-table td {
+            border: 1px solid #000;
+            padding: 8px 6px;
+            vertical-align: middle;
+        }
+
+        table.report-table thead th {
+            background-color: #eaeaea !important;
+            font-weight: bold;
+            text-align: center;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }
+
+        .text-center { text-align: center; }
+        .text-end { text-align: right; }
+        
+        /* Hilangkan elemen yang tidak perlu dicetak (misal tombol) */
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+        }
+    </style>
+</head>
+<body onload="window.print()">
+
+    <!-- Tombol Khusus Layar, Hilang Saat Dicetak -->
+    <div class="no-print mt-3 ms-3">
+        <button onclick="window.print()" class="btn btn-primary d-inline-flex align-items-center me-2">
+            <svg class="me-2" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M5 1a2 2 0 0 0-2 2v1h10V3a2 2 0 0 0-2-2H5zm6 8H5a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1z"/>
+                <path d="M0 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-1v-2a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v2H2a2 2 0 0 1-2-2V7zm2.5 1a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/>
+            </svg>
+            Print Sekarang
+        </button>
+        <button onclick="window.close()" class="btn btn-outline-secondary">Tutup Keluar</button>
+        <hr>
+    </div>
+
+    <div class="report-header">
+        <h3>Laporan Rekapitulasi Ujian Psikotes</h3>
+        <p>Periode: <strong>{{ month_name }} {{ year_name }}</strong> &nbsp;|&nbsp; Dicetak pada: {{ now|date:"d M Y, H:i" }}</p>
+    </div>
+
+    <!-- Kotak Ringkasan Total Dominan -->
+    <div class="summary-wrapper">
+        <div class="summary-card card-sanguinis">
+            <div class="summary-title">Dominan Sanguinis</div>
+            <div class="summary-value">{{ traits_count.Sanguinis }}</div>
+        </div>
+        <div class="summary-card card-melankolis">
+            <div class="summary-title">Dominan Melankolis</div>
+            <div class="summary-value">{{ traits_count.Melankolis }}</div>
+        </div>
+        <div class="summary-card card-koleris">
+            <div class="summary-title">Dominan Koleris</div>
+            <div class="summary-value">{{ traits_count.Koleris }}</div>
+        </div>
+        <div class="summary-card card-plegmatis">
+            <div class="summary-title">Dominan Plegmatis</div>
+            <div class="summary-value">{{ traits_count.Plegmatis }}</div>
+        </div>
+    </div>
+
+    <!-- Tabel Data Mentah -->
+    <table class="report-table">
+        <thead>
+            <tr>
+                <th style="width: 4%;">No</th>
+                <th style="width: 17%;">Nama Kandidat / NIK</th>
+                <th style="width: 10%;">Tanggal Tes</th>
+                <th style="width: 12%;">Jabatan</th>
+                <th style="width: 14%;">Karakter Utama</th>
+                <th style="width: 14%;">Karakter Sekunder</th>
+                <th style="width: 5%;">K</th>
+                <th style="width: 5%;">S</th>
+                <th style="width: 5%;">M</th>
+                <th style="width: 5%;">P</th>
+                <th style="width: 9%;">Metode</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in test_results %}
+            <tr>
+                <td class="text-center">{{ forloop.counter }}</td>
+                <td>
+                    <strong>{{ t.employee.full_name }}</strong><br>
+                    <span style="font-size: 8pt; color: #555;">{{ t.employee.nik }}</span>
+                </td>
+                <td class="text-center">{{ t.test_date|date:"d-m-Y" }}</td>
+                <td>{{ t.employee.position|default:"-" }}</td>
+                <td class="text-center" style="font-weight: bold;">{{ t.primary_trait }}</td>
+                <td class="text-center">{{ t.secondary_trait|default:"-" }}</td>
+                
+                <td class="text-center" style="color: #d32f2f; font-weight: bold;">{{ t.choleric_score|floatformat:0 }}</td>
+                <td class="text-center" style="color: #f57c00; font-weight: bold;">{{ t.sanguine_score|floatformat:0 }}</td>
+                <td class="text-center" style="color: #1976d2; font-weight: bold;">{{ t.melancholic_score|floatformat:0 }}</td>
+                <td class="text-center" style="color: #388e3c; font-weight: bold;">{{ t.phlegmatic_score|floatformat:0 }}</td>
+                
+                <td class="text-center">
+                    <span style="font-size: 8pt;">
+                        {% if t.input_source == 'EXCEL' %}
+                            [ IMPORT ]
+                        {% else %}
+                            MANUAL
+                        {% endif %}
+                    </span>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="11" class="text-center py-4">Tidak ada data ujian psikotes pada periode terpilih.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div style="margin-top: 50px; display: flex; justify-content: flex-end;">
+        <div style="text-align: center; width: 250px;">
+            <p style="margin-bottom: 60px;">Diketahui Oleh,</p>
+            <p><strong>( ______________________ )</strong><br>HR Department / Manager</p>
+        </div>
+    </div>
+
+</body>
+</html>

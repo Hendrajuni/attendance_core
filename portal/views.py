@@ -1664,7 +1664,12 @@ def employee_detail_view(request, employee_id):
         'psikotes_history': psikotes_history,
     }
     
-    return render(request, 'portal/partials/_employee_detail.html', context)
+    # Jika request berasal dari HTMX (dalam dashboard portal)
+    if request.headers.get('HX-Request'):
+        return render(request, 'portal/partials/_employee_detail.html', context)
+    
+    # Jika request langsung dari URL (e.g. Test Center) tampilkan CV ATS
+    return render(request, 'portal/employee_ats_cv.html', context)
 
 
 # =============================================================================
