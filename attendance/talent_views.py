@@ -6,7 +6,7 @@ from django.utils import timezone
 from .models import Employee, PersonalityTest, TraitDictionary, PersonalityIndicator, WorkLocation
 from .services.psychology_engine import process_psychology_excel, calculate_dynamic_form, calculate_role_synergy
 
-@staff_member_required
+@login_required
 def talent_dashboard(request):
     """
     Dashboard Modul Psikotes (MPTT Tree View)
@@ -24,7 +24,7 @@ def talent_dashboard(request):
     return render(request, 'talent/talent_dashboard.html', context)
 
 
-@staff_member_required
+@login_required
 def talent_location_dashboard_htmx(request, location_id=None):
     """
     HTMX Endpoint: Mengambil dan merender statistik psikotes berdasarkan lokasi.
@@ -78,7 +78,7 @@ def talent_location_dashboard_htmx(request, location_id=None):
     return render(request, 'talent/partials/_location_dashboard.html', context)
 
 
-@staff_member_required
+@login_required
 def talent_detail(request, pk):
     employee = get_object_or_404(Employee, pk=pk)
     
@@ -128,7 +128,7 @@ def talent_detail(request, pk):
     }
     return render(request, 'talent/talent_detail.html', context)
 
-@staff_member_required
+@login_required
 def talent_manual_form(request):
     """
     Form Web Manual untuk HR menginput data hasil psikotes satu per satu secara langsung (tanpa Excel)
