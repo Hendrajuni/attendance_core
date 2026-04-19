@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} | TalentDev HRM</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #4318FF;
+            --secondary: #E9EDF7;
+            --text-main: #2B3674;
+            --text-muted: #A3AED0;
+            --bg-color: #F4F7FE;
+            --white: #FFFFFF;
+            
+            --sanguine: #FFB547;
+            --melancholic: #4318FF;
+            --choleric: #EE5D50;
+            --phlegmatic: #05CD99;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            min-height: 100vh;
+        }
+        a { text-decoration: none; color: inherit; }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: var(--white);
+            padding: 30px;
+            box-shadow: 14px 17px 40px 4px rgba(112, 144, 176, 0.08);
+            position: fixed;
+            height: 100vh;
+            z-index: 10;
+        }
+        .logo {
+            font-family: 'Outfit', sans-serif;
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-bottom: 50px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .nav-item {
+            padding: 15px 20px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: 0.3s ease;
+            font-weight: 500;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .nav-item:hover, .nav-item.active {
+            background-color: var(--primary);
+            color: var(--white);
+        }
+
+        /* Main Content */
+        .main {
+            margin-left: 280px;
+            padding: 40px;
+            width: calc(100% - 280px);
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+        }
+        .header h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 32px;
+            font-weight: 700;
+        }
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        /* Generic Utility */
+        .card {
+            background: var(--white);
+            border-radius: 20px;
+            padding: 25px;
+            box-shadow: 0px 18px 40px rgba(112, 144, 176, 0.12);
+        }
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
+        .grid-2 { display: grid; grid-template-columns: 2fr 1.5fr; gap: 20px; }
+        
+        .action-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        .action-btn:hover { box-shadow: 0 10px 20px rgba(67, 24, 255, 0.2); transform: translateY(-2px); }
+        .action-btn.green { background: #05CD99; }
+        .action-btn.secondary { background: var(--secondary); color: var(--text-main); }
+        
+        .alert {
+            padding: 15px; border-radius: 10px; margin-bottom: 20px; font-weight: 500;
+        }
+        .alert-success { background-color: #E5FAF5; color: #05CD99; border: 1px solid #05CD99;}
+        .alert-warning, .alert-error { background-color: #FFF4E5; color: #EE5D50; border: 1px solid #EE5D50;}
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="logo">
+            <i class="fas fa-brain fa-fw" style="color: var(--primary)"></i>
+            TalentDev
+        </div>
+        <a href="{% url 'attendance:talent_dashboard' %}">
+            <div class="nav-item {% if request.resolver_match.url_name == 'talent_dashboard' %}active{% endif %}">
+                <i class="fas fa-chart-pie fa-fw"></i> Overview Dashboard
+            </div>
+        </a>
+        <a href="{% url 'attendance:talent_manual_form' %}">
+            <div class="nav-item {% if request.resolver_match.url_name == 'talent_manual_form' %}active{% endif %}">
+                <i class="fas fa-file-signature fa-fw"></i> Input Data Tes HR
+            </div>
+        </a>
+        <a href="{% url 'admin:index' %}">
+            <div class="nav-item" style="margin-top: 50px; background: #FFF4E5; color: #FF9E00;">
+                <i class="fas fa-arrow-left fa-fw"></i> Kembali ke ERP
+            </div>
+        </a>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main">
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,251 @@
+<div class="p-4 h-100 overflow-auto">
+    <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-4">
+        <h4 class="mb-0 fw-bold text-dark">
+            {% if location %}
+                Statistik Psikotes: {{ location.name }}
+            {% else %}
+                Statistik Psikotes: Rekapitulasi Global
+            {% endif %}
+        </h4>
+    </div>
+
+    <!-- Overview Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="text-white-50 mb-2">Total Tes Diikuti</h6>
+                    <h3 class="fw-bold mb-0">{{ total_tests }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="text-white-50 mb-2">Sangat Sinergi (>80%)</h6>
+                    <h3 class="fw-bold mb-0">{{ synergy_count.sangat_sinergi }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-white border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="text-white-50 mb-2">Pendampingan (50 - 80%)</h6>
+                    <h3 class="fw-bold mb-0">{{ synergy_count.pendampingan }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-danger text-white border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="text-white-50 mb-2">Risiko Sinergi (<50%)</h6>
+                    <h3 class="fw-bold mb-0">{{ synergy_count.beresiko }}</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white py-3">
+                    <h6 class="mb-0 fw-bold"><i class="fas fa-chart-pie me-2 text-primary"></i>Komposisi Tipe Karakter</h6>
+                </div>
+                <div class="card-body d-flex justify-content-center p-3" style="height: 300px;">
+                    {% if total_tests > 0 %}
+                        <canvas id="traitChart"></canvas>
+                    {% else %}
+                        <div class="d-flex align-items-center justify-content-center h-100 text-muted">Belum ada data</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white py-3">
+                    <h6 class="mb-0 fw-bold"><i class="fas fa-balance-scale me-2 text-warning"></i>Status Sinergi Karyawan vs Jabatan</h6>
+                </div>
+                <div class="card-body d-flex justify-content-center p-3" style="height: 300px;">
+                    {% if total_tests > 0 %}
+                        <canvas id="synergyChart"></canvas>
+                    {% else %}
+                        <div class="d-flex align-items-center justify-content-center h-100 text-muted">Belum ada data</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Table Terbaru -->
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0 fw-bold">Riwayat Tes Psikotes Terakhir</h6>
+            <div>
+                <input type="text" name="search" hx-get="{% url 'attendance:talent_location_dashboard_htmx' location.id|default:'0' %}" hx-target="#talent-content-area" hx-trigger="keyup changed delay:500ms" value="{{ search_q }}" class="form-control form-control-sm" placeholder="Cari nama karyawan..." style="width: 250px;">
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="ps-4 border-0">Nama Karyawan</th>
+                            <th class="border-0">Jabatan (Departemen)</th>
+                            <th class="border-0">Tgl Tes</th>
+                            <th class="border-0 text-center">Tipe Dominan</th>
+                            <th class="border-0 text-center">Sinergi</th>
+                            <th class="border-0 text-end pe-3">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for t in tests %}
+                        <tr>
+                            <td class="ps-4">
+                                <div class="d-flex align-items-center">
+                                    <div class="bg-light rounded-circle d-flex align-items-center justify-content-center me-3 text-secondary border" style="width: 40px; height: 40px;">
+                                        <span class="fw-bold">{{ t.employee.full_name|slice:":1"|upper }}</span>
+                                    </div>
+                                    <div>
+                                        <div class="fw-bold text-dark">{{ t.employee.full_name }}</div>
+                                        <small class="text-muted">{{ t.employee.company_nik|default:t.employee.nik }}</small>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="text-dark">{{ t.employee.position|default:"-" }}</div>
+                                <small class="text-muted">{{ t.employee.department.name|default:"-" }}</small>
+                            </td>
+                            <td>
+                                <div class="text-dark fw-medium">{{ t.test_date|date:"d M Y" }}</div>
+                            </td>
+                            <td class="text-center">
+                                {% if 'Sanguinis' in t.primary_trait %}
+                                    <span class="badge" style="background:#FFF4E5; color:#FF9E00;">Sanguinis</span>
+                                {% elif 'Melankolis' in t.primary_trait %}
+                                    <span class="badge" style="background:#E9EDF7; color:#4318FF;">Melankolis</span>
+                                {% elif 'Koleris' in t.primary_trait %}
+                                    <span class="badge" style="background:#FFF0F0; color:#EE5D50;">Koleris</span>
+                                {% elif 'Plegmatis' in t.primary_trait %}
+                                    <span class="badge" style="background:#E5FAF5; color:#05CD99;">Plegmatis</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">{{ t.primary_trait }}</span>
+                                {% endif %}
+                                {% if t.secondary_trait %}
+                                    <div class="small text-muted mt-1">{{ t.secondary_trait }}</div>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <span class="badge {% if t.synergy_score >= 80 %}bg-success{% elif t.synergy_score >= 50 %}bg-warning text-dark{% else %}bg-danger{% endif %} border rounded-pill">
+                                    {{ t.synergy_score|floatformat:0 }}%
+                                </span>
+                            </td>
+                            <td class="text-end pe-3">
+                                <a href="{% url 'attendance:talent_detail' t.employee.pk %}" class="btn btn-sm btn-outline-primary rounded-pill">
+                                    Detail <i class="fas fa-arrow-right ms-1"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="6" class="text-center text-muted py-4">Belum ada riwayat tes dari wilayah ini.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pagination Controls -->
+            {% if tests.has_other_pages %}
+            <div class="d-flex justify-content-between align-items-center p-3 border-top bg-light">
+                <span class="small text-muted">Halaman {{ tests.number }} dari {{ tests.paginator.num_pages }}</span>
+                <div class="btn-group">
+                    {% if tests.has_previous %}
+                    <button class="btn btn-sm btn-outline-secondary" 
+                            hx-get="{% url 'attendance:talent_location_dashboard_htmx' location.id|default:'0' %}?page={{ tests.previous_page_number }}&search={{ search_q }}" 
+                            hx-target="#talent-content-area">Sebelumnnya</button>
+                    {% else %}
+                    <button class="btn btn-sm btn-outline-secondary disabled">Sebelumnnya</button>
+                    {% endif %}
+                    
+                    {% if tests.has_next %}
+                    <button class="btn btn-sm btn-outline-secondary" 
+                            hx-get="{% url 'attendance:talent_location_dashboard_htmx' location.id|default:'0' %}?page={{ tests.next_page_number }}&search={{ search_q }}" 
+                            hx-target="#talent-content-area">Selanjutnya</button>
+                    {% else %}
+                    <button class="btn btn-sm btn-outline-secondary disabled">Selanjutnya</button>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% if total_tests > 0 %}
+<script>
+    // Safe execution block to avoid redeclaration on HTMX swap
+    (function() {
+        // Destroy existing charts to prevent artifacting
+        if (window.talentTraitChart instanceof Chart) window.talentTraitChart.destroy();
+        if (window.talentSynergyChart instanceof Chart) window.talentSynergyChart.destroy();
+
+        // Data from View
+        const traitCtx = document.getElementById('traitChart');
+        if (traitCtx) {
+            window.talentTraitChart = new Chart(traitCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Sanguinis (Sosial)', 'Melankolis (Analitis)', 'Koleris (Tegas)', 'Plegmatis (Stabil)'],
+                    datasets: [{
+                        data: [
+                            {{ traits_count.Sanguinis }},
+                            {{ traits_count.Melankolis }},
+                            {{ traits_count.Koleris }},
+                            {{ traits_count.Plegmatis }}
+                        ],
+                        backgroundColor: ['#FFB547', '#4318FF', '#EE5D50', '#05CD99'],
+                        borderWidth: 0,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right' }
+                    },
+                    cutout: '70%'
+                }
+            });
+        }
+
+        const synCtx = document.getElementById('synergyChart');
+        if (synCtx) {
+            window.talentSynergyChart = new Chart(synCtx, {
+                type: 'pie',
+                data: {
+                    labels: ['Sangat Sinergi (>80%)', 'Perlu Pendampingan', 'Beresiko / Konflik (<50%)'],
+                    datasets: [{
+                        data: [
+                            {{ synergy_count.sangat_sinergi }},
+                            {{ synergy_count.pendampingan }},
+                            {{ synergy_count.beresiko }}
+                        ],
+                        backgroundColor: ['#198754', '#ffc107', '#dc3545'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right' }
+                    }
+                }
+            });
+        }
+    })();
+</script>
+{% endif %}

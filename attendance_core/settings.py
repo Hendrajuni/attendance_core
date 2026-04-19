@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.humanize', # For template filters
     'attendance',
     'portal',  # New frontend app
+    'talent_dev.apps.TalentDevConfig', # Proxy app for admin grouping
     'mptt',
     'simple_history', # Audit Log
 ]

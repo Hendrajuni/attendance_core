@@ -1,0 +1,671 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Psychology Test Center{% endblock %}
+
+{% block content %}
+<style>
+    /* Tab Styling */
+    .table-excel { border-collapse: separate; border-spacing: 0; width: 100%; white-space: nowrap; font-size: 11px; }
+    .table-excel thead th { background-color: #F8FAFC; color: #495057; font-weight: 700; text-transform: uppercase; padding: 10px 10px; border-bottom: 2px solid #dee2e6; border-top: 1px solid #dee2e6; border-right: 1px solid #dee2e6; text-align: center; vertical-align: middle; }
+    .table-excel thead th:first-child { border-left: 1px solid #dee2e6; }
+    .table-excel tbody td { padding: 8px 10px; border-bottom: 1px solid #dee2e6; border-right: 1px solid #dee2e6; vertical-align: middle; }
+    .table-excel tbody td:first-child { border-left: 1px solid #dee2e6; text-align: center; }
+    .table-excel tbody tr:hover { background-color: #F8FAFC; }
+    
+    /* Checklist Custom Styling */
+    .custom-checkbox-list { padding-bottom: 10px; }
+    .check-item { display: block; position: relative; padding: 4px 5px 4px 30px; margin-bottom: 6px; cursor: pointer; border-radius: 4px; background: #FFF; border: 1px solid #dee2e6; transition: all 0.2s; user-select: none; }
+    .check-item:hover { background: #f8f9fa; border-color: #adb5bd; }
+    .check-item input { position: absolute; opacity: 0; cursor: pointer; height: 0; width: 0; }
+    .checkmark { position: absolute; top: 50%; left: 8px; transform: translateY(-50%); height: 16px; width: 16px; background-color: white; border: 1px solid #adb5bd; border-radius: 2px; }
+    .check-item input:checked ~ .checkmark { background-color: #0d6efd; border-color: #0d6efd; }
+    .checkmark:after { content: ""; position: absolute; display: none; }
+    .check-item input:checked ~ .checkmark:after { display: block; left: 5px; top: 2px; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+    
+    .indicator-pos-zone { background: #e9ecef; padding: 10px; border-radius: 4px; border-left: 3px solid #198754; min-height: 100%; }
+    .indicator-neg-zone { background: #e9ecef; padding: 10px; border-radius: 4px; border-left: 3px solid #dc3545; min-height: 100%; }
+    .zone-title { font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px; }
+
+    /* Modal Tabs */
+    .nav-tabs.form-tabs { margin-bottom: 20px; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h4 class="mb-1 fw-bold text-dark">Psychology Test Center</h4>
+        <p class="text-muted mb-0">Dashboard Pengujian dan Riwayat Hasil Asesmen.</p>
+    </div>
+</div>
+
+<!-- ======================= 1. SELECTOR TARGET ========================= -->
+<div class="row mb-2">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm rounded-3">
+            <div class="card-body p-2 bg-white">
+                <div class="d-flex justify-content-between align-items-center mb-2 px-2">
+                    <h6 class="mb-0 fw-bold text-dark"><i class="fas fa-bullseye me-2"></i>Sasaran Karyawan</h6>
+                    <div>
+                        <button type="button" class="btn btn-sm btn-outline-success fw-bold py-1 me-1" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                            <i class="fas fa-file-excel me-1"></i> Import Excel
+                        </button>
+                        <button type="button" class="btn btn-sm btn-dark fw-bold py-1" data-bs-toggle="modal" data-bs-target="#modalRekrutmen">
+                            <i class="fas fa-user-plus me-1"></i> Tambah Kandidat
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="row g-2 align-items-end px-2 pb-2">
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted text-uppercase mb-1">Filter Wilayah</label>
+                        <select class="form-select form-select-sm" id="filterLocation">
+                            <option value="ALL">-- Tampilkan Semua Wilayah --</option>
+                            {% for loc in locations %}
+                                <option value="{{ loc.id }}">{{ loc.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-bold text-muted text-uppercase mb-1"><i class="fas fa-search"></i> Cari Karyawan / NIK</label>
+                        <input type="text" id="searchKaryawan" class="form-control form-control-sm" placeholder="Ketik kata kunci...">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold text-muted text-uppercase mb-1">Pilih Karyawan (Belum / Ingin Dievaluasi)</label>
+                        <select id="selectEmployee" class="form-select form-select-sm">
+                            <option value="">-- Silakan Pilih Karyawan --</option>
+                            {% for emp in employees %}
+                                <option value="{{ emp.id }}" data-location="{{ emp.home_base_id|default:'' }}" data-search="{{ emp.nik|default:'' }} {{ emp.full_name|lower }}">
+                                    {% if not emp.is_verified %}[REKRUTMEN] {% endif %}{{ emp.nik|default:'-' }} - {{ emp.full_name }} ({{ emp.position|default:'Posisi Belum Diset' }})
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-primary btn-sm w-100 fw-bold shadow-sm" onclick="openTestModal()">
+                            <i class="fas fa-clipboard-check me-1"></i> Uji Tes
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- TABS NAVIGATION -->
+<ul class="nav nav-tabs mb-2" id="assessmentTabs">
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'karyawan' %}active{% endif %}" href="?active_tab=karyawan&month={{ current_month|default:'' }}&year={{ current_year|default:'' }}">
+            <i class="fas fa-building me-2"></i> Karyawan Internal
+            <span class="badge bg-secondary ms-2">{{ counts.karyawan }}</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if active_tab == 'rekrutmen' %}active{% endif %}" href="?active_tab=rekrutmen&month={{ current_month|default:'' }}&year={{ current_year|default:'' }}">
+            <i class="fas fa-user-clock me-2 text-warning"></i> Kandidat Baru
+            <span class="badge bg-warning text-dark ms-2">{{ counts.rekrutmen }}</span>
+        </a>
+    </li>
+</ul>
+
+<!-- ======================= 2. TABEL HASIL (TEST CENTER EXCEL MODE) ========================= -->
+<div class="card shadow border-0 rounded-4">
+    <div class="card-body p-0">
+        <div class="p-3 pb-2 d-flex justify-content-between align-items-end border-bottom">
+            <div>
+                <h6 class="mb-1 fw-bold text-success"><i class="fas fa-table me-2"></i>Riwayat Pengujian Psikotes</h6>
+                <p class="small text-muted mb-0" style="font-size: 11px;">Rangkuman skor mentah hasil asesmen yang telah dilakukan tim penilai.</p>
+            </div>
+            <!-- Filter Tanggal/Tahun -->
+            <form method="get" class="d-flex gap-2 align-items-end">
+                <input type="hidden" name="active_tab" value="{{ active_tab }}">
+                <div>
+                    <label class="form-label small fw-bold text-muted text-uppercase mb-1" style="font-size: 10px;">Bulan</label>
+                    <select name="month" class="form-select form-select-sm" style="min-width: 120px;" onchange="this.form.submit()">
+                        <option value="">Semua Bulan</option>
+                        <option value="1" {% if current_month|stringformat:"s" == "1" %}selected{% endif %}>Januari</option>
+                        <option value="2" {% if current_month|stringformat:"s" == "2" %}selected{% endif %}>Februari</option>
+                        <option value="3" {% if current_month|stringformat:"s" == "3" %}selected{% endif %}>Maret</option>
+                        <option value="4" {% if current_month|stringformat:"s" == "4" %}selected{% endif %}>April</option>
+                        <option value="5" {% if current_month|stringformat:"s" == "5" %}selected{% endif %}>Mei</option>
+                        <option value="6" {% if current_month|stringformat:"s" == "6" %}selected{% endif %}>Juni</option>
+                        <option value="7" {% if current_month|stringformat:"s" == "7" %}selected{% endif %}>Juli</option>
+                        <option value="8" {% if current_month|stringformat:"s" == "8" %}selected{% endif %}>Agustus</option>
+                        <option value="9" {% if current_month|stringformat:"s" == "9" %}selected{% endif %}>September</option>
+                        <option value="10" {% if current_month|stringformat:"s" == "10" %}selected{% endif %}>Oktober</option>
+                        <option value="11" {% if current_month|stringformat:"s" == "11" %}selected{% endif %}>November</option>
+                        <option value="12" {% if current_month|stringformat:"s" == "12" %}selected{% endif %}>Desember</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label small fw-bold text-muted text-uppercase mb-1" style="font-size: 10px;">Tahun</label>
+                    <select name="year" class="form-select form-select-sm" style="min-width: 100px;" onchange="this.form.submit()">
+                        <option value="">Semua Tahun</option>
+                        <option value="2024" {% if current_year|stringformat:"s" == "2024" %}selected{% endif %}>2024</option>
+                        <option value="2025" {% if current_year|stringformat:"s" == "2025" %}selected{% endif %}>2025</option>
+                        <option value="2026" {% if current_year|stringformat:"s" == "2026" %}selected{% endif %}>2026</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-dark btn-sm fw-bold">
+                    <i class="fas fa-filter"></i> Terapkan
+                </button>
+            </form>
+        </div>
+        
+        <div class="table-responsive" style="max-height: 65vh; overflow: auto;">
+            <table class="table table-bordered table-excel mb-0">
+                <thead style="position: sticky; top: 0; z-index: 10;">
+                    <tr>
+                        <th style="width: 40px;">No</th>
+                        <th style="text-align: left; min-width: 200px;">Nama / NIK</th>
+                        <th style="width: 90px;">Tgl Test</th>
+                        <th>Jabatan</th>
+                        <th>Tgl Lahir</th>
+                        <th>Gol. Darah</th>
+                        <th class="text-danger">K</th>
+                        <th class="text-warning">S</th>
+                        <th class="text-primary">M</th>
+                        <th class="text-success">P</th>
+                        <th class="fw-bolder" style="background-color: #f1f3f5;">DOMINAN</th>
+                        <th>JJ</th>
+                        <th>TJ</th>
+                        <th>Penguji</th>
+                        <th style="text-align: left;">Ket</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in test_results %}
+                    <tr>
+                        <td class="text-muted">{{ forloop.counter }}</td>
+                        <td style="text-align: left; padding-left: 15px;">
+                            <a href="{% url 'attendance:talent_detail' pk=p.employee.pk %}" class="fw-bold text-decoration-none text-dark" style="font-size: 12px;">
+                                {{ p.employee.full_name }}
+                            </a>
+                            <div class="text-muted" style="font-size: 10px;">{{ p.employee.nik|default:'-' }}</div>
+                        </td>
+                        <td class="text-center fw-bold text-dark">
+                            {{ p.test_date|date:"d/m/Y" }}
+                            <div class="mt-1">
+                                {% if p.input_source == 'EXCEL' %}
+                                    <span class="badge bg-success" style="font-size: 8px;"><i class="fas fa-file-excel"></i> IMPORT</span>
+                                {% else %}
+                                    <span class="badge bg-primary" style="font-size: 8px;"><i class="fas fa-keyboard"></i> MANUAL</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td class="text-center">{{ p.employee.position|default:'-' }}</td>
+                        <td class="text-center">{{ p.employee.date_of_birth|date:"d/m/Y"|default:'-' }}</td>
+                        <td class="text-center fw-bold text-danger">{{ p.employee.blood_type|default:'-' }}</td>
+                        
+                        <!-- Raw Scores -->
+                        <td class="text-center fw-bold text-danger bg-light">{{ p.choleric_score|floatformat:0 }}</td>
+                        <td class="text-center fw-bold text-warning bg-light">{{ p.sanguine_score|floatformat:0 }}</td>
+                        <td class="text-center fw-bold text-primary bg-light">{{ p.melancholic_score|floatformat:0 }}</td>
+                        <td class="text-center fw-bold text-success bg-light">{{ p.phlegmatic_score|floatformat:0 }}</td>
+                        
+                        <td class="text-center fw-black" style="background-color: #f1f3f5;">{{ p.primary_trait }}</td>
+                        <td class="text-center bg-light">{{ p.honesty_score|floatformat:1 }}</td>
+                        <td class="text-center bg-light">{{ p.responsibility_score|floatformat:1 }}</td>
+                        
+                        <td class="text-center text-muted" style="font-size: 10px;">{% if p.evaluator %}{{ p.evaluator.first_name|default:p.evaluator.username }}{% else %}System{% endif %}</td>
+                        <td style="text-align: left; padding-left: 10px;" class="text-muted"><span class="d-inline-block text-truncate" style="max-width: 150px;" title="{{ p.consultant_notes }}">{{ p.consultant_notes|default:'-' }}</span></td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="16" class="text-center py-5 text-muted">Belum ada data hasil psikotes di periode ini.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ======================= 3. MODAL UJI TES (TABS) ========================= -->
+<form method="post" id="psikotesForm">
+{% csrf_token %}
+<input type="hidden" name="action" value="save_psikotes">
+<input type="hidden" name="employee_id" id="modalEmployeeId">
+
+<div class="modal fade" id="modalUjiTes" tabindex="-1" data-bs-backdrop="static" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content rounded-1">
+            <div class="modal-header bg-dark text-white rounded-0">
+                <h5 class="modal-title"><i class="fas fa-clipboard-list me-2"></i>Lembar Uji Test Psikotes</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            
+            <div class="modal-body p-0 bg-white">
+                <!-- Data Karyawan Banner -->
+                <div class="bg-light p-3 border-bottom d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center">
+                        <div class="rounded bg-secondary text-white d-flex align-items-center justify-content-center me-3" style="width: 45px; height: 45px; font-size: 20px;">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div>
+                            <h6 class="mb-0 fw-bold text-dark" id="modalEmpName">Nama Karyawan</h6>
+                            <small class="text-muted" id="modalEmpTitle">NIK - Jabatan</small>
+                        </div>
+                    </div>
+                    
+                    <!-- LIVE SCORE INDICATOR -->
+                    <div class="d-flex gap-4 text-center me-3">
+                        <div>
+                            <small class="fw-bold text-danger d-block mb-1" style="font-size: 10px;">KOLERIS</small>
+                            <span class="badge bg-danger rounded-pill px-3 py-2 fs-6 shadow-sm" id="live_K">0</span>
+                        </div>
+                        <div>
+                            <small class="fw-bold text-warning d-block mb-1" style="font-size: 10px;">SANGUINIS</small>
+                            <span class="badge bg-warning rounded-pill px-3 py-2 fs-6 shadow-sm text-dark" id="live_S">0</span>
+                        </div>
+                        <div>
+                            <small class="fw-bold text-primary d-block mb-1" style="font-size: 10px;">MELANKOLIS</small>
+                            <span class="badge bg-primary rounded-pill px-3 py-2 fs-6 shadow-sm" id="live_M">0</span>
+                        </div>
+                        <div>
+                            <small class="fw-bold text-success d-block mb-1" style="font-size: 10px;">PLEGMATIS</small>
+                            <span class="badge bg-success rounded-pill px-3 py-2 fs-6 shadow-sm" id="live_P">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabs Navigation -->
+                <div class="bg-white px-3 pt-3 border-bottom">
+                    <ul class="nav nav-tabs form-tabs" id="myTab" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active rounded-0 text-dark" data-bs-toggle="tab" data-bs-target="#tab-fast" type="button" role="tab">Papan Skor Mentah</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link rounded-0 text-dark" data-bs-toggle="tab" data-bs-target="#tab-s-m" type="button" role="tab">Kuesioner S & M</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link rounded-0 text-dark" data-bs-toggle="tab" data-bs-target="#tab-k-p" type="button" role="tab">Kuesioner K & P</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link rounded-0 text-dark" data-bs-toggle="tab" data-bs-target="#tab-notes" type="button" role="tab">Catatan Akhir</button>
+                        </li>
+                    </ul>
+                </div>
+                
+                <!-- Tabs Content -->
+                <div class="tab-content p-4" id="myTabContent">
+                    
+                    <!-- TAB 1: Fast Entry -->
+                    <div class="tab-pane fade show active" id="tab-fast" role="tabpanel">
+                        <div class="alert alert-secondary border mb-4 rounded-1">
+                            <strong><i class="fas fa-info-circle me-1"></i> INFO PENGISIAN:</strong> Ketik angka bila menggunakan rekap manual. Jika menggunakan menu Kuesioner, biarkan kotak di bawah ini berisi angka <b>0</b>.
+                        </div>
+                        <div class="row align-items-center">
+                            <!-- Kiri: Kard Karakter 4 kuadran -->
+                            <div class="col-md-8 border-end pb-3 pb-md-0 pe-md-4">
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <div class="p-3 border rounded-1 bg-light d-flex align-items-center justify-content-between">
+                                            <div>
+                                                <div class="fw-bold text-dark mb-1">SANGUINIS</div>
+                                                <small class="text-secondary">Sosial/Ekspresif</small>
+                                            </div>
+                                            <input type="number" name="manual_sanguine" id="score_S" value="0" min="0" class="form-control text-center fw-bold" style="width: 70px;" oninput="manualOverride('S')">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="p-3 border rounded-1 bg-light d-flex align-items-center justify-content-between">
+                                            <div>
+                                                <div class="fw-bold text-dark mb-1">MELANKOLIS</div>
+                                                <small class="text-secondary">Analitis/Detail</small>
+                                            </div>
+                                            <input type="number" name="manual_melancholic" id="score_M" value="0" min="0" class="form-control text-center fw-bold" style="width: 70px;" oninput="manualOverride('M')">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="p-3 border rounded-1 bg-light d-flex align-items-center justify-content-between">
+                                            <div>
+                                                <div class="fw-bold text-dark mb-1">KOLERIS</div>
+                                                <small class="text-secondary">Tegas/Pemimpin</small>
+                                            </div>
+                                            <input type="number" name="manual_choleric" id="score_K" value="0" min="0" class="form-control text-center fw-bold" style="width: 70px;" oninput="manualOverride('K')">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="p-3 border rounded-1 bg-light d-flex align-items-center justify-content-between">
+                                            <div>
+                                                <div class="fw-bold text-dark mb-1">PLEGMATIS</div>
+                                                <small class="text-secondary">Damai/Stabil</small>
+                                            </div>
+                                            <input type="number" name="manual_phlegmatic" id="score_P" value="0" min="0" class="form-control text-center fw-bold" style="width: 70px;" oninput="manualOverride('P')">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Kanan: Jujur & Tanggung Jawab -->
+                            <div class="col-md-4 ps-md-4">
+                                <div class="row g-3">
+                                    <div class="col-12">
+                                        <label class="form-label fw-bold text-dark small">Skor Jujur (JJ)</label>
+                                        <input type="number" step="0.1" name="jujur_score" value="" class="form-control" placeholder="Kosong (Wajib Isi)">
+                                    </div>
+                                    <div class="col-12 mt-4">
+                                        <label class="form-label fw-bold text-dark small">Skor Tanggung Jawab (TJ)</label>
+                                        <input type="number" step="0.1" name="tggjawab_score" value="" class="form-control" placeholder="Kosong (Wajib Isi)">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- TAB 2: Checkbox S & M -->
+                    <div class="tab-pane fade" id="tab-s-m" role="tabpanel">
+                        <div class="row g-4">
+                            <!-- Sanguinis Checklist -->
+                            <div class="col-lg-6">
+                                <div class="card shadow-sm border-0 h-100">
+                                    <div class="card-header bg-white py-3 border-0"><h6 class="fw-bold mb-0" style="color:#FF9E00">Indikator Sanguinis</h6></div>
+                                    <div class="card-body pt-0 custom-checkbox-list">
+                                        <div class="row h-100">
+                                            <div class="col-6 pe-2"><div class="indicator-pos-zone"><div class="zone-title"><i class="fas fa-plus"></i> Kekuatan (+)</div>
+                                                {% for ind in dict_indicators.S %}{% if ind.kind == 'POS' %}
+                                                <label class="check-item sanguinis"><input type="checkbox" name="indicators" value="{{ ind.id }}" data-category="S" data-weight="{{ ind.weight }}" class="smart-checkbox"><span class="checkmark"></span><span class="text-secondary ms-2" style="font-size: 11px;">{{ ind.indicator_text }}</span></label>
+                                                {% endif %}{% endfor %}
+                                            </div></div>
+                                            <div class="col-6 ps-2"><div class="indicator-neg-zone"><div class="zone-title"><i class="fas fa-minus"></i> Kelemahan (-)</div>
+                                                {% for ind in dict_indicators.S %}{% if ind.kind == 'NEG' %}
+                                                <label class="check-item sanguinis"><input type="checkbox" name="indicators" value="{{ ind.id }}" data-category="S" data-weight="{{ ind.weight }}" class="smart-checkbox"><span class="checkmark"></span><span class="text-secondary ms-2" style="font-size: 11px;">{{ ind.indicator_text }}</span></label>
+                                                {% endif %}{% endfor %}
+                                            </div></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Melankolis Checklist -->
+                            <div class="col-lg-6">
+                                <div class="card shadow-sm border-0 h-100">
+                                    <div class="card-header bg-white py-3 border-0"><h6 class="fw-bold mb-0" style="color:#4318FF">Indikator Melankolis</h6></div>
+                                    <div class="card-body pt-0 custom-checkbox-list">
+                                        <div class="row h-100">
+                                            <div class="col-6 pe-2"><div class="indicator-pos-zone"><div class="zone-title"><i class="fas fa-plus"></i> Kekuatan (+)</div>
+                                                {% for ind in dict_indicators.M %}{% if ind.kind == 'POS' %}
+                                                <label class="check-item melankolis"><input type="checkbox" name="indicators" value="{{ ind.id }}" data-category="M" data-weight="{{ ind.weight }}" class="smart-checkbox"><span class="checkmark"></span><span class="text-secondary ms-2" style="font-size: 11px;">{{ ind.indicator_text }}</span></label>
+                                                {% endif %}{% endfor %}
+                                            </div></div>
+                                            <div class="col-6 ps-2"><div class="indicator-neg-zone"><div class="zone-title"><i class="fas fa-minus"></i> Kelemahan (-)</div>
+                                                {% for ind in dict_indicators.M %}{% if ind.kind == 'NEG' %}
+                                                <label class="check-item melankolis"><input type="checkbox" name="indicators" value="{{ ind.id }}" data-category="M" data-weight="{{ ind.weight }}" class="smart-checkbox"><span class="checkmark"></span><span class="text-secondary ms-2" style="font-size: 11px;">{{ ind.indicator_text }}</span></label>
+                                                {% endif %}{% endfor %}
+                                            </div></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- TAB 3: Checkbox K & P -->
+                    <div class="tab-pane fade" id="tab-k-p" role="tabpanel">
+                        <div class="row g-4">
+                            <!-- Koleris Checklist -->
+                            <div class="col-lg-6">
+                                <div class="card shadow-sm border-0 h-100">
+                                    <div class="card-header bg-white py-3 border-0"><h6 class="fw-bold mb-0" style="color:#EE5D50">Indikator Koleris</h6></div>
+                                    <div class="card-body pt-0 custom-checkbox-list">
+                                        <div class="row h-100">
+                                            <div class="col-6 pe-2"><div class="indicator-pos-zone"><div class="zone-title"><i class="fas fa-plus"></i> Kekuatan (+)</div>
+                                                {% for ind in dict_indicators.K %}{% if ind.kind == 'POS' %}
+                                                <label class="check-item koleris"><input type="checkbox" name="indicators" value="{{ ind.id }}" data-category="K" data-weight="{{ ind.weight }}" class="smart-checkbox"><span class="checkmark"></span><span class="text-secondary ms-2" style="font-size: 11px;">{{ ind.indicator_text }}</span></label>
+                                                {% endif %}{% endfor %}
+                                            </div></div>
+                                            <div class="col-6 ps-2"><div class="indicator-neg-zone"><div class="zone-title"><i class="fas fa-minus"></i> Kelemahan (-)</div>
+                                                {% for ind in dict_indicators.K %}{% if ind.kind == 'NEG' %}
+                                                <label class="check-item koleris"><input type="checkbox" name="indicators" value="{{ ind.id }}" data-category="K" data-weight="{{ ind.weight }}" class="smart-checkbox"><span class="checkmark"></span><span class="text-secondary ms-2" style="font-size: 11px;">{{ ind.indicator_text }}</span></label>
+                                                {% endif %}{% endfor %}
+                                            </div></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Plegmatis Checklist -->
+                            <div class="col-lg-6">
+                                <div class="card shadow-sm border-0 h-100">
+                                    <div class="card-header bg-white py-3 border-0"><h6 class="fw-bold mb-0" style="color:#05CD99">Indikator Plegmatis</h6></div>
+                                    <div class="card-body pt-0 custom-checkbox-list">
+                                        <div class="row h-100">
+                                            <div class="col-6 pe-2"><div class="indicator-pos-zone"><div class="zone-title"><i class="fas fa-plus"></i> Kekuatan (+)</div>
+                                                {% for ind in dict_indicators.P %}{% if ind.kind == 'POS' %}
+                                                <label class="check-item plegmatis"><input type="checkbox" name="indicators" value="{{ ind.id }}" data-category="P" data-weight="{{ ind.weight }}" class="smart-checkbox"><span class="checkmark"></span><span class="text-secondary ms-2" style="font-size: 11px;">{{ ind.indicator_text }}</span></label>
+                                                {% endif %}{% endfor %}
+                                            </div></div>
+                                            <div class="col-6 ps-2"><div class="indicator-neg-zone"><div class="zone-title"><i class="fas fa-minus"></i> Kelemahan (-)</div>
+                                                {% for ind in dict_indicators.P %}{% if ind.kind == 'NEG' %}
+                                                <label class="check-item plegmatis"><input type="checkbox" name="indicators" value="{{ ind.id }}" data-category="P" data-weight="{{ ind.weight }}" class="smart-checkbox"><span class="checkmark"></span><span class="text-secondary ms-2" style="font-size: 11px;">{{ ind.indicator_text }}</span></label>
+                                                {% endif %}{% endfor %}
+                                            </div></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- TAB 4: Notes -->
+                    <div class="tab-pane fade" id="tab-notes" role="tabpanel">
+                        <div class="row">
+                            <div class="col-md-6 border-end pe-md-4">
+                                <label class="fw-bold text-muted small"><i class="fas fa-robot text-info me-2"></i>Formula Algoritma Kematangan</label>
+                                <div class="p-3 bg-white border rounded shadow-sm mt-2 font-monospace text-center text-primary" style="font-size: 13px;">
+                                    (Total Bobot POSITIF / Total Skor Seluruhnya) × 100%
+                                </div>
+                                <p class="text-muted small mt-3">Sistem Engine akan secara otomatis menormalisasikan hasil mentah Anda menjadi persentase komposisi kepribadian (100% Utuh) yang bisa Anda lihat di tombol "Buka Profil", bersamaan dengan Sinergi Jabatannya.</p>
+                            </div>
+                            <div class="col-md-6 ps-md-4 d-flex flex-column">
+                                <label class="fw-bold text-muted small mb-2"><i class="fas fa-edit text-secondary me-2"></i>Catatan Administrator (Opsional)</label>
+                                <textarea name="catatan" class="form-control flex-grow-1" style="min-height: 150px;" placeholder="Tuliskan impresi klinis atau catatan wawancara khusus (jika ada)..."></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Footer Modal -->
+            <div class="modal-footer border-top p-3 bg-light">
+                <button type="button" class="btn btn-secondary px-4 rounded-1" data-bs-dismiss="modal">Batal</button>
+                <button type="submit" class="btn btn-primary px-4 fw-bold rounded-1">
+                    <i class="fas fa-save me-1"></i> Simpan
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+</form>
+<!-- Upload Excel Modal -->
+<div class="modal fade" id="uploadModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="fas fa-file-excel me-2"></i>Import Data Psikotes Excel</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center p-4">
+                    <p class="mb-3">Format kolom <b>Wajib Sama Persis</b> (Nama, K, S, M, P, JJ, TJ, Ket)<br>Maturity akan dihitung berdasarkan engine.</p>
+                    <input type="file" name="excel_file" class="form-control" accept=".xlsx, .xls" required>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Tutup</button>
+                    <button type="submit" class="btn btn-success fw-bold shadow-sm"><i class="fas fa-upload me-1"></i> Upload & Proses</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalRekrutmen" tabindex="-1" aria-labelledby="modalRekrutmenLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content border-0 rounded-1 shadow">
+            <div class="modal-header bg-dark rounded-0 px-4">
+                <h6 class="modal-title text-white fw-bold" id="modalRekrutmenLabel"><i class="fas fa-user-plus me-2"></i> Kandidat Baru</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="post" action="{% url 'attendance:talent_manual_form' %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="add_candidate">
+                <div class="modal-body p-4 bg-white">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-dark">Nama Lengkap</label>
+                        <input type="text" class="form-control" name="candidate_name" required placeholder="Cth: Ahmad Rofiqi">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-dark">Posisi yang Dilamar</label>
+                        <input type="text" class="form-control" name="candidate_position" required placeholder="Cth: Asisten Teknik">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-dark">No HP (Opsional)</label>
+                        <input type="text" class="form-control" name="candidate_phone" placeholder="08123...">
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-bold small text-dark">Tanggal Lahir (Opsional)</label>
+                            <input type="date" class="form-control" name="candidate_dob">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-bold small text-dark">Golongan Darah</label>
+                            <select class="form-select" name="candidate_blood">
+                                <option value="">Belum Diketahui</option>
+                                <option value="A">A</option>
+                                <option value="B">B</option>
+                                <option value="AB">AB</option>
+                                <option value="O">O</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-top px-4 bg-light">
+                    <button type="button" class="btn btn-secondary rounded-1" data-bs-dismiss="modal">Tutup</button>
+                    <button type="submit" class="btn btn-primary rounded-1 px-4"><i class="fas fa-check me-1"></i> Buat</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        // --- 1. JS FILTER OPTION DROPDOWN ---
+        const filterLocation = document.getElementById('filterLocation');
+        const searchInput = document.getElementById('searchKaryawan');
+        const selectEmployee = document.getElementById('selectEmployee');
+        const originalOptions = Array.from(selectEmployee.options);
+        const blankOption = originalOptions[0].cloneNode(true);
+
+        function filterOptions() {
+            const locId = filterLocation.value;
+            const searchTerm = searchInput.value.toLowerCase().trim();
+            selectEmployee.innerHTML = '';
+            selectEmployee.appendChild(blankOption);
+            
+            originalOptions.forEach(opt => {
+                if(opt.value === "") return;
+                const optLoc = opt.getAttribute('data-location') || '';
+                const optSearchText = opt.getAttribute('data-search') || '';
+                if((locId === 'ALL' || optLoc === locId) && (searchTerm === '' || optSearchText.includes(searchTerm))) {
+                    selectEmployee.appendChild(opt.cloneNode(true));
+                }
+            });
+            if(selectEmployee.options.length === 2) selectEmployee.selectedIndex = 1; else selectEmployee.selectedIndex = 0;
+        }
+
+        filterLocation.addEventListener('change', filterOptions);
+        searchInput.addEventListener('input', filterOptions);
+        
+        // --- 2. LOGIKA KLIK UJI TEST KE MODAL ---
+        window.openTestModal = function() {
+            const btn = document.getElementById('selectEmployee');
+            const empId = btn.value;
+            if(!empId) {
+                alert("Silakan pilih Karyawan terlebih dahulu dari dropdown.");
+                return;
+            }
+            
+            // Set Employee Info to Modal Header
+            const selectedText = btn.options[btn.selectedIndex].text;
+            document.getElementById('modalEmployeeId').value = empId;
+            document.getElementById('modalEmpName').innerText = selectedText.split('(')[0].trim().replace('[REKRUTMEN] ', '');
+            let title = "Posisi Tidak Diketahui";
+            if(selectedText.includes('(')) title = selectedText.split('(')[1].replace(')', '');
+            document.getElementById('modalEmpTitle').innerText = title;
+            
+            // Tampilkan Modal
+            var myModal = new bootstrap.Modal(document.getElementById('modalUjiTes'));
+            myModal.show();
+            
+            // Reset checklist and manual
+            document.querySelectorAll('.smart-checkbox').forEach(box => box.checked = false);
+            ['S', 'M', 'K', 'P'].forEach(cat => {
+                checklistScores[cat] = 0;
+                manualOverrides[cat] = false;
+                document.getElementById('score_' + cat).value = 0;
+                document.getElementById('live_' + cat).innerText = 0;
+            });
+            document.querySelector('input[name="jujur_score"]').value = '';
+            document.querySelector('input[name="tggjawab_score"]').value = '';
+        };
+
+        // --- 3. KALKULATOR TABS FORM ---
+        const checklistScores = { 'S': 0, 'M': 0, 'K': 0, 'P': 0 };
+        const manualOverrides = { 'S': false, 'M': false, 'K': false, 'P': false };
+
+        document.querySelectorAll('.smart-checkbox').forEach(box => {
+            box.addEventListener('change', function() {
+                const cat = this.getAttribute('data-category');
+                const weight = parseFloat(this.getAttribute('data-weight')) || 0;
+                
+                if(this.checked) checklistScores[cat] += weight; else checklistScores[cat] -= weight;
+                if(checklistScores[cat] < 0) checklistScores[cat] = 0;
+
+                if(!manualOverrides[cat]) {
+                    document.getElementById('score_' + cat).value = checklistScores[cat];
+                    document.getElementById('live_' + cat).innerText = checklistScores[cat];
+                }
+            });
+        });
+
+        window.manualOverride = function(cat) {
+            manualOverrides[cat] = true;
+            let manualVal = document.getElementById('score_' + cat).value;
+            document.getElementById('live_' + cat).innerText = manualVal ? parseInt(manualVal) : 0;
+        };
+
+        // --- 4. VALIDASI FORM SIMPAN (JJ & TJ) ---
+        document.getElementById('psikotesForm').addEventListener('submit', function(e) {
+            const jjInput = document.querySelector('input[name="jujur_score"]');
+            const tjInput = document.querySelector('input[name="tggjawab_score"]');
+            
+            if (jjInput.value.trim() === '' || tjInput.value.trim() === '') {
+                e.preventDefault(); // Hentikan pengiriman form
+                
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Peringatan!',
+                    html: '<b>Skor Jujur (JJ)</b> dan <b>Skor Tanggung Jawab (TJ)</b> wajib diisi!<br><small>Jika tidak ada nilai, pastikan Anda mengisi angka <b>0</b>.</small>',
+                    confirmButtonText: '<i class="fas fa-edit me-1"></i> Mengerti, lengkapi sekarang',
+                    confirmButtonColor: '#2B3674',
+                    customClass: {
+                        popup: 'rounded-4 shadow-lg border-0'
+                    }
+                }).then(() => {
+                    // Pindah otomatis ke Tab Papan Skor Mentah tempat input JJ & TJ berada
+                    var tabFast = document.querySelector('button[data-bs-target="#tab-fast"]');
+                    if(tabFast) {
+                        var tab = new bootstrap.Tab(tabFast);
+                        tab.show();
+                    }
+                    
+                    // Fokus ke input yang kosong
+                    if (jjInput.value.trim() === '') {
+                        jjInput.focus();
+                    } else {
+                        tjInput.focus();
+                    }
+                });
+            }
+        });
+    });
+</script>
+{% endblock %}

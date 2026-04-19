@@ -125,6 +125,30 @@
                        value="{{ emp.telegram_user_id|default:'' }}" placeholder="ID dari bot Telegram">
             </div>
             
+            <hr>
+            
+            <h6 class="fw-bold text-primary mb-3">
+                <i class="fas fa-heartbeat me-2"></i>Personal
+            </h6>
+
+            <div class="row g-2 mb-3">
+                <div class="col-6">
+                    <label for="date_of_birth" class="form-label fw-medium">Tanggal Lahir</label>
+                    <input type="date" class="form-control" id="date_of_birth" name="date_of_birth" 
+                           value="{{ emp.date_of_birth|date:'Y-m-d'|default:'' }}">
+                </div>
+                <div class="col-6">
+                    <label for="blood_type" class="form-label fw-medium">Golongan Darah</label>
+                    <select class="form-select" id="blood_type" name="blood_type">
+                        <option value="">Belum Diketahui</option>
+                        <option value="A" {% if emp.blood_type == "A" %}selected{% endif %}>A</option>
+                        <option value="B" {% if emp.blood_type == "B" %}selected{% endif %}>B</option>
+                        <option value="AB" {% if emp.blood_type == "AB" %}selected{% endif %}>AB</option>
+                        <option value="O" {% if emp.blood_type == "O" %}selected{% endif %}>O</option>
+                    </select>
+                </div>
+            </div>
+            
             <!-- Device User ID -->
             <div class="mb-3">
                 <label for="device_user_id" class="form-label fw-medium">Device User ID (Fingerprint)</label>

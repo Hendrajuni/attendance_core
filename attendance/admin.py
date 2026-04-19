@@ -969,3 +969,4 @@ register_historical_model(Employee, "Riwayat Karyawan (Global)")
 register_historical_model(AttendanceLog, "Riwayat Absensi (Global)")
 register_historical_model(DailySchedule, "Riwayat Jadwal (Global)")
 register_historical_model(ShiftPattern, "Riwayat Shift (Global)")
+

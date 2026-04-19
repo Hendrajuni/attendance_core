@@ -226,6 +226,8 @@ class Employee(models.Model):
     
     # Verification & Dates
     is_verified = models.BooleanField(default=False, help_text="False = Data baru (butuh review). True = Data master valid.")
+    date_of_birth = models.DateField(null=True, blank=True, verbose_name="Tanggal Lahir")
+    blood_type = models.CharField(max_length=5, null=True, blank=True, verbose_name="Golongan Darah")
     joined_date = models.DateField(null=True, blank=True, help_text="Tanggal mulai bekerja")
     imported_at = models.DateTimeField(null=True, blank=True, help_text="Tanggal data di-import")
     
@@ -298,6 +300,7 @@ class EmployeeProfile(models.Model):
         ('ACCOUNTING', 'Accounting'),
         ('KERANI', 'Kerani (Admin Lapangan)'),
         ('DEPT_ADMIN', 'Admin Departemen'),
+        ('PENGUJI', 'Penguji (Assessor)'),
     ]
     
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='employee_profile')
@@ -851,3 +854,139 @@ class DailyShiftAssignment(models.Model):
 
     def __str__(self):
         return f"{self.employee.full_name} @ {self.date} : {self.shift.name}"
+
+
+# =============================================================================
+# PHASE 5: TALENT DEVELOPMENT & PSYCHOLOGICAL ASSESSMENT (DISC/LITTAUER)
+# =============================================================================
+
+class TraitDictionary(models.Model):
+    """
+    Kamus Master Data untuk Tipe Kepribadian (Sanguinis, Melankolis, Koleris, Plegmatis).
+    Berisi teks auto-generate untuk laporan.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    trait_name = models.CharField(max_length=50, unique=True, help_text="Cth: Sanguinis")
+    core_strengths = models.TextField(help_text="Peluang Tumbuh / Kekuatan Utama")
+    development_areas = models.TextField(help_text="Area Pengembangan (Kelemahan)")
+    manager_coaching_tips = models.TextField(help_text="Tips Pembinaan untuk Atasan (Action Plan)")
+    
+    class Meta:
+        verbose_name = "Kamus Tipe Karakter"
+        verbose_name_plural = "Kamus Tipe Karakter"
+        
+    def __str__(self):
+        return self.trait_name
+
+
+class RoleSynergyMaster(models.Model):
+    """
+    Pemetaan kecocokan antara tipe karakter dominan dengan spesifik jabatan.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    position_name = models.CharField(max_length=100, unique=True, help_text="Nama Jabatan, cth: Staff Akunting")
+    
+    # Rekomendasi
+    ideal_primary_traits = models.CharField(max_length=100, help_text="Cth: Melankolis, Plegmatis")
+    warning_primary_traits = models.CharField(max_length=100, help_text="Karakter yang butuh pendampingan ekstra di posisi ini. Cth: Sanguinis")
+    
+    class Meta:
+        verbose_name = "Pemetaan Sinergi Posisi"
+        verbose_name_plural = "Pemetaan Sinergi Posisi"
+        
+    def __str__(self):
+        return self.position_name
+
+
+class PersonalityTest(models.Model):
+    """
+    Rekam jejak Hasil Psikotes Karyawan.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name="personality_tests")
+    evaluator = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="evaluated_tests")
+    test_date = models.DateField(help_text="Tanggal Tes Dilakukan")
+    
+    INPUT_CHOICES = [
+        ('MANUAL', 'Form Manual'),
+        ('EXCEL', 'Import Excel'),
+    ]
+    
+    # The calculated aggregate scores (Total = Positif + Negatif)
+    sanguine_score = models.FloatField(default=0)
+    melancholic_score = models.FloatField(default=0)
+    choleric_score = models.FloatField(default=0)
+    phlegmatic_score = models.FloatField(default=0)
+    
+    # Custom Traits (Sesuai format Excel HR yang baru)
+    honesty_score = models.FloatField(default=0, help_text="Nilai Jujur (JJ)")
+    responsibility_score = models.FloatField(default=0, help_text="Nilai Tanggung Jawab (TJ)")
+    
+    # Maturity ratio (Positif / Total Score)
+    sanguine_maturity = models.FloatField(default=0, help_text="% Kematangan Sanguinis")
+    melancholic_maturity = models.FloatField(default=0, help_text="% Kematangan Melankolis")
+    choleric_maturity = models.FloatField(default=0, help_text="% Kematangan Koleris")
+    phlegmatic_maturity = models.FloatField(default=0, help_text="% Kematangan Plegmatis")
+    
+    # Audit Trail
+    input_source = models.CharField(max_length=20, choices=INPUT_CHOICES, default='MANUAL')
+    
+    # Auto-Generated Results
+    primary_trait = models.CharField(max_length=50, blank=True)
+    secondary_trait = models.CharField(max_length=50, blank=True)
+    synergy_score = models.FloatField(default=0, help_text="Persentase Kecocokan dengan Posisi Saat Ini")
+    
+    # The detailed 40 individual indicators will be stored here
+    raw_responses = models.JSONField(
+        default=dict, 
+        blank=True,
+        help_text="Penyimpanan 40 poin indikator dalam bentuk Dictionary JSON"
+    )
+    
+    consultant_notes = models.TextField(blank=True, help_text="Catatan manual khusus dari konsultan")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ['-test_date']
+        verbose_name = "Hasil Psikotes (Talent Dev)"
+        verbose_name_plural = "Hasil Psikotes (Talent Dev)"
+
+    def __str__(self):
+        return f"Psikotes {self.employee.full_name} ({self.primary_trait})"
+
+
+class PersonalityIndicator(models.Model):
+    """
+    Model Form Builder untuk Checklist Cerdas saat wawancara manual.
+    Agar HRD bisa define sub-karakter (indikator) secara mandiri.
+    """
+    CATEGORY_CHOICES = [
+        ('S', 'Sanguinis'),
+        ('M', 'Melankolis'),
+        ('K', 'Koleris'),
+        ('P', 'Plegmatis'),
+        ('JJ', 'Jujur'),
+        ('TJ', 'Tanggung Jawab'),
+    ]
+    KIND_CHOICES = [
+        ('POS', 'Positif (Kekuatan)'),
+        ('NEG', 'Negatif (Kelemahan) / Netral'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    indicator_text = models.CharField(max_length=255, verbose_name="Teks Indikator (Contoh: Mudah Bergaul)")
+    category = models.CharField(max_length=2, choices=CATEGORY_CHOICES, verbose_name="Kategori Induk")
+    kind = models.CharField(max_length=3, choices=KIND_CHOICES, verbose_name="Sifat / Jenis")
+    weight = models.FloatField(default=1.0, verbose_name="Bobot Pengali")
+    is_active = models.BooleanField(default=True, verbose_name="Tampil di Form?")
+
+    class Meta:
+        verbose_name = "Sub-Karakter (Form Builder)"
+        verbose_name_plural = "Bank Soal / Sub-Karakter"
+        ordering = ['category', 'kind', 'indicator_text']
+
+    def __str__(self):
+        return f"[{self.category}] {self.indicator_text}"

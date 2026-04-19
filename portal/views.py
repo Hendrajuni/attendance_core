@@ -1639,8 +1639,11 @@ def employee_detail_view(request, employee_id):
     attendance_dates = {str(log['timestamp__date']): log['count'] for log in heatmap_logs}
     
     # === EMPLOYEE LEAVES (Cuti/Izin) ===
-    from attendance.models import EmployeeLeave
+    from attendance.models import EmployeeLeave, PersonalityTest
     leaves = EmployeeLeave.objects.filter(employee=employee).order_by('-start_date')
+    
+    # === PSIKOTES HISTORY ===
+    psikotes_history = PersonalityTest.objects.filter(employee=employee).order_by('-test_date')
     
     context = {
         'emp': employee,
@@ -1658,6 +1661,7 @@ def employee_detail_view(request, employee_id):
         'attendance_dates': attendance_dates,
         'current_month': now.strftime('%B %Y'),
         'leaves': leaves,
+        'psikotes_history': psikotes_history,
     }
     
     return render(request, 'portal/partials/_employee_detail.html', context)
@@ -1729,6 +1733,14 @@ def employee_edit_view(request, employee_id):
                     
                     employee.company_nik = request.POST.get('company_nik', '').strip() or None
                     employee.position = request.POST.get('position', '').strip() or None
+                    employee.blood_type = request.POST.get('blood_type', '').strip() or None
+                    
+                    dob_str = request.POST.get('date_of_birth', '')
+                    if dob_str:
+                        from datetime import datetime
+                        employee.date_of_birth = datetime.strptime(dob_str, '%Y-%m-%d').date()
+                    else:
+                        employee.date_of_birth = None
                     
                     # Device User ID
                     if device_user_id:

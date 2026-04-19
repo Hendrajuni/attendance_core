@@ -142,6 +142,13 @@
                                 <i class="fas fa-calendar-minus me-1"></i> Izin & Cuti
                             </button>
                         </li>
+                        {% if user.is_superuser or user.employee_profile.role == 'HRD' or user.employee_profile.role == 'ADMIN' or user.employee_profile.role == 'PENGUJI' %}
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link fw-medium" id="psikotes-tab" data-bs-toggle="tab" data-bs-target="#psikotes" type="button">
+                                <i class="fas fa-brain me-1"></i> Hasil Psikotes
+                            </button>
+                        </li>
+                        {% endif %}
                     </ul>
                 </div>
                 <div class="card-body">
@@ -177,6 +184,24 @@
                                             <div class="bg-light rounded p-3">
                                                 <small class="text-muted">Telegram ID</small>
                                                 <div class="fw-medium">{{ emp.telegram_user_id|default:"-" }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="bg-light rounded p-3">
+                                                <small class="text-muted">Tanggal Lahir</small>
+                                                <div class="fw-medium">{{ emp.date_of_birth|date:"d M Y"|default:"-" }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="bg-light rounded p-3">
+                                                <small class="text-muted">Golongan Darah</small>
+                                                <div class="fw-medium">
+                                                    {% if emp.blood_type %}
+                                                    <span class="badge bg-danger">{{ emp.blood_type }}</span>
+                                                    {% else %}
+                                                    -
+                                                    {% endif %}
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -406,12 +431,62 @@
                             </div>
                         </div>
 
+                        <!-- TAB 5: Riwayat Psikotes -->
+                        {% if user.is_superuser or user.employee_profile.role == 'HRD' or user.employee_profile.role == 'ADMIN' or user.employee_profile.role == 'PENGUJI' %}
+                        <div class="tab-pane fade" id="psikotes" role="tabpanel">
+                            <h6 class="fw-bold text-primary mb-3">
+                                <i class="fas fa-brain me-2"></i>Riwayat Hasil Psikotes
+                            </h6>
+                            
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover align-middle">
+                                    <thead class="bg-light">
+                                        <tr>
+                                            <th>Tgl Test</th>
+                                            <th class="text-danger text-center">K</th>
+                                            <th class="text-warning text-center">S</th>
+                                            <th class="text-primary text-center">M</th>
+                                            <th class="text-success text-center">P</th>
+                                            <th>Dominan</th>
+                                            <th class="text-center">JJ</th>
+                                            <th class="text-center">TJ</th>
+                                            <th>Penguji</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for p in psikotes_history %}
+                                        <tr>
+                                            <td>
+                                                <div class="fw-medium">{{ p.test_date|date:"d M Y" }}</div>
+                                            </td>
+                                            <td class="text-center fw-bold text-danger">{{ p.choleric_score|floatformat:0 }}</td>
+                                            <td class="text-center fw-bold text-warning">{{ p.sanguine_score|floatformat:0 }}</td>
+                                            <td class="text-center fw-bold text-primary">{{ p.melancholic_score|floatformat:0 }}</td>
+                                            <td class="text-center fw-bold text-success">{{ p.phlegmatic_score|floatformat:0 }}</td>
+                                            <td><span class="badge bg-secondary">{{ p.primary_trait }}</span></td>
+                                            <td class="text-center">{{ p.honesty_score|floatformat:1 }}</td>
+                                            <td class="text-center">{{ p.responsibility_score|floatformat:1 }}</td>
+                                            <td><small class="text-muted">{% if p.evaluator %}{{ p.evaluator.first_name|default:p.evaluator.username }}{% else %}System{% endif %}</small></td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr>
+                                            <td colspan="9" class="text-center py-5 text-muted">
+                                                <i class="fas fa-clipboard-list fs-2 mb-3 opacity-25 d-block"></i>
+                                                Belum ada data riwayat psikotes.
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% endif %}
+
                     </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
 
 
 
