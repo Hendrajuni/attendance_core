@@ -582,7 +582,12 @@
             const btn = document.getElementById('selectEmployee');
             const empId = btn.value;
             if(!empId) {
-                alert("Silakan pilih Karyawan terlebih dahulu dari dropdown.");
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Pilih Target Individu',
+                    text: 'Silakan pilih Karyawan/Kandidat terlebih dahulu dari dropdown sebelum mengevaluasi.',
+                    confirmButtonColor: '#4318FF'
+                });
                 return;
             }
             
