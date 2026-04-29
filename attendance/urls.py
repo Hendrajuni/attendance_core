@@ -4,6 +4,7 @@ URL Configuration for Attendance App
 from django.urls import path
 from . import views
 from . import talent_views
+from . import api_views
 
 app_name = 'attendance'
 
@@ -15,6 +16,10 @@ urlpatterns = [
     path('api/sync-machine/<uuid:device_id>/', views.sync_machine_single, name='sync_machine_single'),
     path('api/sync-wa-source/<uuid:source_id>/', views.sync_wa_source_single, name='sync_wa_source_single'),
     path('api/device-status/<uuid:device_id>/', views.device_status_check, name='device_status_check'),
+
+    # API Endpoints for Mobile App (DRF)
+    path('api/mobile/context/', api_views.MobileContextAPIView.as_view(), name='api_mobile_context'),
+    path('api/mobile/sync/', api_views.MobileSyncAPIView.as_view(), name='api_mobile_sync'),
 
     # Talent Development & HR Assessment
     path('talent/', talent_views.talent_dashboard, name='talent_dashboard'),
