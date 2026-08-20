@@ -43,3 +43,21 @@ python manage.py migrate
 # Run server
 python manage.py runserver
 ```
+
+## 🏗️ Architecture Overview (Auto-Documented by AI)
+
+Sistem ini menggunakan arsitektur monolitik Django yang sangat *data-driven*, terpusat pada aplikasi `attendance` sebagai inti logika bisnis.
+
+### Node Utama (God Nodes)
+- **`Employee`**: Pusat dari seluruh sistem yang menjembatani Absensi, Cuti, Shift, Mutasi, dan Laporan.
+- **`AttendanceLog`**: Entitas transaksional utama penyimpan log absensi harian (dari mesin, WA, atau manual).
+- **`WorkLocation`**: Mengelola titik lokasi kerja dan validasi batas radius GPS.
+- **`MonthlyReport`**: Modul agregasi yang membungkus log absensi bulanan untuk keperluan validasi dan *payroll*.
+
+### Modul Kunci
+1. **Modul Web Portal (`portal/views.py`)**: Bertindak sebagai UI/UX presentasi. Berisi fungsi seperti Dashboard, Rekap Matriks, dan Export Data. Sangat bergantung pada model di `attendance`.
+2. **Modul API (`attendance/api_views.py`)**: Gerbang otentikasi (JWT) dan endpoint sinkronisasi untuk aplikasi *mobile*.
+3. **Modul Integrasi Hardware (`AttendanceMachine`)**: Menarik data log secara periodik dari mesin sidik jari/wajah.
+4. **Modul Talent & Psikologi**: Menangani penilaian karakter karyawan (`PersonalityTest`, `RoleSynergyMaster`).
+
+*(Catatan: Dokumentasi ini akan diperbarui otomatis oleh AI Assistant setiap kali ada fitur baru atau penyelesaian issue yang signifikan).*

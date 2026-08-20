@@ -45,8 +45,58 @@ response.html
 clean_phones.py
 create_dummy_leave.py
 test_logs.py
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+*.json
+credentials.json
+
+# Environment Variables
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project Specific / Debug Files
+debug_*.py
+repair_log.txt
+debug_trace.txt
+debug_location.txt
+check_holiday.py
+repair_niks.py
+verify_report_workflow.py
+implementation_plan_sync_employees.md
+response.html
+clean_phones.py
+create_dummy_leave.py
+test_logs.py
 check_csv.py
 check_schedules.py
 check_arlond.py
 check_csv_arlond.py
 check_arlond_sch.py
+
+# Graphify
+graphify-out/

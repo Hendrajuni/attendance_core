@@ -31,7 +31,7 @@ class AttendanceLogSerializer(serializers.ModelSerializer):
         # pada layer view. Disini kita berasumsi `employee` dikirim lewat serializer.save(employee=obj)
         
         # Hardcode metadata untuk submission dari Mobile App
-        validated_data['source_type'] = 'MOBILE_APP'
+        validated_data['source_type'] = 'FINGERPRINT'
         validated_data['verification_method'] = 'GPS'
         
         # Simpan ke tabel AttendanceLog
