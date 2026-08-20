@@ -132,4 +132,19 @@ class DailyContextSerializer(serializers.Serializer):
             data['shift'] = "Tidak Ada Jadwal"
             data['shift_in'] = "08:00"
             data['shift_out'] = "16:00"
+            
+        from django.utils import timezone
+        from .models import AttendanceLog
+        today = timezone.localtime(timezone.now()).date()
+        logs = AttendanceLog.objects.filter(employee=instance, timestamp__date=today).order_by('timestamp')
+        if logs.exists():
+            data['today_clock_in'] = timezone.localtime(logs.first().timestamp).strftime("%H:%M")
+            if logs.count() > 1:
+                data['today_clock_out'] = timezone.localtime(logs.last().timestamp).strftime("%H:%M")
+            else:
+                data['today_clock_out'] = None
+        else:
+            data['today_clock_in'] = None
+            data['today_clock_out'] = None
+            
         return data
