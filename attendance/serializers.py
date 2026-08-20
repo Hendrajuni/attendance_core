@@ -120,3 +120,16 @@ class DailyContextSerializer(serializers.Serializer):
             })
 
         return buttons
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        schedule = self._get_today_schedule(instance)
+        if schedule:
+            data['shift'] = schedule.name
+            data['shift_in'] = schedule.clock_in.strftime("%H:%M") if schedule.clock_in else "08:00"
+            data['shift_out'] = schedule.clock_out.strftime("%H:%M") if schedule.clock_out else "16:00"
+        else:
+            data['shift'] = "Tidak Ada Jadwal"
+            data['shift_in'] = "08:00"
+            data['shift_out'] = "16:00"
+        return data
