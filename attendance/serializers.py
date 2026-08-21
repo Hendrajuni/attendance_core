@@ -145,15 +145,31 @@ class DailyContextSerializer(serializers.Serializer):
         from .models import AttendanceLog
         today = timezone.localtime(timezone.now()).date()
         logs = AttendanceLog.objects.filter(employee=instance, timestamp__date=today).order_by('timestamp')
-        if logs.exists():
+        
+        data['today_clock_in'] = None
+        data['today_clock_out'] = None
+        data['today_cp1'] = None
+        data['today_istirahat'] = None
+        data['today_cp2'] = None
+
+        for log in logs:
+            time_str = timezone.localtime(log.timestamp).strftime("%H:%M")
+            if log.log_category == 'MASUK' and not data['today_clock_in']:
+                data['today_clock_in'] = time_str
+            elif log.log_category == 'PULANG' and not data['today_clock_out']:
+                data['today_clock_out'] = time_str
+            elif log.log_category == 'CHECKPOINT_1' and not data['today_cp1']:
+                data['today_cp1'] = time_str
+            elif log.log_category == 'ISTIRAHAT' and not data['today_istirahat']:
+                data['today_istirahat'] = time_str
+            elif log.log_category == 'CHECKPOINT_2' and not data['today_cp2']:
+                data['today_cp2'] = time_str
+                
+        # Fallback to keep backward compatibility with existing Dashboard logic
+        if not data['today_clock_in'] and logs.exists():
             data['today_clock_in'] = timezone.localtime(logs.first().timestamp).strftime("%H:%M")
-            if logs.count() > 1:
-                data['today_clock_out'] = timezone.localtime(logs.last().timestamp).strftime("%H:%M")
-            else:
-                data['today_clock_out'] = None
-        else:
-            data['today_clock_in'] = None
-            data['today_clock_out'] = None
+        if not data['today_clock_out'] and logs.count() > 1:
+            data['today_clock_out'] = timezone.localtime(logs.last().timestamp).strftime("%H:%M")
             
         return data
 

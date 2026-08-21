@@ -12,6 +12,9 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 
 class MobileTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
+        if 'username' in attrs:
+            attrs['username'] = attrs['username'].upper()
+        
         data = super().validate(attrs)
         # Aplikasi Android mengekspektasikan balasan JSON {"token": "eyJhb..."}
         return {"token": data["access"]}
