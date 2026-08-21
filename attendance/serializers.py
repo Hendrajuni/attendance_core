@@ -103,6 +103,14 @@ class DailyContextSerializer(serializers.Serializer):
                 "end": schedule.checkin_1_end.strftime("%H:%M")
             })
 
+        # Tombol ISTIRAHAT
+        if schedule.break_start and schedule.break_end:
+            buttons.append({
+                "category": "ISTIRAHAT",
+                "start": schedule.break_start.strftime("%H:%M"),
+                "end": schedule.break_end.strftime("%H:%M")
+            })
+
         # Tombol CHECKPOINT 2
         if schedule.enable_checkin_2 and schedule.checkin_2_start and schedule.checkin_2_end:
             buttons.append({
@@ -148,3 +156,5 @@ class DailyContextSerializer(serializers.Serializer):
             data['today_clock_out'] = None
             
         return data
+
+
