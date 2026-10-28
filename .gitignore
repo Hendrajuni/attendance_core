@@ -10,19 +10,32 @@ db.sqlite3
 db.sqlite3-journal
 media/
 staticfiles/
-*.json
-credentials.json
 
-# Environment Variables
+# Secrets & Environment Variables (SENSITIVE)
 .env
-.venv
+*.env.*
+credentials.json
+client_secret*.json
+service_account*.json
+*.pem
+*.key
+*.pfx
+*.p12
+
+# AI Agent & Tools Workspace
+.agents/
+.ai_workspace/
+graphify-out/
+
+# Virtual Environments
+.venv/
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
 
-# IDE
+# IDE & Editors
 .idea/
 .vscode/
 *.swp
@@ -32,54 +45,7 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
-# Project Specific / Debug Files
-debug_*.py
-repair_log.txt
-debug_trace.txt
-debug_location.txt
-check_holiday.py
-repair_niks.py
-verify_report_workflow.py
-implementation_plan_sync_employees.md
-response.html
-clean_phones.py
-create_dummy_leave.py
-test_logs.py
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Django
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-media/
-staticfiles/
-*.json
-credentials.json
-
-# Environment Variables
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Project Specific / Debug Files
+# Project Specific / Debug Files / One-off Scripts
 debug_*.py
 repair_log.txt
 debug_trace.txt
@@ -98,5 +64,8 @@ check_arlond.py
 check_csv_arlond.py
 check_arlond_sch.py
 
-# Graphify
-graphify-out/
+# Data dumps & Spreadsheets with PII
+*.xlsx
+*.xls
+*.csv
+*.json
