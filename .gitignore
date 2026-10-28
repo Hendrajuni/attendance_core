@@ -24,8 +24,11 @@ service_account*.json
 
 # AI Agent & Tools Workspace
 .agents/
+.agents
 .ai_workspace/
+.ai_workspace
 graphify-out/
+graphify-out
 
 # Virtual Environments
 .venv/
