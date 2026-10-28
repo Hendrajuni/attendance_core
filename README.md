@@ -1,3 +1,6 @@
+<img width="600" height="400" alt="777418587_38218265461119990_1224474160664587274_n" src="https://github.com/user-attachments/assets/4f13037e-6ed5-4bf5-a9a5-5f8680e6aea6" />
+
+
 # 🌿 Petaling HR - Attendance Core System
 
 Sistem manajemen sumber daya manusia (HRIS) dan absensi berbasis web yang dirancang untuk operasional multi-cabang, perkebunan, dan industri. Sistem ini mengintegrasikan presensi biometrik fisik, pencatatan presensi digital multi-kanal, pengaturan shift kerja dinamis, rekapitulasi, hingga modul asesmen potensi karyawan.
